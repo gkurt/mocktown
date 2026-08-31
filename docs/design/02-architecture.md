@@ -97,6 +97,17 @@ own guidance is Router-alone for authenticated dashboards. Deferred, not banned:
 revisit only if a hosted/cloud GUI ever leaves "deliberately unscheduled"
 ([11-roadmap.md](11-roadmap.md)).
 
+**Decision: styling and components are Tailwind v4 + shadcn/ui on Base UI;
+utility hooks come from @mantine/hooks.** Base UI is shadcn's default for new
+projects as of 2026-07 (Radix remains supported; a migration command exists both
+ways). @mantine/hooks is a standalone zero-dependency package (no Mantine
+components) covering the UI-logic layer — disclosures, focus, hotkeys, element
+size, debounce — the layer between Base UI primitives below and TanStack Query
+above. House rule: prefer an existing @mantine/hooks hook over a hand-rolled one;
+hand-roll only what it lacks. *Rejected:* ahooks (its data-layer hooks duplicate
+TanStack Query's domain — two idioms for one job); react-use (maintenance pace,
+uneven quality); hooks-from-scratch (edge cases are the whole point of delegating).
+
 **Decision: GUI is Vite + React + TypeScript, built to static files served by the
 daemon** and opened in the default browser — zero packaging/signing, works over SSH
 and in devcontainers. A desktop shell, if ever demanded, is **Tauri** wrapping the
