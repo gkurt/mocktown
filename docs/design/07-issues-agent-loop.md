@@ -32,7 +32,10 @@ by an agent that has read nothing but the issue and the files it links.**
    Mocktown for the three recurring jobs — *generate mock from corpus*, *fix issue
    backlog*, *apply redirect recipes*. House rules live here (never invent auth-shaped
    fields; prefer widening matchers over duplicating routes; every new mock adds its
-   EKB entry; state fidelity over verbatim replay).
+   EKB entry; state fidelity over verbatim replay; seed data per auth profile with
+   `default` + `empty-org` minimum; prefer profile variation over knob flips for
+   data-shape scenarios; all randomness via the seeded PRNG —
+   [12-scenario-controls.md](12-scenario-controls.md)).
 3. **Files**: issues also materialize as JSON under `.mocktown/issues/` in the
    workspace so file-oriented agents (`claude -p`, CI bots) work without MCP.
 

@@ -20,6 +20,7 @@ your task** — each file is self-contained and cross-links where context is nee
 | [09-gui-plugins.md](09-gui-plugins.md) | GUI shell, state viewers, the panels plugin model |
 | [10-security.md](10-security.md) | Secrets scrubbing, threat model, signing/distribution |
 | [11-roadmap.md](11-roadmap.md) | Phasing and what ships in which milestone |
+| [12-scenario-controls.md](12-scenario-controls.md) | Knobs, auth profiles, seed/reset/session state lifecycle |
 
 ## Conventions
 

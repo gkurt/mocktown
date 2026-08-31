@@ -10,9 +10,13 @@ interface Provider {
   service: string                      // hostname or logical service id
   start(ctx: ProviderCtx): Promise<{ baseUrl: string }>
   stop(): Promise<void>
+  reset(scope: ResetScope): Promise<void>  // back to seed; per-profile or full (12)
+  knobs?: KnobManifest                 // Zod schema + defaults + descriptions (12)
   state?: StateIntrospection           // backs /api/…/state and GUI panels
   ekbEntry: EndpointRecipe             // how clients get pointed at it (05)
 }
+// Request context carries ctx.profile (auth profile) and ctx.prng (seeded stream) —
+// see 12-scenario-controls.md for the determinism contract.
 ```
 
 ## Provider kinds

@@ -156,6 +156,8 @@ HTTP as:
 - `POST /record/start|stop` · `POST /seal/run` — mode control
 - `GET  /env` — the generated env-var setup ([05-redirection.md](05-redirection.md))
 - `GET  /state/<service>/…` — provider state introspection (backs GUI panels)
+- `GET/PUT /knobs/<service>` · `GET /profiles` · `POST /profiles/<n>/session` ·
+  `POST /state/reset` — scenario controls ([12-scenario-controls.md](12-scenario-controls.md))
 
 The same API is exposed to agents as an MCP server
 ([07-issues-agent-loop.md](07-issues-agent-loop.md)).

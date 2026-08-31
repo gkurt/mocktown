@@ -33,7 +33,10 @@ Provider interface · emulate providers for famous services · **generated-mock
 pipeline v1**: agent skill + corpus export + replay-verify harness
 ([06-emulation.md](06-emulation.md)) · issue engine with the full taxonomy
 ([07-issues-agent-loop.md](07-issues-agent-loop.md)) · MCP server · `mocktown env`
-generator + EKB seeded from emulate skills. **Exit criterion:** the loop closes —
+generator + EKB seeded from emulate skills · **auth profiles + seed/reset + knob
+manifests** ([12-scenario-controls.md](12-scenario-controls.md)) — in this phase,
+not later: profiles shape how mocks are generated, and retrofitting them would
+churn every generated mock (GUI knob forms land in phase 4). **Exit criterion:** the loop closes —
 unseen request → issue → agent patch → verified replay — on a real project.
 
 ## Phase 3 — The seal & the sandbox
