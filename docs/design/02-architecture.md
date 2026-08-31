@@ -90,10 +90,14 @@ on `Bun.serve` cover the daemon's needs.
 row schemas all share it. No second validation library may be introduced.
 
 **Decision: GUI framework set is React 19 + TanStack Router + TanStack Query
-(+ `@orpc/tanstack-query`) + TanStack Form (latest v2.x), as a Vite SPA.** Forms
+(+ `@orpc/tanstack-query`) + TanStack Form (latest v2.x) + TanStack Store (latest), as a Vite SPA.** Forms
 (service registry editing, scrub-rule config, seed editors) use TanStack Form with
 Zod adapters — same schema objects as the oRPC contract, so form validation and API
-validation cannot drift. TanStack **Start is not adopted**: it
+validation cannot drift. State split: **TanStack Query owns all server state**
+(daemon API data — never mirrored into a store); TanStack Store holds the small
+client-only remainder (UI preferences, panel layout, feed filters). *Rejected:*
+Zustand/Jotai/Redux (a second state idiom outside the TanStack set for the same
+narrow job). TanStack **Start is not adopted**: it
 is an SSR/full-stack framework (still RC as of 2026-06) whose value — SEO, server
 functions, streaming — a daemon-served local dashboard cannot collect; TanStack's
 own guidance is Router-alone for authenticated dashboards. Deferred, not banned:
