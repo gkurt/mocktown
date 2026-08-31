@@ -1,0 +1,8 @@
+{
+  "name": "spike-04-container-seal",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "mockttp": "4.6.1"
+  }
+}

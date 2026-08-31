@@ -1,0 +1,14 @@
+{
+  "name": "spike-05-scrubber",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "mockttp": "4.6.1",
+    "emulate": "0.10.0",
+    "stripe": "^19",
+    "@octokit/rest": "^22"
+  },
+  "devDependencies": {
+    "https-proxy-agent": "9"
+  }
+}

@@ -1,0 +1,37 @@
+# Seed data is part of project config (08-projects-config.md), committed so sandbox runs
+# are reproducible. This is the shape Mocktown would generate/manage per project.
+tokens:
+  test_token_admin:
+    login: admin
+    scopes: [repo, user, admin:org]
+
+github:
+  users:
+    - login: octocat
+      name: The Octocat
+      email: octocat@github.com
+      company: GitHub
+  repos:
+    - owner: octocat
+      name: hello-world
+      description: Seeded by Mocktown
+      language: TypeScript
+      auto_init: true
+  oauth_apps:
+    - client_id: Iv1.mocktown_spike
+      client_secret: mocktown_spike_secret
+      name: Mocktown Spike
+      redirect_uris:
+        - http://127.0.0.1:9999/callback
+
+stripe:
+  customers:
+    - email: ada@example.com
+      name: Ada Lovelace
+  products:
+    - name: Mocktown Pro
+      description: Seeded product
+  prices:
+    - product_name: Mocktown Pro
+      currency: usd
+      unit_amount: 4200

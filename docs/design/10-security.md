@@ -16,6 +16,28 @@ wrong; we must not.
   known-vendor auth headers; JWT-shaped strings anywhere; body fields matching a
   deny-pattern list (`password`, `token`, `secret`, `card`, `ssn`, …); high-entropy
   string detection as a heuristic backstop.
+- **Shape beats location when labelling.** A Stripe key in an `Authorization` header is
+  `{{secret:stripe-secret-key#1}}`, not `{{secret:auth-header#1}}` — the kind is what a
+  generated mock reasons about, and what lets replay re-inject a correctly-shaped fake.
+  Location-based rules supply the kind only when nothing recognises the value's shape.
+- **No single rule deletion may leak a credential.** The named-field and shape/entropy
+  passes are meant to overlap; in the phase-0 corpus a GitHub PAT was covered three times
+  over (vendor pattern, header rule, entropy backstop). This is a testable property, not a
+  happy accident — the spike asserts it.
+- **The entropy backstop needs a character-class rule, not just a threshold.** A 48-char
+  hex session id measures 3.59 bits/char, *below* an ISO timestamp's 3.49-safe threshold;
+  no single cutoff separates them. Treat any token of ≥32 chars that is pure hex as a
+  secret regardless of entropy. Everything else stays conservative — a false positive
+  silently corrupts the corpus mocks are generated from.
+- **Card numbers are decided by Luhn, not by length**, so amounts in minor units and epoch
+  timestamps survive.
+- Redaction is structure-preserving: JSON stays JSON, form encoding stays form encoding,
+  cookie names and attributes survive with only values replaced, and auth schemes
+  (`Bearer`, `token`) survive with only credentials replaced — otherwise 03-capture.md's
+  "immediately agent-legible" corpus doesn't survive the scrubber.
+
+*All of the above verified 2026-08-31 against a real captured corpus:*
+[spikes/05-scrubber](../../spikes/05-scrubber/FINDINGS.md) (14/14).
 - Redaction is **structured, not destructive**: values are replaced with typed
   placeholders (`{{secret:stripe-key#1}}`) kept consistent within a session, so
   generated mocks can validate "a credential was present" and **re-inject fake
@@ -49,6 +71,7 @@ no kernel drivers, no network extensions, no OS entitlements:
 | Artifact | Requirement |
 |---|---|
 | CLI/daemon binaries (macOS) | Developer ID cert + notarization (~$99/yr Apple program). Applies to Homebrew distribution too. |
+| Bundled Node runtime (front door) | The proxy is a Node sidecar ([02-architecture.md](02-architecture.md)), so a Node runtime ships alongside the Bun-compiled binaries and must be notarized/signed with them, and installed in the sandbox image. |
 | CLI/daemon binaries (Windows) | Authenticode (OV cert or Azure Trusted Signing) to avoid SmartScreen. No EV/driver signing needed — ever, by design. |
 | Linux / container image | No signing regime; publish image digests + provenance (SLSA-style) instead. |
 | npm package | Standard supply-chain hygiene: lockfiles, provenance publishing, minimal deps. |

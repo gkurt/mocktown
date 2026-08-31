@@ -8,16 +8,33 @@ moat. Every phase ends with something usable headlessly.
 
 ## Phase 0 — Spikes (de-risk before building)
 
-- [ ] Mockttp on Bun: MITM + h2 + WebSockets under Bun's node-compat. Fallback
-  decision (Node sidecar) made here, not later.
-- [ ] oRPC on Bun: OpenAPIHandler + static serving on `Bun.serve`; validate the
+- [x] Mockttp on Bun: MITM + h2 + WebSockets under Bun's node-compat. **Outcome:
+  Bun fails on h2 and WebSockets; the front door runs as a Node sidecar** — decision
+  and revisit criteria in [spikes/01-mockttp-bun](../../spikes/01-mockttp-bun/FINDINGS.md),
+  [02-architecture.md](02-architecture.md) amended.
+- [x] oRPC on Bun: OpenAPIHandler + static serving on `Bun.serve`; validate the
   contract→CLI and contract→MCP generation path (existing adapters vs. ~200-line
-  walk) with two real procedures.
-- [ ] emulate driven as child processes: start/stop/seed Stripe + GitHub, point real
-  SDKs at them, confirm OAuth flow works end-to-end.
-- [ ] Container seal: network namespace + DNS override + baked CA; prove a raw-socket
-  escape attempt fails and files a wall-hit.
-- [ ] Scrubber prototype over real recorded traffic from one of our own apps.
+  walk) with two real procedures. **Outcome: 10/10 unpatched; we own the walk (161
+  lines), both candidate adapters rejected** —
+  [spikes/02-orpc-bun](../../spikes/02-orpc-bun/FINDINGS.md).
+- [x] emulate driven as child processes: start/stop/seed Stripe + GitHub, point real
+  SDKs at them, confirm OAuth flow works end-to-end. **Outcome: 7/8 — viable as a wrapped
+  child process; a provider is a supervisor for N services, and emulate binds every
+  interface** — [spikes/03-emulate](../../spikes/03-emulate/FINDINGS.md),
+  [06-emulation.md](06-emulation.md) and [12-scenario-controls.md](12-scenario-controls.md)
+  amended.
+- [x] Container seal: network namespace + DNS override + baked CA; prove a raw-socket
+  escape attempt fails and files a wall-hit. **Outcome: 8/8 against a negative control —
+  the seal holds; DNS must be a catch-all, not an alias list; IPv6 recorded INCONCLUSIVE
+  (no IPv6 egress on the test host) and must be re-run in phase 3** —
+  [spikes/04-container-seal](../../spikes/04-container-seal/FINDINGS.md),
+  [04-sandbox.md](04-sandbox.md) amended.
+- [x] Scrubber prototype over real recorded traffic. **Outcome: 14/14 — shape must beat
+  location when labelling secrets, the entropy backstop needs a hex rule as well as a
+  threshold, and two capture bugs found (`.always()` on Mockttp rules,
+  `NODE_USE_ENV_PROXY` for fetch-based SDKs)** —
+  [spikes/05-scrubber](../../spikes/05-scrubber/FINDINGS.md),
+  [10-security.md](10-security.md) and [03-capture.md](03-capture.md) amended.
 
 ## Phase 1 — The recorder & the corpus
 

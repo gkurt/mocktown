@@ -10,10 +10,15 @@ can undo it.
 
 ## Guarantees and how they're enforced
 
+*Verified 2026-08-31* by the phase-0 spike
+([spikes/04-container-seal](../../spikes/04-container-seal/FINDINGS.md)), 8/8 against a
+negative control proving the escape attempts succeed on an unsealed network — with IPv6 the
+one open item (see below).
+
 | Property | Mechanism |
 |---|---|
-| Deny-by-default egress | Network namespace with exactly one route: the front door. Raw sockets included — escape is impossible, not just discouraged. |
-| Unmodified code hits mocks | DNS inside the sandbox resolves mocked hostnames (`api.stripe.com`, …) to the front door. |
+| Deny-by-default egress | Network namespace with exactly one route: the front door. Raw sockets included — escape is impossible, not just discouraged. Implemented as `docker network create --internal`: no route out, no NAT. |
+| Unmodified code hits mocks | DNS inside the sandbox resolves mocked hostnames (`api.stripe.com`, …) to the front door. **It must be a catch-all** (`dnsmasq --address=/#/<front-door>`), not a per-host alias list: with aliases, an unknown hostname returns NXDOMAIN and the app reports a DNS failure; with the catch-all it reaches the deny wall and becomes a filed issue with the full request. That is the difference between "the app broke" and the evidence guarantee below. |
 | TLS just works | Project CA baked into the image: system store + `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, Java keystore — at image build time. |
 | Browser traffic is covered | The image ships headless Chromium (Playwright-compatible). An agent testing a web app browses *inside* the boundary, so third-party scripts (Stripe.js etc.) hit the mocks too. |
 | Every escape attempt is evidence | A request to an unknown host hits the deny wall and files an issue with the full request ([07-issues-agent-loop.md](07-issues-agent-loop.md)). |
@@ -48,7 +53,15 @@ as carrying the sandbox guarantee.
 
 - Image composition: one base image + app layered on top, vs. injecting Mocktown into
   the user's existing Dockerfile/devcontainer. Leaning: ship both a base image and a
-  devcontainer *feature*.
-- IPv6 egress must be namespaced identically to IPv4 (easy to forget, classic leak).
+  devcontainer *feature*. The phase-0 spike built the two-image form; the devcontainer
+  feature is untested.
+- **IPv6 egress must be namespaced identically to IPv4** (easy to forget, classic leak).
+  *Still open after phase 0* ([spikes/04-container-seal](../../spikes/04-container-seal/FINDINGS.md)):
+  the sealed container could not reach IPv6 — but neither could the unsealed control, because
+  the test host had no IPv6 egress at all. A blocked attempt with no reachable baseline
+  proves nothing, so this is recorded as INCONCLUSIVE, not passed. Phase 3 must re-run the
+  spike on a host with working IPv6: create the control network with `--ipv6 --subnet
+  <ULA>/64`, confirm the control reaches `2606:4700:4700::1111`, and only then assert the
+  sealed container cannot.
 - Clock/randomness determinism inside the sandbox: out of scope for v1, note for CI
   reproducibility later.

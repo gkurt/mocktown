@@ -12,6 +12,12 @@ the **front door**. Its behavior per service is a mode, not a separate binary:
 | `passthrough` | Forward without recording (explicitly allowlisted hosts only) |
 | `deny` | Refuse + file an issue (default for unknown hosts in sealed mode) |
 
+**Implementation rule found in phase 0** ([spikes/05-scrubber](../../spikes/05-scrubber/FINDINGS.md)):
+Mockttp rules stop matching once consumed unless `.always()` is set. A forwarding rule that
+silently expires sends subsequent traffic to the **real** upstream — the worst failure mode
+this product has. Two defences, both cheap: `.always()` on every rule, and a fallthrough
+that **denies and logs** rather than passes through, so an escape is loud instead of silent.
+
 ## Capture tiers
 
 **Decision: explicit (cooperative) capture for now; OS-level capture is deferred,
@@ -26,6 +32,13 @@ The escalation ladder — each rung covers the previous rung's failure case:
    knobs (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`,
    `JAVA_TOOL_OPTIONS`, …) into the child process tree. Covers well-behaved runtimes,
    which is most of them.
+   **`NODE_USE_ENV_PROXY=1` is required and easy to miss** — found in phase 0
+   ([spikes/05-scrubber](../../spikes/05-scrubber/FINDINGS.md)): SDKs built on `fetch`
+   (undici) ignore `http.Agent` entirely *and* ignore `HTTPS_PROXY` unless that variable is
+   set. Octokit v22 configured with an explicit proxy agent went straight to the real
+   GitHub API and came back with a genuine request id. Without this knob a large and
+   growing class of modern SDKs escapes the front door in host mode while appearing
+   correctly configured.
 2. **Launched browser** — for web-app client traffic: fresh browser profile,
    `--proxy-server` set, CA trusted in that profile only (HTTP Toolkit's pattern).
 3. **In-sandbox record mode** — for code that ignores proxy env vars: inside the

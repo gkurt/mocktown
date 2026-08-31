@@ -1,0 +1,6 @@
+# Raw, unscrubbed exchanges and the ground-truth secret list. The product never writes
+# these (10-security.md: scrub before disk); they exist only so the spike has something
+# to scrub and something to check itself against. Regenerate with `node capture.mjs`.
+corpus.raw.json
+secrets.json
+out/

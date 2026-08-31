@@ -54,6 +54,14 @@ Schema (project SQLite, editable via GUI/API):
   credentials through the app's normal login flow and issue tokens/cookies tagged to
   the profile. The front door maps incoming auth → profile and passes it to the
   provider in `ctx.profile`; unauthenticated requests get the `anonymous` profile.
+  *Qualified 2026-08-31 by the phase-0 spike*
+  ([spikes/03-emulate](../../spikes/03-emulate/FINDINGS.md)): for **emulate-backed**
+  services this is a consent-screen shortcut, not a credential exchange — emulate's
+  OAuth consent page is a picker over seeded users, driven by POSTing `login=<user>`
+  to `/login/oauth/callback`. The issued token does authenticate real SDK calls, so
+  the profile mapping holds; but the roster must say which kind of sign-in a service
+  offers, and EKB recipes for emulate-backed OAuth services must describe the consent
+  POST or unattended agent runs will hang on an HTML page.
 - **Discovery**: `GET /profiles`, `mocktown profiles list`, and an MCP
   `list_profiles` tool return the roster with descriptions — an agent driving a
   browser test asks for the roster, picks the persona the scenario needs, and signs
@@ -79,7 +87,9 @@ Schema (project SQLite, editable via GUI/API):
   per service, per profile, or everything. Implementation: generated-mock state
   lives in namespaced SQLite tables keyed by (service, profile), so reset is
   drop + re-seed, cheap enough to run between test cases. Emulator providers reset
-  by child-process restart with the same seed config ([06-emulation.md](06-emulation.md)).
+  by child-process restart with the same seed config ([06-emulation.md](06-emulation.md))
+  — spike-verified, at a cost of a few seconds per reset, so emulator-backed services
+  cannot be reset between every test case the way generated mocks can.
   A reset closes the session and starts a new one; recordings and issues are tagged
   by session id.
 - **Later (unscheduled)**: named snapshots ("save this interesting state, branch

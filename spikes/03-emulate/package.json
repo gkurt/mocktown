@@ -1,0 +1,10 @@
+{
+  "name": "spike-03-emulate",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@octokit/rest": "22",
+    "emulate": "0.10.0",
+    "stripe": "19"
+  }
+}

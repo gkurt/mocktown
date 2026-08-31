@@ -1,0 +1,15 @@
+# The front door image: Node (spike 01 — the proxy cannot run on Bun) plus dnsmasq, which
+# answers every DNS query inside the sandbox with this container's address. That is what
+# makes unmodified code hit the mocks: there is no hostname that resolves anywhere else.
+FROM node:22-alpine
+
+RUN apk add --no-cache dnsmasq
+WORKDIR /app
+RUN npm install --omit=dev mockttp@4.6.1 2>&1 | tail -2
+
+COPY front-door.mjs /app/front-door.mjs
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 53/udp 80 443 9100
+ENTRYPOINT ["/entrypoint.sh"]

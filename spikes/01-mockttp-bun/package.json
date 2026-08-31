@@ -1,0 +1,13 @@
+{
+  "name": "spike-01-mockttp-bun",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "mockttp": "4.6.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "https-proxy-agent": "^9.1.0",
+    "ws": "^8.21.3"
+  }
+}
