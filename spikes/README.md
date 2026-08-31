@@ -44,7 +44,9 @@ design decision changes, by editing the relevant `docs/design/*.md` block.
   [spikes/01-mockttp-bun/upstream/](01-mockttp-bun/upstream/)
   ([httpolyglot#4](https://github.com/httptoolkit/httpolyglot/pull/4),
   [mockttp#206](https://github.com/httptoolkit/mockttp/pull/206) — the latter blocked on a
-  CLA only its author can sign).
+  CLA only its author can sign). Defect 1 turned out to be **already fixed in Bun 1.4.1**
+  by [#40920](https://github.com/oven-sh/bun/pull/40920); our report was a duplicate. The
+  ALPN defect stands, and is now the sole runtime blocker on an h2 front door under Bun.
   [oven-sh/bun#41060](https://github.com/oven-sh/bun/issues/41060) (silent MITM hang) and
   [#41061](https://github.com/oven-sh/bun/issues/41061) (silent h2 downgrade) are the
   revisit criteria for the Node-sidecar decision — until they're fixed, the sidecar is

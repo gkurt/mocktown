@@ -37,7 +37,7 @@ re-run after every `bun install`.
 Each has a standalone reproduction in `repros/` that runs under both runtimes and prints
 PASS/FAIL, so none of this rests on reading Mockttp's source.
 
-### 1. `net.Server`'s constructor listener is invisible to `emit('connection')` — *patchable*
+### 1. `net.Server`'s constructor listener is invisible to `emit('connection')` — **fixed in Bun 1.4.1**
 
 `repros/01-net-server-emit-connection.ts`
 
@@ -48,7 +48,20 @@ silently does nothing, so the handshake never starts and the client hangs with *
 on either side**. This is what `@httptoolkit/httpolyglot` (Mockttp's port multiplexer) does.
 
 Fixed by patch 1: call `super()` then `this.on('connection', …)` explicitly. One line,
-no behaviour change on Node — a clean upstream PR.
+no behaviour change on Node.
+
+**Fixed upstream in Bun 1.4.1** by [oven-sh/bun#40920](https://github.com/oven-sh/bun/pull/40920),
+merged 2026-08-30 — ten days after the 1.4.0 we tested on, and one day before we filed
+[#41060](https://github.com/oven-sh/bun/issues/41060), which was closed as a duplicate of
+[#40917](https://github.com/oven-sh/bun/issues/40917). That PR gives the real mechanism,
+which is sharper than what we inferred: the callback was stashed in the options bag and
+each accept path called `prependOnceListener` immediately before its own emit, so it
+existed as a listener only for the duration of that internal emit. Hence genuine inbound
+connections worked while `listenerCount('connection')` read 0 and a manual emit reached
+nobody.
+
+Patch 1 stays for now, since we pin 1.4.0; drop it when we move to 1.4.1 and confirm
+`repros/01` passes unpatched.
 
 ### 2. `@SECLEVEL=0` in a cipher string is rejected — *patchable*
 
@@ -144,8 +157,9 @@ distribution table.
 Return to single-runtime Bun when **all** of these hold, re-verified by re-running
 `spike.ts`:
 
-1. `net.Server` constructor listeners respond to `emit('connection')` (defect 1) —
-   filed as [oven-sh/bun#41060](https://github.com/oven-sh/bun/issues/41060).
+1. ~~`net.Server` constructor listeners respond to `emit('connection')` (defect 1).~~
+   **Met** — fixed in Bun 1.4.1 by
+   [oven-sh/bun#40920](https://github.com/oven-sh/bun/pull/40920).
 2. `SNICallback` no longer suppresses ALPN (defect 3) — the h2 blocker, and the one that
    decides whether the sidecar is permanent. Filed as
    [oven-sh/bun#41061](https://github.com/oven-sh/bun/issues/41061).
@@ -153,7 +167,9 @@ Return to single-runtime Bun when **all** of these hold, re-verified by re-runni
    `new WebSocket(null, …)` constructor (defect 4).
 4. No segfault under the full matrix (defect 5).
 
-Criteria 1 and 2 are tracked upstream by the two issues above. Defect 4 has been reported
+Criterion 2 is tracked by [#41061](https://github.com/oven-sh/bun/issues/41061) and is now
+the only thing standing between us and an h2-capable front door on Bun, apart from
+WebSockets. Defect 4 has been reported
 since 2023 ([#2955](https://github.com/oven-sh/bun/issues/2955),
 [#3613](https://github.com/oven-sh/bun/issues/3613),
 [#4568](https://github.com/oven-sh/bun/issues/4568),

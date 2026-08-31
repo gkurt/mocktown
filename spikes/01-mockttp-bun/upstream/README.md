@@ -5,10 +5,18 @@ files here are the drafts as submitted, minus the scaffolding header.
 
 | Draft | Filed as | Fixes |
 |---|---|---|
-| [`bun-issue-1-net-server-emit-connection.md`](bun-issue-1-net-server-emit-connection.md) | [oven-sh/bun#41060](https://github.com/oven-sh/bun/issues/41060) | Defect 1 — the silent MITM hang |
+| [`bun-issue-1-net-server-emit-connection.md`](bun-issue-1-net-server-emit-connection.md) | [oven-sh/bun#41060](https://github.com/oven-sh/bun/issues/41060) — **closed, duplicate** | Defect 1 — the silent MITM hang |
 | [`bun-issue-2-snicallback-suppresses-alpn.md`](bun-issue-2-snicallback-suppresses-alpn.md) | [oven-sh/bun#41061](https://github.com/oven-sh/bun/issues/41061) | Defect 3 — the silent h2 downgrade |
 | [`pr-httpolyglot-reinjected-connections.md`](pr-httpolyglot-reinjected-connections.md) | [httptoolkit/httpolyglot#4](https://github.com/httptoolkit/httpolyglot/pull/4) | Works around defect 1 |
 | [`pr-mockttp-seclevel-feature-detect.md`](pr-mockttp-seclevel-feature-detect.md) | [httptoolkit/mockttp#206](https://github.com/httptoolkit/mockttp/pull/206) | Works around defect 2 |
+
+**Defect 1 was already fixed** when we filed: [#40920](https://github.com/oven-sh/bun/pull/40920)
+merged 2026-08-30, one day before, closing [#40917](https://github.com/oven-sh/bun/issues/40917) —
+the same report, also found via Mockttp's CONNECT handoff. Ships in Bun 1.4.1. Our #41060 was
+closed as a duplicate. The search that missed it used the symptom's vocabulary
+("emit connection constructor listener node compat"); #40917's title leads with
+`net.createServer(callback)`. Worth checking a repo's **recently closed** issues and its
+merged PRs, not just open issues, before writing anything up.
 
 **mockttp#206 is blocked on a CLA** that has to be signed by the PR author in person, at
 <https://cla-assistant.io/httptoolkit/mockttp?pullRequest=206>. Until that's done the PR
