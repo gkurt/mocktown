@@ -108,11 +108,25 @@ revisit only if a hosted/cloud GUI ever leaves "deliberately unscheduled"
 Base UI is shadcn's default for new projects as of 2026-07 (Radix remains
 supported; a migration command exists both ways).
 
-**Open: utility hooks library — deliberately not locked.** The owner will designate
-one when it matters; until then, write only the hooks actually needed, colocated in
-`src/hooks/`, so a later library adoption is a mechanical replacement. Constraint
-that DOES hold now: no data-fetching hooks outside TanStack Query, whatever library
-lands. *Rejected:* @mantine/hooks (owner veto); ahooks (data-layer hooks duplicate
+**Decision: utility hooks come from the owner's shadcn registry —
+`@gkurt` (https://gkurt.com/shadcn/).** Registered in `components.json` as
+`"@gkurt": "https://gkurt.com/shadcn/r/{name}.json"`; installed per-item via
+`npx shadcn@latest add @gkurt/<name>` (hooks like `use-stable-callback`, the
+`use-control` family, `use-promise`, plus utilities such as `poly` and
+`tv-pick`). Precedence rules:
+
+1. **Library-owned hooks win over registry hooks on collision.** If TanStack
+   Form/Query/Store/Router or Base UI ships a hook for the job, use it; the
+   registry covers what the locked libraries don't. No data-fetching hooks outside
+   TanStack Query, ever.
+2. Registry hooks install as source into `src/hooks/` (shadcn model — we own the
+   copy).
+3. **Any modification to an installed registry hook, and any new reusable hook
+   written locally, must carry a `// TODO(registry):` marker** with a one-line
+   reason — these are upstreaming candidates for the registry, and the marker is
+   how they're found later.
+
+*Rejected:* @mantine/hooks (owner veto); ahooks (data-layer hooks duplicate
 TanStack Query's domain); react-use (maintenance pace, uneven quality).
 
 **Decision: GUI is Vite + React + TypeScript, built to static files served by the
