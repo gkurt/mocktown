@@ -2,9 +2,14 @@
 """
 Spike 01 — the minimum edits that make Mockttp usable under Bun.
 
-Both are upstream-fixable and neither changes behaviour under Node, so they are
-candidates for PRs (httpolyglot) / a Bun bug report (the ALPN one, which is NOT
-fixed here because it can't be — see FINDINGS.md).
+Both are upstream-fixable and neither changes behaviour under Node. Both have been
+drafted as PRs in upstream/ (unfiled); the two defects that are NOT fixable from
+userland are drafted there as Bun bug reports instead — see FINDINGS.md.
+
+Note the SECLEVEL guard below sniffs `process.versions.bun`, while the upstream PR
+feature-detects instead (Bun reports process.versions.openssl === '1.1.0', so version
+checks get the wrong answer). Identical behaviour here; the PR's version is the one
+that generalises. This patches compiled dist/, hence the simpler form.
 
 Idempotent: re-running is a no-op. Run after every `bun install`.
 """

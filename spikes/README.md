@@ -40,9 +40,10 @@ design decision changes, by editing the relevant `docs/design/*.md` block.
   container's failure to reach IPv6 proves nothing. Re-run in phase 3 on a host with IPv6.
 - **emulate exposes mock services to the LAN** (spike 03). Sandbox mode solves it by
   construction; host mode must warn, and a `--host` flag is worth upstreaming.
-- **Two Bun bugs and two upstream PRs** are described in spike 01: a `httpolyglot` PR and a
-  Mockttp PR (both small, both behaviour-preserving on Node), plus Bun bug reports for the
-  ALPN/`SNICallback` and builtin-`ws` defects.
+- **Two Bun bugs and two upstream PRs are drafted but unfiled**, in
+  [spikes/01-mockttp-bun/upstream/](01-mockttp-bun/upstream/). The two Bun issues are the
+  revisit criteria for the Node-sidecar decision — until they're fixed, the sidecar is
+  permanent. Both PRs are verified against fresh clones and their projects' own suites.
 - **`NODE_USE_ENV_PROXY=1` belongs in the launch wrapper** (spike 05): without it,
   `fetch`-based SDKs escape the front door in host mode while appearing configured.
 

@@ -1,0 +1,71 @@
+diff --git a/src/index.ts b/src/index.ts
+index a4a5ea3..66fa740 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -103,7 +103,15 @@ class Server extends net.Server {
+   ) {
+     // We just act as a plain TCP server, accepting and examing
+     // each connection, then passing it to the right subserver.
+-    super((socket) => this.connectionListener(socket));
++    //
++    // Note that this is registered as an explicit 'connection' listener, rather than
++    // being passed to the net.Server constructor. The two are equivalent in Node (the
++    // constructor argument is registered as a 'connection' listener) but only the
++    // explicit form is portable: some runtimes handle the constructor callback
++    // internally, so that re-emitting a socket with server.emit('connection', socket)
++    // — as proxies do to re-inject a tunnelled socket after CONNECT — never reaches it.
++    super();
++    this.on('connection', (socket) => this.connectionListener(socket));
+ 
+     let config: HttpolyglotOptions = {};
+     let requestListener: http.RequestListener;
+diff --git a/test/reinjected-connection.spec.ts b/test/reinjected-connection.spec.ts
+new file mode 100644
+index 0000000..7f58d66
+--- /dev/null
++++ b/test/reinjected-connection.spec.ts
+@@ -0,0 +1,44 @@
++import * as net from 'net';
++import * as http from 'http';
++import { expect } from 'chai';
++
++import * as httpolyglot from '..';
++import { Deferred, getDeferred } from './test-util';
++
++describe("A re-injected connection", () => {
++
++    let server: httpolyglot.Server;
++    let tunnelServer: net.Server;
++    let serverReqRes: Deferred<[http.IncomingMessage, http.ServerResponse]>;
++
++    beforeEach(async () => {
++        serverReqRes = getDeferred();
++        server = httpolyglot.createServer((req, res) => serverReqRes.resolve([req, res]));
++        server.listen();
++
++        // Stands in for a proxy's CONNECT handler: it takes the raw socket itself, and
++        // then hands it back to the polyglot server to be sniffed and routed as usual.
++        tunnelServer = net.createServer((socket) => server.emit('connection', socket));
++        await new Promise<void>((resolve) => { tunnelServer.listen(() => resolve()); });
++    });
++
++    afterEach(() => {
++        server.close();
++        tunnelServer.close();
++    });
++
++    it("should be sniffed and routed like any other connection", async () => {
++        const client = new net.Socket();
++        await new Promise<void>((resolve) => {
++            client.connect((tunnelServer.address() as net.AddressInfo).port, '127.0.0.1', () => resolve());
++        });
++        client.write('GET /re-injected HTTP/1.1\r\nHost: localhost\r\n\r\n');
++
++        const [req, res] = await serverReqRes;
++        expect(req.url).to.equal('/re-injected');
++
++        res.writeHead(200);
++        res.end();
++        client.destroy();
++    });
++});

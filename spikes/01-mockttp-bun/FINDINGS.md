@@ -64,12 +64,25 @@ Fixed by patch 2: omit it under Bun. Costs only tolerance for legacy/weak upstre
 
 ### 3. `SNICallback` silently disables ALPN — **not patchable**
 
-`repros/03-alpn-dropped-by-snicallback.ts`
+`repros/03-alpn-dropped-by-snicallback.ts`, and a dependency-free five-case matrix in
+[`upstream/bun-issue-alpn-repro.mjs`](upstream/bun-issue-alpn-repro.mjs)
 
 A MITM proxy must choose its certificate per-connection, which means `SNICallback`. Under
-Bun, *any* TLS server using `SNICallback` negotiates **no ALPN protocol at all**. Neither
-`ALPNCallback`, nor `ALPNProtocols` on the returned `SecureContext`, nor setting both a
-static cert and `SNICallback` recovers it — all three were tried, all three fail.
+Bun, *any* TLS server using `SNICallback` negotiates **no ALPN protocol at all**. The
+defect is `SNICallback` specifically, not the ALPN APIs:
+
+| configuration | Node 24.20.0 | Bun 1.4.0 |
+|---|---|---|
+| `ALPNProtocols` in server options | h2 | h2 |
+| `ALPNProtocols` + `SNICallback` | h2 | **none** |
+| `ALPNProtocols` only on the context returned by `SNICallback` | none | none |
+| `ALPNCallback` | h2 | h2 |
+| `ALPNCallback` + `SNICallback` | h2 | **none** |
+
+`ALPNCallback` on its own works fine — it stops working only once `SNICallback` is also
+set. Row 3 fails on both runtimes: ALPN isn't a per-context setting in Node either, so
+that one is expected, not a Bun defect. There is no configuration that keeps both
+per-host certificates and ALPN.
 
 Consequence: h2 clients silently fall back to HTTP/1.1. That is quiet enough to be
 dangerous — we would record h1.1 traffic for services that speak h2 in production, and
