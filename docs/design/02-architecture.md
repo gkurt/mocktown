@@ -1,6 +1,6 @@
 # 02 — Architecture & Tech Stack
 
-**Status:** Draft
+**Status:** Implemented in phases 1–2 (GUI stack unbuilt — phase 4)
 
 One long-running **daemon** owns all logic and exposes a local HTTP/JSON API. The CLI
 and GUI are thin clients of that API — no client has privileged access to anything.
@@ -100,6 +100,16 @@ dialect; OpenAPI is a bolted-on afterthought, and plain-JSON access is a hard
 requirement here); bare REST handlers (no shared types, three surfaces drift);
 adding a web framework (Hono/Elysia/Express) — oRPC handlers + static file serving
 on `Bun.serve` cover the daemon's needs.
+
+*Amended 2026-08-31 by the phase-1/2 implementation.* Deriving `readOnlyHint` from the
+HTTP method turns "does this procedure mutate?" into a property of the route, which makes
+a mutating flag on a `GET` a **contract defect** rather than a style question: `env.get`
+originally took `--write`, which would have handed agents a read-only-looking tool that
+edits their repo. It is now `env.get` (GET) and `env.write` (POST). Two more house rules
+were made structural the same way, each enforced by a test over the contract walk rather
+than by review: every procedure carries `project`, and every procedure has a **human
+renderer** — a procedure with none falls back to printing its JSON, which quietly breaks
+"the human output is a projection of `--json`, never richer".
 
 **Decision: Zod v4 (pinned) is the single schema language.** oRPC contracts,
 `mocktown.json` and scrub-rule validation, MCP tool inputs, and `drizzle-zod`-derived

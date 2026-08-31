@@ -1,5 +1,5 @@
 {
   "name": "mocktown-repo",
   "private": true,
-  "workspaces": ["spikes/*"]
+  "workspaces": ["packages/*", "spikes/*"]
 }

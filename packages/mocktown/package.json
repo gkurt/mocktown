@@ -1,0 +1,42 @@
+{
+  "name": "mocktown",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "mocktown": "./src/cli/index.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./mock": "./src/mocks/types.ts"
+  },
+  "scripts": {
+    "daemon": "bun src/daemon/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@orpc/client": "1.15.0",
+    "@orpc/contract": "1.15.0",
+    "@orpc/openapi": "1.15.0",
+    "@orpc/openapi-client": "1.15.0",
+    "@orpc/server": "1.15.0",
+    "@orpc/zod": "1.15.0",
+    "commander": "15.0.0",
+    "drizzle-orm": "0.45.2",
+    "drizzle-zod": "0.8.3",
+    "mockttp": "4.6.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "@types/node": "^24.0.0",
+    "drizzle-kit": "0.31.10",
+    "typescript": "5"
+  },
+  "optionalDependencies": {
+    "@libsql/client": "0.17.4"
+  }
+}

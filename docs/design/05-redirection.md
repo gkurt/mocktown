@@ -1,6 +1,6 @@
 # 05 — Endpoint Redirection & the Seal
 
-**Status:** Draft
+**Status:** Implemented in part — `mocktown env` + EKB shipped in phase 2; seal certification remains phase 3
 
 Env-var / SDK-endpoint redirection is a **first-class mode**, not a fallback. It is
 how humans do everyday local dev and how most server-side SDKs are pointed at mocks.

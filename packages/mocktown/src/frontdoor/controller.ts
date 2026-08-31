@@ -1,0 +1,391 @@
+/**
+ * The daemon's half of the front door: spawn the Node sidecar, drive the Mockttp
+ * instance inside it over the admin-server protocol, and turn what flows through into
+ * events the recorder and issue engine consume.
+ *
+ * Two rules from phase 0 are structural here rather than remembered:
+ *
+ *   - **Every rule sets `.always()`.** Mockttp rules stop matching once consumed, and a
+ *     forwarding rule that silently expires sends subsequent traffic to the *real*
+ *     upstream — the worst failure mode this product has (spike 05).
+ *   - **The fallthrough denies and logs; it never passes through.** An escape has to be
+ *     loud (03-capture.md).
+ *
+ * Two more are structural because the remote client made us learn them the hard way; see
+ * `subscribe` and `applyRouting`.
+ */
+import { spawn, type ChildProcess } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import * as mockttp from "mockttp";
+import { completionCheckers, matchers, requestSteps, webSocketSteps } from "mockttp";
+import type { Mockttp, RequestRuleData, WebSocketRuleData } from "mockttp";
+import { findFreePort } from "../util/ports.ts";
+import { tableSignature, type Route, type RoutingTable } from "./routing.ts";
+
+const sidecarPath = join(dirname(fileURLToPath(import.meta.url)), "sidecar.ts");
+
+/** Mockttp's own fallback priority, so an unmatched-request rule loses to every route. */
+const FALLBACK_PRIORITY = 0;
+
+/** One captured exchange, raw. It goes straight to the recorder, which scrubs it. */
+export interface CapturedExchange {
+  id: string;
+  method: string;
+  url: string;
+  statusCode: number;
+  requestHeaders: Record<string, string | string[]>;
+  responseHeaders: Record<string, string | string[]>;
+  requestBody: string;
+  responseBody: string;
+  durationMs: number | null;
+  /** Which front-door mode served it, so the recorder knows whether to persist. */
+  mode: string;
+}
+
+export interface FrontDoorEvents {
+  onExchange?: (exchange: CapturedExchange) => void;
+  /** A request that hit a `deny` route or the fallthrough — the issue engine's input. */
+  onWallHit?: (hit: WallHit) => void;
+  /** TLS interception refused by the client: a `pinned-client` issue (03-capture.md). */
+  onPinnedClient?: (event: { hostname: string | undefined; reason: string }) => void;
+}
+
+/**
+ * `deny` and `provider-down` are both walls, but they are different mistakes: one is the
+ * registry saying no, the other is a provider that was supposed to be serving and is not.
+ * Reporting them as one makes the issue's diagnosis wrong for whichever case it isn't.
+ */
+export interface WallHit {
+  method: string;
+  url: string;
+  headers: Record<string, string | string[]>;
+  body: string;
+  reason: "deny" | "unknown-host" | "provider-down";
+  /** For `provider-down`: the provider the registry expected to be serving this host. */
+  provider?: string;
+}
+
+export interface FrontDoorOptions {
+  ca: { cert: string; key: string };
+  port?: number;
+  /** Node binary to run the sidecar with; the distribution bundles its own. */
+  nodePath?: string;
+}
+
+interface HalfRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string | string[]>;
+  body: string;
+  startedAt: number;
+}
+
+interface HalfResponse {
+  statusCode: number;
+  headers: Record<string, string | string[]>;
+  body: string;
+}
+
+/** The two halves of one exchange, joined whichever order they arrive in. */
+interface Exchange {
+  request?: HalfRequest;
+  response?: HalfResponse;
+  seenAt: number;
+}
+
+/** How long a half-exchange waits for its other half before being swept. */
+const HALF_EXCHANGE_TTL_MS = 120_000;
+
+export class FrontDoor {
+  private sidecar?: ChildProcess;
+  private proxy?: Mockttp;
+  private appliedSignature?: string;
+  private routes = new Map<string, Route>();
+  private exchanges = new Map<string, Exchange>();
+  private lastSweep = 0;
+  readonly log: string[] = [];
+  port = 0;
+  adminPort = 0;
+
+  constructor(private readonly options: FrontDoorOptions, private readonly events: FrontDoorEvents = {}) {}
+
+  get isRunning(): boolean {
+    return !!this.proxy && !!this.sidecar && this.sidecar.exitCode === null;
+  }
+
+  async start(): Promise<void> {
+    if (this.isRunning) return;
+    this.adminPort = await findFreePort(4700);
+    this.port = this.options.port ?? (await findFreePort(4400));
+
+    this.sidecar = spawn(this.options.nodePath ?? "node", [sidecarPath, String(this.adminPort)], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`front door sidecar did not start within 20s\n${this.log.join("")}`)), 20_000);
+      const onData = (buf: Buffer) => {
+        const text = buf.toString();
+        this.log.push(text);
+        if (text.includes('"ready":true')) { clearTimeout(timer); resolve(); }
+      };
+      this.sidecar!.stdout?.on("data", onData);
+      this.sidecar!.stderr?.on("data", onData);
+      this.sidecar!.once("exit", (code) => { clearTimeout(timer); reject(new Error(`front door sidecar exited with code ${code}\n${this.log.join("")}`)); });
+    });
+
+    this.proxy = mockttp.getRemote({
+      adminServerUrl: `http://127.0.0.1:${this.adminPort}`,
+      https: { cert: this.options.ca.cert, key: this.options.ca.key },
+    });
+    await this.proxy.start(this.port);
+    await this.subscribe();
+  }
+
+  /**
+   * Subscribe exactly once, for the life of the proxy.
+   *
+   * `request` and `response` do **not** arrive in that order. When Mockttp answers a
+   * request itself — a `deny` rule — both events cross the admin-server websocket at
+   * once and the response routinely wins. Pairing them by arrival order silently drops
+   * every locally-answered exchange, which is precisely the wall-hit traffic the issue
+   * engine exists to see. So the two halves are joined by id, whichever lands first.
+   */
+  private async subscribe(): Promise<void> {
+    const proxy = this.proxy!;
+
+    await proxy.on("request", async (request) => {
+      this.join(request.id, {
+        request: {
+          method: request.method,
+          url: request.url,
+          headers: request.headers as Record<string, string | string[]>,
+          body: (await request.body.getText().catch(() => "")) ?? "",
+          startedAt: Date.now(),
+        },
+      });
+    });
+
+    await proxy.on("response", async (response) => {
+      this.join(response.id, {
+        response: {
+          statusCode: response.statusCode,
+          headers: response.headers as Record<string, string | string[]>,
+          body: (await response.body.getText().catch(() => "")) ?? "",
+        },
+      });
+    });
+
+    // An aborted request never gets a response half; drop it rather than let it linger.
+    await proxy.on("abort", (request) => { this.exchanges.delete(request.id); });
+
+    // A client that refuses our certificate is pinned; documented out of scope, but it
+    // must be surfaced rather than looking like a network failure (03-capture.md).
+    await proxy.on("tls-client-error", (event) => {
+      this.events.onPinnedClient?.({ hostname: event.tlsMetadata?.sniHostname, reason: event.failureCause });
+    });
+  }
+
+  private join(id: string, half: Partial<Exchange>): void {
+    const entry = this.exchanges.get(id) ?? { seenAt: Date.now() };
+    Object.assign(entry, half);
+    if (!entry.request || !entry.response) {
+      this.exchanges.set(id, entry);
+      this.sweep();
+      return;
+    }
+
+    this.exchanges.delete(id);
+    const { request, response } = entry;
+    const mode = this.modeFor(request.url);
+
+    if (mode === "deny") {
+      const route = this.routes.get(hostOf(request.url));
+      this.events.onWallHit?.({
+        method: request.method, url: request.url, headers: request.headers, body: request.body,
+        // A route carrying a provider is one whose provider never came up — the registry
+        // said `generated:x`, routing had nowhere to send it, and denying was the safe
+        // answer. A route with no provider is a registry `deny`; no route at all is a
+        // host nobody has decided about yet.
+        reason: !route ? "unknown-host" : route.provider ? "provider-down" : "deny",
+        provider: route?.provider,
+      });
+      return;
+    }
+
+    this.events.onExchange?.({
+      id,
+      method: request.method,
+      url: request.url,
+      statusCode: response.statusCode,
+      requestHeaders: request.headers,
+      responseHeaders: response.headers,
+      requestBody: request.body,
+      responseBody: response.body,
+      durationMs: Date.now() - request.startedAt,
+      mode,
+    });
+  }
+
+  /** A half that never found its partner — a dropped connection — must not accumulate. */
+  private sweep(): void {
+    const now = Date.now();
+    if (now - this.lastSweep < HALF_EXCHANGE_TTL_MS) return;
+    this.lastSweep = now;
+    for (const [id, entry] of this.exchanges) {
+      if (now - entry.seenAt > HALF_EXCHANGE_TTL_MS) this.exchanges.delete(id);
+    }
+  }
+
+  private modeFor(url: string): string {
+    return this.routes.get(hostOf(url))?.mode ?? this.fallthroughMode;
+  }
+
+  private fallthroughMode: "record" | "deny" = "deny";
+
+  /**
+   * Re-apply the whole rule set. Mockttp has no incremental rule editing, and rebuilding
+   * is cheap, so the table is the unit of change — which also means routing can never
+   * drift halfway between two configurations.
+   *
+   * The rules are built as data and installed with `setRequestRules` rather than through
+   * the `forAnyRequest()...` builder, because the builder's only way to clear the old set
+   * is `reset()` — and `reset()` also tears down the server-side event subscriptions
+   * while leaving the client-side callbacks registered. Re-subscribing after it revives
+   * every callback ever registered, so each `applyRouting` would deliver one more copy of
+   * every event: duplicate recordings, duplicate issues. Replacing rules leaves the
+   * subscriptions from `start()` alone.
+   */
+  async applyRouting(table: RoutingTable): Promise<void> {
+    if (!this.proxy) throw new Error("front door is not running");
+    const signature = tableSignature(table);
+    if (signature === this.appliedSignature) return;
+
+    this.fallthroughMode = table.fallthrough;
+    this.routes = new Map(table.routes.map((r) => [r.host, r]));
+
+    const requestRules: RequestRuleData[] = table.routes.map((route) => ({
+      matchers: [new matchers.WildcardMatcher(), new matchers.HostnameMatcher(route.host)],
+      steps: [requestStepFor(route)],
+      completionChecker: new completionCheckers.Always(),
+    }));
+
+    // WebSockets are recorded, not mocked, until phase 3 (03-capture.md). Denied hosts
+    // deny here too, so a WS upgrade can't become an escape hatch past the wall.
+    const webSocketRules: WebSocketRuleData[] = table.routes.map((route) => ({
+      matchers: [new matchers.WildcardMatcher(), new matchers.HostnameMatcher(route.host)],
+      steps: [webSocketStepFor(route)],
+      completionChecker: new completionCheckers.Always(),
+    }));
+
+    if (table.fallthrough === "record") {
+      requestRules.push({
+        priority: FALLBACK_PRIORITY,
+        matchers: [new matchers.WildcardMatcher()],
+        steps: [new requestSteps.PassThroughStep()],
+        completionChecker: new completionCheckers.Always(),
+      });
+      webSocketRules.push({
+        priority: FALLBACK_PRIORITY,
+        matchers: [new matchers.WildcardMatcher()],
+        steps: [new webSocketSteps.PassThroughWebSocketStep()],
+        completionChecker: new completionCheckers.Always(),
+      });
+    } else {
+      requestRules.push({
+        priority: FALLBACK_PRIORITY,
+        matchers: [new matchers.WildcardMatcher()],
+        steps: [jsonStep(502, denyBody(null, "No provider is registered for this host and the front door is sealed."))],
+        completionChecker: new completionCheckers.Always(),
+      });
+      webSocketRules.push({
+        priority: FALLBACK_PRIORITY,
+        matchers: [new matchers.WildcardMatcher()],
+        steps: [new webSocketSteps.RejectWebSocketStep(502, "Denied by mocktown")],
+        completionChecker: new completionCheckers.Always(),
+      });
+    }
+
+    await this.proxy.setRequestRules(...requestRules);
+    await this.proxy.setWebSocketRules(...webSocketRules);
+    this.appliedSignature = signature;
+  }
+
+  async stop(): Promise<void> {
+    try { await this.proxy?.stop(); } catch { /* the sidecar is about to go anyway */ }
+    this.proxy = undefined;
+    this.appliedSignature = undefined;
+    this.exchanges.clear();
+
+    const child = this.sidecar;
+    this.sidecar = undefined;
+    if (!child || child.exitCode !== null) return;
+    await new Promise<void>((resolve) => {
+      const force = setTimeout(() => child.kill("SIGKILL"), 3000);
+      child.once("exit", () => { clearTimeout(force); resolve(); });
+      child.kill("SIGTERM");
+    });
+  }
+}
+
+function requestStepFor(route: Route) {
+  switch (route.mode) {
+    case "record":
+    case "passthrough":
+      return new requestSteps.PassThroughStep();
+    case "mock":
+      return new requestSteps.PassThroughStep({
+        transformRequest: {
+          // The scheme is rewritten too: a client calling `https://api.stripe.com` must
+          // reach an emulator that speaks plain HTTP. Inheriting the incoming protocol
+          // would send TLS at a cleartext listener and fail as a 502.
+          setProtocol: route.targetProtocol ?? "http",
+          // Keep the original Host header: a generated mock for api.stripe.com should
+          // see `Host: api.stripe.com`, not the loopback address it listens on.
+          replaceHost: { targetHost: route.target!, updateHostHeader: false },
+        },
+      });
+    case "deny":
+      return jsonStep(502, denyBody(route.host, "This service is set to deny in the project's service registry."));
+  }
+}
+
+function webSocketStepFor(route: Route) {
+  switch (route.mode) {
+    case "deny":
+      return new webSocketSteps.RejectWebSocketStep(502, "Denied by mocktown");
+    case "mock":
+      return new webSocketSteps.PassThroughWebSocketStep({
+        transformRequest: {
+          setProtocol: route.targetProtocol === "https" ? "wss" : "ws",
+          replaceHost: { targetHost: route.target!, updateHostHeader: false },
+        },
+      });
+    default:
+      return new webSocketSteps.PassThroughWebSocketStep();
+  }
+}
+
+function jsonStep(status: number, body: unknown) {
+  return new requestSteps.FixedResponseStep(status, undefined, JSON.stringify(body), {
+    "content-type": "application/json",
+  });
+}
+
+function hostOf(url: string): string {
+  try { return new URL(url).hostname; } catch { return ""; }
+}
+
+/**
+ * A denial is agent-facing output: it says what happened, which project wall it hit, and
+ * what to do next. An opaque 502 would just look like a flaky network.
+ */
+function denyBody(host: string | null, why: string) {
+  return {
+    error: "mocktown_denied",
+    message: why,
+    host,
+    hint: "Run `mocktown issues list` — this request was filed as an issue with the request that triggered it.",
+  };
+}

@@ -1,6 +1,6 @@
 # 10 — Security, Secrets & Distribution
 
-**Status:** Draft
+**Status:** Implemented in part — scrubbing and CA handling shipped in phase 1; distribution and signing remain
 
 Mocktown records real traffic and MITMs TLS — the two most sensitive things a dev
 tool can do. The design must be conservative by default.

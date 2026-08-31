@@ -1,6 +1,6 @@
 # 03 — Traffic Capture & the Front Door
 
-**Status:** Draft
+**Status:** Implemented — phase 1; WebSocket/gRPC mocking and OS-level capture remain deferred
 
 All traffic — recording real APIs and serving mocked ones — flows through one proxy,
 the **front door**. Its behavior per service is a mode, not a separate binary:
@@ -17,6 +17,21 @@ Mockttp rules stop matching once consumed unless `.always()` is set. A forwardin
 silently expires sends subsequent traffic to the **real** upstream — the worst failure mode
 this product has. Two defences, both cheap: `.always()` on every rule, and a fallthrough
 that **denies and logs** rather than passes through, so an escape is loud instead of silent.
+
+**Two more rules found in phase 1/2, both about Mockttp's admin-server protocol** (the
+daemon↔sidecar boundary, [02-architecture.md](02-architecture.md)):
+
+- **Replace rules; never `reset()`.** `reset()` tears down the *server-side* event
+  subscriptions while leaving the client-side callbacks registered, so re-subscribing
+  afterwards revives every callback ever registered — each routing change would deliver
+  one more copy of every event, duplicating recordings and issues. Rules are therefore
+  built as data and installed with `setRequestRules`/`setWebSocketRules`, which leaves
+  the subscriptions alone. Subscribe exactly once, when the proxy starts.
+- **`request` and `response` events are not ordered.** When Mockttp answers a request
+  itself — any `deny` rule — both events cross the protocol together and the response
+  routinely arrives first. Pairing them by arrival order silently drops every
+  locally-answered exchange, which is precisely the wall-hit traffic the issue engine
+  exists to see. The two halves are joined by request id, whichever lands first.
 
 ## Capture tiers
 

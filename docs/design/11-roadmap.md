@@ -1,6 +1,6 @@
 # 11 — Roadmap
 
-**Status:** Draft
+**Status:** Living — phases 0–2 done, phase 3 next
 
 Sequencing principle: ship the thin composed version fast (the market window —
 [01-product.md](01-product.md)), let the long-tail generator and EKB accrete as the
@@ -38,23 +38,54 @@ moat. Every phase ends with something usable headlessly.
 
 ## Phase 1 — The recorder & the corpus
 
-Daemon skeleton (API v1, SQLite/Drizzle, project resolution per
-[08-projects-config.md](08-projects-config.md)) · front door in `record` +
-`passthrough` modes · `mocktown record -- <cmd>` with CA env injection · HAR import
-([03-capture.md](03-capture.md)) · scrubbing on by default · Drizzle Studio hookup. **Exit criterion:** record a real app's traffic,
-browse the scrubbed corpus.
+- [x] Daemon skeleton: API v1 on `Bun.serve`, SQLite/Drizzle (12 tables, WAL, daemon
+  is the only writer), project resolution per
+  [08-projects-config.md](08-projects-config.md).
+- [x] Front door in `record` + `passthrough` modes, driving the Node sidecar over
+  Mockttp's admin-server protocol.
+- [x] `mocktown record -- <cmd>` with CA + proxy env injection (including
+  `NODE_USE_ENV_PROXY`, without which fetch/undici SDKs escape while appearing
+  configured).
+- [x] HAR import through the same scrubber and the same normalization
+  ([03-capture.md](03-capture.md)), reporting what it could not use rather than
+  dropping it.
+- [x] Scrubbing on by default, **before disk** — scrub, then normalize, then persist.
+- [x] Drizzle Studio hookup (`mocktown studio`).
+
+**Exit criterion met:** a real app's traffic is recorded and the scrubbed corpus is
+browsable — verified end-to-end through the CLI and by `tests/loop.test.ts` against a
+live upstream and a live MITM proxy.
+
+*Amendments produced:* the admin-server protocol's subscription and event-ordering rules
+([03-capture.md](03-capture.md)), `source` threading through the surfaces
+([08-projects-config.md](08-projects-config.md)), Studio's Node SQLite driver
+([09-gui-plugins.md](09-gui-plugins.md)).
 
 ## Phase 2 — Mock serving & the agent loop (the product becomes real)
 
-Provider interface · emulate providers for famous services · **generated-mock
-pipeline v1**: agent skill + corpus export + replay-verify harness
-([06-emulation.md](06-emulation.md)) · issue engine with the full taxonomy
-([07-issues-agent-loop.md](07-issues-agent-loop.md)) · MCP server · `mocktown env`
-generator + EKB seeded from emulate skills · **auth profiles + seed/reset + knob
-manifests** ([12-scenario-controls.md](12-scenario-controls.md)) — in this phase,
-not later: profiles shape how mocks are generated, and retrofitting them would
-churn every generated mock (GUI knob forms land in phase 4). **Exit criterion:** the loop closes —
-unseen request → issue → agent patch → verified replay — on a real project.
+- [x] Provider interface — a supervisor for N services, returning `service → baseUrl`.
+- [x] emulate provider for the famous services, on a contiguous port run, with the
+  startup banner treated as noise and readiness established by probing.
+- [x] **Generated-mock pipeline v1**: agent skill + corpus export (variety-preferring
+  examples, stateful hints) + replay-verify harness that compares status class and
+  response *shape*, never values ([06-emulation.md](06-emulation.md)).
+- [x] Issue engine with the full taxonomy, deduping on
+  type/service/method/pathTemplate, reopening rather than re-filing, and materializing
+  the open queue as files ([07-issues-agent-loop.md](07-issues-agent-loop.md)).
+- [x] MCP server over stdio, generated from the same contract walk.
+- [x] `mocktown env` generator + EKB seeded from the emulate recipes, honest about the
+  services it cannot cover mechanically ([05-redirection.md](05-redirection.md)).
+- [x] **Auth profiles + seed/reset + knob manifests**
+  ([12-scenario-controls.md](12-scenario-controls.md)).
+
+**Exit criterion met:** the loop closes — an unseen request is denied loudly, filed as an
+`unknown-service` issue with the triggering request attached, resolved by pointing the
+service at a provider, and the mock verified against the corpus by replay.
+
+*Amendments produced:* `mock` routing is host-preserving pass-through plus a scheme
+rewrite ([06-emulation.md](06-emulation.md)); `readOnlyHint`-follows-method makes a
+mutating `GET` a contract defect, and renderer coverage joins the structurally-enforced
+house rules ([02-architecture.md](02-architecture.md)).
 
 ## Phase 3 — The seal & the sandbox
 

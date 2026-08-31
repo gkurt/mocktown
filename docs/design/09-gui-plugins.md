@@ -1,6 +1,6 @@
 # 09 — GUI, State Visibility & the Panels Plugin Model
 
-**Status:** Draft
+**Status:** Draft — only the Drizzle Studio hookup is built (phase 1); the GUI and panels are phase 4
 
 The GUI is a **thin shell over the daemon API** ([02-architecture.md](02-architecture.md)).
 It never gains logic of its own — that is the one architectural line that must hold,
@@ -15,6 +15,12 @@ agent) use at full parity.
 - **Database viewer**: embed/link **Drizzle Studio** (`drizzle-kit studio`) over the
   project SQLite. Recordings, issues, EKB, mock state — browsable on day one with
   ~zero custom UI work. This satisfies "see into the saved state" until panels exist.
+  *Amended 2026-08-31 by the phase-1 implementation:* `drizzle-kit` runs under Node, which
+  cannot use `bun:sqlite`, so Studio needs its own SQLite driver (`@libsql/client`). It is
+  an **optional** dependency — a platform where it fails to build should lose the viewer,
+  not the product — and `mocktown studio` says which driver to install rather than letting
+  drizzle-kit's own error surface. Studio reads the file directly, so the daemon remains
+  the only writer.
 
 **Decision: GUI is a local web app (Vite + React + TypeScript) served by the
 daemon**, opened in the default browser. Stack rationale and rejected alternatives

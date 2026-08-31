@@ -1,6 +1,6 @@
 # 12 — Scenario Controls: Knobs, Auth Profiles & State Lifecycle
 
-**Status:** Draft
+**Status:** Implemented — phase 2; GUI knob forms remain phase 4
 
 Generated mocks ([06-emulation.md](06-emulation.md)) must be *steerable* without
 losing determinism. Three mechanisms, one contract: **same seed + same knob values +

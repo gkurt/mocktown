@@ -1,0 +1,256 @@
+[
+  {
+    "id": "c9389ac6-53fe-4de5-bdaf-c51765d5d1d1",
+    "method": "POST",
+    "url": "https://api.stripe.com/v1/customers",
+    "statusCode": 200,
+    "requestHeaders": {
+      "accept": "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+      "user-agent": "Stripe/v1 NodeBindings/19.3.1",
+      "x-stripe-client-user-agent": "{\"bindings_version\":\"19.3.1\",\"lang\":\"node\",\"publisher\":\"stripe\",\"uname\":\"Darwin%20GKPro.local%2025.6.0%20Darwin%20Kernel%20Version%2025.6.0%3A%20Fri%20Jul%2031%2019%3A16%3A36%20PDT%202026%3B%20root%3Axnu-12377.161.14~5%2FRELEASE_ARM64_T6030%20arm64%0A\",\"typescript\":\"false\",\"lang_version\":\"v24.20.0\",\"platform\":\"darwin\",\"httplib\":\"node\"}",
+      "stripe-version": "2025-10-29.clover",
+      "idempotency-key": "stripe-node-retry-a847c4ae-b779-44dc-9312-cdf205d3d292",
+      "content-length": "43",
+      "authorization": "Bearer sk_test_51QxSpIkeRealLookingSecretKeyABCDEFGHIJKLMNOP",
+      "host": "api.stripe.com",
+      "connection": "close"
+    },
+    "requestBody": "email=ada%40example.com&name=Ada%20Lovelace",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "content-type": "application/json; charset=UTF-8",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4999",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "responseBody": "{\"id\":\"cus_kHI4QOEo13L5vUxa\",\"object\":\"customer\",\"email\":\"ada@example.com\",\"name\":\"Ada Lovelace\",\"description\":null,\"metadata\":{},\"created\":1788190039,\"livemode\":false}"
+  },
+  {
+    "id": "94a5bf7e-c743-41a9-b266-b407e4cb5070",
+    "method": "POST",
+    "url": "https://api.stripe.com/v1/payment_intents",
+    "statusCode": 200,
+    "requestHeaders": {
+      "accept": "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+      "user-agent": "Stripe/v1 NodeBindings/19.3.1",
+      "x-stripe-client-user-agent": "{\"bindings_version\":\"19.3.1\",\"lang\":\"node\",\"publisher\":\"stripe\",\"uname\":\"Darwin%20GKPro.local%2025.6.0%20Darwin%20Kernel%20Version%2025.6.0%3A%20Fri%20Jul%2031%2019%3A16%3A36%20PDT%202026%3B%20root%3Axnu-12377.161.14~5%2FRELEASE_ARM64_T6030%20arm64%0A\",\"typescript\":\"false\",\"lang_version\":\"v24.20.0\",\"platform\":\"darwin\",\"httplib\":\"node\"}",
+      "stripe-version": "2025-10-29.clover",
+      "idempotency-key": "stripe-node-retry-94c483b5-2fdd-4347-ac32-8d6efacefa52",
+      "content-length": "54",
+      "authorization": "Bearer sk_test_51QxSpIkeRealLookingSecretKeyABCDEFGHIJKLMNOP",
+      "host": "api.stripe.com",
+      "connection": "close"
+    },
+    "requestBody": "amount=4200&currency=usd&customer=cus_kHI4QOEo13L5vUxa",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "content-type": "application/json; charset=UTF-8",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4998",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "responseBody": "{\"id\":\"pi_o4j_4cSrPj33rNhI\",\"object\":\"payment_intent\",\"amount\":4200,\"currency\":\"usd\",\"status\":\"requires_payment_method\",\"customer\":\"cus_kHI4QOEo13L5vUxa\",\"description\":null,\"payment_method\":null,\"metadata\":{},\"created\":1788190039,\"livemode\":false}"
+  },
+  {
+    "id": "7706ad42-f8fe-49f1-afc1-b2aeeb3b03b1",
+    "method": "GET",
+    "url": "https://api.github.com/repos/octocat/hello-world",
+    "statusCode": 200,
+    "requestHeaders": {
+      "host": "api.github.com",
+      "connection": "keep-alive",
+      "accept": "application/vnd.github.v3+json",
+      "user-agent": "octokit-rest.js/22.0.1 octokit-core.js/7.0.8 Node.js/24",
+      "authorization": "token ghp_R3alL00k1ngPersonalAccessToken0123456789",
+      "accept-language": "*",
+      "sec-fetch-mode": "cors",
+      "accept-encoding": "br, gzip, deflate"
+    },
+    "requestBody": "",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "content-type": "application/json; charset=UTF-8",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4999",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "keep-alive",
+      "keep-alive": "timeout=5",
+      "transfer-encoding": "chunked"
+    },
+    "responseBody": "{\"id\":1,\"node_id\":\"MDpSZXBvc2l0b3J5MQ\",\"name\":\"hello-world\",\"full_name\":\"octocat/hello-world\",\"private\":false,\"owner\":{\"login\":\"octocat\",\"id\":3,\"node_id\":\"MDpVc2VyMw\",\"avatar_url\":\"http://localhost:4601/avatars/u/octocat\",\"gravatar_id\":\"\",\"url\":\"http://localhost:4601/users/octocat\",\"html_url\":\"http://localhost:4601/octocat\",\"followers_url\":\"http://localhost:4601/users/octocat/followers\",\"following_url\":\"http://localhost:4601/users/octocat/following{/other_user}\",\"gists_url\":\"http://localhost:4601/users/octocat/gists{/gist_id}\",\"starred_url\":\"http://localhost:4601/users/octocat/starred{/owner}{/repo}\",\"subscriptions_url\":\"http://localhost:4601/users/octocat/subscriptions\",\"organizations_url\":\"http://localhost:4601/users/octocat/orgs\",\"repos_url\":\"http://localhost:4601/users/octocat/repos\",\"events_url\":\"http://localhost:4601/users/octocat/events{/privacy}\",\"received_events_url\":\"http://localhost:4601/users/octocat/received_events\",\"type\":\"User\",\"site_admin\":false,\"user_view_type\":\"public\"},\"html_url\":\"http://localhost:4601/octocat/hello-world\",\"description\":\"Seeded by Mocktown\",\"fork\":false,\"url\":\"http://localhost:4601/repos/octocat/hello-world\",\"forks_url\":\"http://localhost:4601/repos/octocat/hello-world/forks\",\"keys_url\":\"http://localhost:4601/repos/octocat/hello-world/keys{/key_id}\",\"collaborators_url\":\"http://localhost:4601/repos/octocat/hello-world/collaborators{/collaborator}\",\"teams_url\":\"http://localhost:4601/repos/octocat/hello-world/teams\",\"hooks_url\":\"http://localhost:4601/repos/octocat/hello-world/hooks\",\"issue_events_url\":\"http://localhost:4601/repos/octocat/hello-world/issues/events{/number}\",\"events_url\":\"http://localhost:4601/repos/octocat/hello-world/events\",\"assignees_url\":\"http://localhost:4601/repos/octocat/hello-world/assignees{/user}\",\"branches_url\":\"http://localhost:4601/repos/octocat/hello-world/branches{/branch}\",\"tags_url\":\"http://localhost:4601/repos/octocat/hello-world/tags\",\"blobs_url\":\"http://localhost:4601/repos/octocat/hello-world/git/blobs{/sha}\",\"git_tags_url\":\"http://localhost:4601/repos/octocat/hello-world/git/tags{/sha}\",\"git_refs_url\":\"http://localhost:4601/repos/octocat/hello-world/git/ref{/sha}\",\"trees_url\":\"http://localhost:4601/repos/octocat/hello-world/git/trees{/sha}\",\"statuses_url\":\"http://localhost:4601/repos/octocat/hello-world/statuses/{sha}\",\"languages_url\":\"http://localhost:4601/repos/octocat/hello-world/languages\",\"stargazers_url\":\"http://localhost:4601/repos/octocat/hello-world/stargazers\",\"contributors_url\":\"http://localhost:4601/repos/octocat/hello-world/contributors\",\"subscribers_url\":\"http://localhost:4601/repos/octocat/hello-world/subscribers\",\"subscription_url\":\"http://localhost:4601/repos/octocat/hello-world/subscription\",\"commits_url\":\"http://localhost:4601/repos/octocat/hello-world/commits{/sha}\",\"git_commits_url\":\"http://localhost:4601/repos/octocat/hello-world/git/commits{/sha}\",\"comments_url\":\"http://localhost:4601/repos/octocat/hello-world/comments{/number}\",\"issue_comment_url\":\"http://localhost:4601/repos/octocat/hello-world/issues/comments{/number}\",\"contents_url\":\"http://localhost:4601/repos/octocat/hello-world/contents/{+path}\",\"compare_url\":\"http://localhost:4601/repos/octocat/hello-world/compare/{base}...{head}\",\"merges_url\":\"http://localhost:4601/repos/octocat/hello-world/merges\",\"archive_url\":\"http://localhost:4601/repos/octocat/hello-world/{archive_format}{/ref}\",\"downloads_url\":\"http://localhost:4601/repos/octocat/hello-world/downloads\",\"issues_url\":\"http://localhost:4601/repos/octocat/hello-world/issues{/number}\",\"pulls_url\":\"http://localhost:4601/repos/octocat/hello-world/pulls{/number}\",\"milestones_url\":\"http://localhost:4601/repos/octocat/hello-world/milestones{/number}\",\"notifications_url\":\"http://localhost:4601/repos/octocat/hello-world/notifications{?since,all,participating}\",\"labels_url\":\"http://localhost:4601/repos/octocat/hello-world/labels{/name}\",\"releases_url\":\"http://localhost:4601/repos/octocat/hello-world/releases{/id}\",\"deployments_url\":\"http://localhost:4601/repos/octocat/hello-world/deployments\",\"created_at\":\"2026-08-31T15:27:19.105Z\",\"updated_at\":\"2026-08-31T15:27:19.105Z\",\"pushed_at\":\"2026-08-31T15:27:19.105Z\",\"git_url\":\"git://localhost:4601/octocat/hello-world.git\",\"ssh_url\":\"git@localhost:4601:octocat/hello-world.git\",\"clone_url\":\"http://localhost:4601/octocat/hello-world.git\",\"svn_url\":\"http://localhost:4601/octocat/hello-world\",\"homepage\":null,\"size\":1,\"stargazers_count\":0,\"watchers_count\":0,\"language\":\"TypeScript\",\"has_issues\":true,\"has_projects\":true,\"has_downloads\":true,\"has_wiki\":true,\"has_pages\":false,\"has_discussions\":false,\"forks_count\":0,\"mirror_url\":null,\"archived\":false,\"disabled\":false,\"open_issues_count\":0,\"license\":null,\"allow_forking\":true,\"is_template\":false,\"topics\":[],\"visibility\":\"public\",\"forks\":0,\"open_issues\":0,\"watchers\":0,\"default_branch\":\"main\",\"permissions\":{\"admin\":true,\"maintain\":true,\"push\":true,\"triage\":true,\"pull\":true},\"allow_rebase_merge\":true,\"allow_squash_merge\":true,\"allow_merge_commit\":true,\"allow_auto_merge\":false,\"delete_branch_on_merge\":false}"
+  },
+  {
+    "id": "f6fff184-cdb7-47ca-a595-935eae5a0a89",
+    "method": "POST",
+    "url": "https://api.github.com/repos/octocat/hello-world/issues",
+    "statusCode": 201,
+    "requestHeaders": {
+      "host": "api.github.com",
+      "connection": "keep-alive",
+      "accept": "application/vnd.github.v3+json",
+      "user-agent": "octokit-rest.js/22.0.1 octokit-core.js/7.0.8 Node.js/24",
+      "authorization": "token ghp_R3alL00k1ngPersonalAccessToken0123456789",
+      "content-type": "application/json; charset=utf-8",
+      "accept-language": "*",
+      "sec-fetch-mode": "cors",
+      "accept-encoding": "br, gzip, deflate",
+      "content-length": "48"
+    },
+    "requestBody": "{\"title\":\"Captured by the spike\",\"body\":\"hello\"}",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "content-type": "application/json; charset=UTF-8",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4998",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "keep-alive",
+      "keep-alive": "timeout=5",
+      "transfer-encoding": "chunked"
+    },
+    "responseBody": "{\"url\":\"http://localhost:4601/repos/octocat/hello-world/issues/1\",\"repository_url\":\"http://localhost:4601/repos/octocat/hello-world\",\"labels_url\":\"http://localhost:4601/repos/octocat/hello-world/issues/1/labels{/name}\",\"comments_url\":\"http://localhost:4601/repos/octocat/hello-world/issues/1/comments\",\"events_url\":\"http://localhost:4601/repos/octocat/hello-world/issues/1/events\",\"html_url\":\"http://localhost:4601/octocat/hello-world/issues/1\",\"id\":1,\"node_id\":\"MDpJc3N1ZTE\",\"number\":1,\"title\":\"Captured by the spike\",\"user\":{\"login\":\"octocat\",\"id\":3,\"node_id\":\"MDpVc2VyMw\",\"avatar_url\":\"http://localhost:4601/avatars/u/octocat\",\"gravatar_id\":\"\",\"url\":\"http://localhost:4601/users/octocat\",\"html_url\":\"http://localhost:4601/octocat\",\"followers_url\":\"http://localhost:4601/users/octocat/followers\",\"following_url\":\"http://localhost:4601/users/octocat/following{/other_user}\",\"gists_url\":\"http://localhost:4601/users/octocat/gists{/gist_id}\",\"starred_url\":\"http://localhost:4601/users/octocat/starred{/owner}{/repo}\",\"subscriptions_url\":\"http://localhost:4601/users/octocat/subscriptions\",\"organizations_url\":\"http://localhost:4601/users/octocat/orgs\",\"repos_url\":\"http://localhost:4601/users/octocat/repos\",\"events_url\":\"http://localhost:4601/users/octocat/events{/privacy}\",\"received_events_url\":\"http://localhost:4601/users/octocat/received_events\",\"type\":\"User\",\"site_admin\":false,\"user_view_type\":\"public\"},\"labels\":[],\"state\":\"open\",\"state_reason\":null,\"locked\":false,\"active_lock_reason\":null,\"assignee\":null,\"assignees\":[],\"milestone\":null,\"comments\":0,\"created_at\":\"2026-08-31T15:27:19.210Z\",\"updated_at\":\"2026-08-31T15:27:19.210Z\",\"closed_at\":null,\"closed_by\":null,\"body\":\"hello\",\"reactions\":{\"url\":\"http://localhost:4601/repos/octocat/hello-world/issues/1/reactions\",\"total_count\":0,\"+1\":0,\"-1\":0,\"laugh\":0,\"hooray\":0,\"confused\":0,\"heart\":0,\"rocket\":0,\"eyes\":0},\"timeline_url\":\"http://localhost:4601/repos/octocat/hello-world/issues/1/timeline\",\"performed_via_github_app\":null,\"author_association\":\"OWNER\"}"
+  },
+  {
+    "id": "0f5066a8-884f-4473-9dee-4fbad3715174",
+    "method": "POST",
+    "url": "https://github.com/login/oauth/callback",
+    "statusCode": 302,
+    "requestHeaders": {
+      "content-type": "application/x-www-form-urlencoded",
+      "host": "github.com",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "requestBody": "login=octocat&client_id=Iv1.mocktown_spike&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcb&state=s&scope=repo",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "location": "http://127.0.0.1:9999/cb?code=aa364a07d002dac59162c1c0849a85bd073a6870&state=s",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4999",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "set-cookie": "_emu_session=akFmeh2aaqg0iblDouTvPwzA9cWvHF3Q; Path=/; HttpOnly; SameSite=Lax",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "close",
+      "content-length": "0"
+    },
+    "responseBody": ""
+  },
+  {
+    "id": "02f1603c-3b75-491d-966a-58117db1cfef",
+    "method": "POST",
+    "url": "https://github.com/login/oauth/access_token",
+    "statusCode": 200,
+    "requestHeaders": {
+      "content-type": "application/json",
+      "accept": "application/json",
+      "host": "github.com",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "requestBody": "{\"client_id\":\"Iv1.mocktown_spike\",\"client_secret\":\"mocktown_spike_secret\",\"code\":\"aa364a07d002dac59162c1c0849a85bd073a6870\",\"redirect_uri\":\"http://127.0.0.1:9999/cb\"}",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "content-type": "application/json; charset=UTF-8",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4998",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "responseBody": "{\"access_token\":\"gho_PVceXundxBnvFTz1Eew1Y28BIrE\",\"token_type\":\"bearer\",\"scope\":\"repo\"}"
+  },
+  {
+    "id": "ea40bdaf-f06a-4f17-99d0-d8bb869a1228",
+    "method": "POST",
+    "url": "https://api.stripe.com/v1/customers",
+    "statusCode": 200,
+    "requestHeaders": {
+      "content-type": "application/json",
+      "authorization": "Bearer sk_test_51QxSpIkeRealLookingSecretKeyABCDEFGHIJKLMNOP",
+      "cookie": "sid=8f14e45fceea167a5a36dedd4bea2543deadbeefcafef00d",
+      "x-api-key": "xapi_live_9f8e7d6c5b4a39281706",
+      "host": "api.stripe.com",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "requestBody": "{\"email\":\"grace@example.com\",\"password\":\"hunter2-correct-horse-battery\",\"payment\":{\"card\":{\"number\":\"5555555555554444\",\"cvc\":\"314\",\"exp_month\":12,\"exp_year\":2030}},\"applicant\":{\"ssn\":\"123-45-6789\",\"name\":\"Grace Hopper\"},\"product\":{\"name\":\"Token Ring Adapter\",\"description\":\"A legacy token ring network adapter\"}}",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "content-type": "application/json; charset=UTF-8",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4997",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "responseBody": "{\"id\":\"cus_W6ln2rWmHmEqfTqb\",\"object\":\"customer\",\"email\":\"grace@example.com\",\"name\":null,\"description\":null,\"metadata\":{},\"created\":1788190039,\"livemode\":false}"
+  },
+  {
+    "id": "c73a9e15-7b5e-4822-8f3f-0fddd655d242",
+    "method": "POST",
+    "url": "https://accounts.google.com/o/oauth2/v2/auth/callback",
+    "statusCode": 302,
+    "requestHeaders": {
+      "content-type": "application/x-www-form-urlencoded",
+      "host": "accounts.google.com",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "requestBody": "email=testuser%40gmail.com&client_id=example-client-id.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcb&scope=openid+email&state=s&nonce=&code_challenge=",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "location": "http://127.0.0.1:9999/cb?code=d81f161a2e8e41a7d2af49d73ab06e828dc1ac60&state=s",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4999",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "close",
+      "content-length": "0"
+    },
+    "responseBody": ""
+  },
+  {
+    "id": "d7e231a1-a791-4864-975f-52e724e0a08e",
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/oauth2/token",
+    "statusCode": 200,
+    "requestHeaders": {
+      "content-type": "application/x-www-form-urlencoded",
+      "host": "oauth2.googleapis.com",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "requestBody": "code=d81f161a2e8e41a7d2af49d73ab06e828dc1ac60&client_id=example-client-id.apps.googleusercontent.com&client_secret=GOCSPX-example_secret&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcb&grant_type=authorization_code",
+    "responseHeaders": {
+      "access-control-allow-origin": "*",
+      "content-type": "application/json; charset=UTF-8",
+      "x-ratelimit-limit": "5000",
+      "x-ratelimit-remaining": "4998",
+      "x-ratelimit-reset": "1788193639",
+      "x-ratelimit-resource": "core",
+      "date": "Mon, 31 Aug 2026 15:27:19 GMT",
+      "connection": "close",
+      "transfer-encoding": "chunked"
+    },
+    "responseBody": "{\"access_token\":\"google_1PkDjON9PrcRoNjLj5CdrqsqEZQ\",\"refresh_token\":\"google_refresh_Tf5anm7iphtEnj8x5H3SCnKm4dWjso0E\",\"id_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJnb29nX3RzU1k4WUFFbUhUTEFLRm8iLCJlbWFpbCI6InRlc3R1c2VyQGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJuYW1lIjoiVGVzdCBVc2VyIiwiZ2l2ZW5fbmFtZSI6IlRlc3QiLCJmYW1pbHlfbmFtZSI6IlVzZXIiLCJwaWN0dXJlIjpudWxsLCJsb2NhbGUiOiJlbiIsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3Q6NDYwMiIsImF1ZCI6ImV4YW1wbGUtY2xpZW50LWlkLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwiaWF0IjoxNzg4MTkwMDM5LCJleHAiOjE3ODgxOTM2Mzl9.BJ88sjI2qcniW6MzPbjEvIZ6tjd_SvunQR5yOyuIqcg\",\"token_type\":\"Bearer\",\"expires_in\":3600,\"scope\":\"openid email\"}"
+  }
+]

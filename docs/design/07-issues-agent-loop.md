@@ -1,6 +1,6 @@
 # 07 — Issues & the Agent Loop
 
-**Status:** Draft
+**Status:** Implemented — phase 2
 
 The issue engine is what keeps the mock environment *alive*. Every request the front
 door can't serve cleanly becomes a typed, self-contained work item that a coding agent

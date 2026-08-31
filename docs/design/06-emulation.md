@@ -1,6 +1,6 @@
 # 06 — Emulation: Providers, emulate, and the Long-Tail Generator
 
-**Status:** Draft
+**Status:** Implemented — phase 2
 
 A **provider** is anything that can serve a mocked service behind the front door.
 The provider interface is the seam that keeps Mocktown independent of any one backend.
@@ -96,6 +96,21 @@ The front door routes by hostname (SNI/Host header) using the project's service
 registry: `hostname → provider | record | passthrough | deny`. Unknown hostname in
 sealed mode → deny + issue. Conflicts (two providers claiming one host) are a
 config-validation error, not a runtime race.
+
+*Amended 2026-08-31 by the phase-2 implementation.* A `mock` route is a pass-through with
+two transforms, not a redirect the client can observe:
+
+- `replaceHost: { targetHost, updateHostHeader: false }` — the provider's listener
+  receives the request but the **original `Host` header is preserved**, which is what lets
+  one loopback listener serve many services and lets a generated mock for `api.stripe.com`
+  see `Host: api.stripe.com`.
+- `setProtocol` — the scheme is rewritten from the provider's own base URL rather than
+  inherited. A client calling `https://api.stripe.com` must reach an emulator that speaks
+  plain HTTP; inheriting the incoming protocol sends TLS at a cleartext listener and
+  surfaces as an unexplained 502.
+
+A provider therefore returns full base URLs (`http://127.0.0.1:4600`), not `host:port` —
+the scheme is load-bearing.
 
 ## State introspection
 

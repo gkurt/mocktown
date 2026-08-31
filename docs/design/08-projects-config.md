@@ -1,6 +1,6 @@
 # 08 — Projects, Config Layering & Storage
 
-**Status:** Draft
+**Status:** Implemented — phase 1
 
 Mocktown supports multiple named **projects**. Resolution follows the git/kubectl
 "context" pattern, with agent-safety guardrails.
@@ -14,6 +14,13 @@ Mocktown supports multiple named **projects**. Resolution follows the git/kubect
 
 **Rule: every command prints the resolved project in its first output line.**
 Misdirection must be visible, never silent.
+
+*Amended 2026-08-31 by the phase-1 implementation.* Resolution happens in the **surface**,
+not the daemon — the daemon only ever receives a project *name*, so it cannot know which
+rung produced it. The surface therefore sends `source` alongside `project`: the CLI sends
+how it resolved, the MCP server sends its own resolution (neither is a model-supplied
+argument), and a caller that says nothing gets `unknown` rather than a plausible guess.
+Reporting a resolution that did not happen is the same failure as not reporting one.
 
 **Rule: Mocktown-generated agent instructions always pin `MOCKTOWN_PROJECT`
 explicitly** — never rely on the mutable global default. Rationale: the kubectl

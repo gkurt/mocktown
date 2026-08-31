@@ -25,7 +25,8 @@ your task** — each file is self-contained and cross-links where context is nee
 ## Conventions
 
 - Each file opens with a **Status** line (`Draft` / `Agreed` / `Implemented`) and a
-  one-paragraph summary.
+  one-paragraph summary. A status may carry a qualifier naming what is *not* yet built —
+  a partially-built document must say so rather than round up to `Implemented`.
 - Decisions are recorded inline as `**Decision:**` blocks with the alternatives that
   were considered and rejected. Change a decision by editing the block, not by
   appending contradictions.
