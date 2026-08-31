@@ -161,8 +161,11 @@ since 2023 ([#2955](https://github.com/oven-sh/bun/issues/2955),
 not filed: all we have is "test 5 kills the process when run after tests 1–4", which is a
 symptom, not a reproduction — it needs reducing first.
 
-Defects 1 and 2 are also fixable from the library side, and both fixes are drafted as PRs
-in [`upstream/`](upstream/), verified against fresh clones. Neither is opened yet.
+Defects 1 and 2 are also fixable from the library side, and both fixes are open as PRs —
+[httpolyglot#4](https://github.com/httptoolkit/httpolyglot/pull/4) and
+[mockttp#206](https://github.com/httptoolkit/mockttp/pull/206) — verified against fresh
+clones before submission. If either lands, the corresponding half of
+`apply-bun-patches.py` can be dropped once the release is out.
 
 ## Not tested here
 
