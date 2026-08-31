@@ -90,7 +90,7 @@ on `Bun.serve` cover the daemon's needs.
 row schemas all share it. No second validation library may be introduced.
 
 **Decision: GUI framework set is React 19 + TanStack Router + TanStack Query
-(+ `@orpc/tanstack-query`) + TanStack Form (latest v1.x), as a Vite SPA.** Forms
+(+ `@orpc/tanstack-query`) + TanStack Form (latest v2.x), as a Vite SPA.** Forms
 (service registry editing, scrub-rule config, seed editors) use TanStack Form with
 Zod adapters — same schema objects as the oRPC contract, so form validation and API
 validation cannot drift. TanStack **Start is not adopted**: it
