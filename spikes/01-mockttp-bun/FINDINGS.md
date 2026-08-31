@@ -32,7 +32,7 @@ Reproduce: `node spike.ts` · `SKIP=5 bun run spike.ts` (test 5 kills the Bun pr
 must be run alone: `ONLY=5 bun run spike.ts`). Patches: `python3 apply-bun-patches.py`,
 re-run after every `bun install`.
 
-## The five defects, in the order they bite
+## The six defects, in the order they bite
 
 Each has a standalone reproduction in `repros/` that runs under both runtimes and prints
 PASS/FAIL, so none of this rests on reading Mockttp's source.
@@ -131,6 +131,35 @@ Note the WebSocket test deliberately runs its client and upstream under Node
 (`ws-client-check.mjs`) even when the proxy runs under Bun — otherwise defect 4 would break
 the *client* and we would be measuring the wrong thing.
 
+### 6. Loading Mockttp's native TLS module segfaults Bun — **not patchable**
+
+Found 2026-08-31 while answering Mockttp's maintainer on
+[mockttp#206](https://github.com/httptoolkit/mockttp/pull/206), who pointed out that
+Mockttp integrates with OpenSSL at a level Bun cannot follow. He is right, and the
+evidence is worse than his framing.
+
+`tls-impersonate` is an **optionalDependency** and a native module (`binding.gyp`) that
+reproduces a client's TLS fingerprint upstream. On this machine Node loads the matching
+`darwin-arm64` prebuild and reports `isSupported() === true`. Under Bun, `require('tls-impersonate')`
+**segfaults the process** — on the correct binary for the platform, so this is not an
+architecture mismatch:
+
+```
+node 24.20.0   tls-impersonate: loaded, isSupported() = true
+bun  1.4.0     panic(main thread): Segmentation fault at address 0x7100051FB9400008
+```
+
+The reason this matters more than "a feature is unavailable": Mockttp already degrades
+gracefully when the module is unusable — `src/util/tls-impersonation.ts` wraps the
+`require` in try/catch, checks `isSupported()`, warns once and falls back to the default
+fingerprint. **A segfault cannot be caught.** So on Bun, enabling fingerprint mirroring
+doesn't lose a feature, it kills the process — and the existing guard, which handles old
+Node and unsupported platforms correctly, cannot help.
+
+Unlike defect 5 this reduces to a two-line repro, so it is worth filing against Bun. Not
+yet isolated: whether this is specific to `tls-impersonate` or affects native addons under
+Bun generally.
+
 ## Decision
 
 **The front door runs on Node, as a sidecar process.** Everything else — daemon, API, CLI,
@@ -167,9 +196,16 @@ Return to single-runtime Bun when **all** of these hold, re-verified by re-runni
    `new WebSocket(null, …)` constructor (defect 4).
 4. No segfault under the full matrix (defect 5).
 
-Criterion 2 is tracked by [#41061](https://github.com/oven-sh/bun/issues/41061) and is now
-the only thing standing between us and an h2-capable front door on Bun, apart from
-WebSockets. Defect 4 has been reported
+Criterion 2 is tracked by [#41061](https://github.com/oven-sh/bun/issues/41061).
+
+**These criteria are now necessary but not sufficient.** Defect 6 puts a ceiling above
+them: TLS fingerprint mirroring depends on a native OpenSSL module, and BoringSSL cannot
+host it at all, so that capability is permanently unavailable on Bun no matter what Bun
+fixes. Mockttp's maintainer makes the same argument from the other side on
+[mockttp#206](https://github.com/httptoolkit/mockttp/pull/206) — that the library's
+low-level TLS coupling makes a second runtime an ongoing maintenance cost he does not
+want. Treat the sidecar as the permanent design, not a holding pattern; revisit only if
+we ever stop needing impersonation *and* defects 3, 4 and 6 are all resolved. Defect 4 has been reported
 since 2023 ([#2955](https://github.com/oven-sh/bun/issues/2955),
 [#3613](https://github.com/oven-sh/bun/issues/3613),
 [#4568](https://github.com/oven-sh/bun/issues/4568),
