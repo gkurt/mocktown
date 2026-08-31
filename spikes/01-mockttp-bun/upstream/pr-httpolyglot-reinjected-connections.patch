@@ -1,19 +1,14 @@
 diff --git a/src/index.ts b/src/index.ts
-index a4a5ea3..66fa740 100644
+index a4a5ea3..4b3fb05 100644
 --- a/src/index.ts
 +++ b/src/index.ts
-@@ -103,7 +103,15 @@ class Server extends net.Server {
+@@ -103,7 +103,10 @@ class Server extends net.Server {
    ) {
      // We just act as a plain TCP server, accepting and examing
      // each connection, then passing it to the right subserver.
 -    super((socket) => this.connectionListener(socket));
-+    //
-+    // Note that this is registered as an explicit 'connection' listener, rather than
-+    // being passed to the net.Server constructor. The two are equivalent in Node (the
-+    // constructor argument is registered as a 'connection' listener) but only the
-+    // explicit form is portable: some runtimes handle the constructor callback
-+    // internally, so that re-emitting a socket with server.emit('connection', socket)
-+    // — as proxies do to re-inject a tunnelled socket after CONNECT — never reaches it.
++    // Registered explicitly rather than via super(), so that re-emitted sockets
++    // (server.emit('connection', socket), as proxies do after CONNECT) reach it too.
 +    super();
 +    this.on('connection', (socket) => this.connectionListener(socket));
  
