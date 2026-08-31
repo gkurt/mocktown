@@ -156,9 +156,30 @@ fingerprint. **A segfault cannot be caught.** So on Bun, enabling fingerprint mi
 doesn't lose a feature, it kills the process — and the existing guard, which handles old
 Node and unsupported platforms correctly, cannot help.
 
-Unlike defect 5 this reduces to a two-line repro, so it is worth filing against Bun. Not
-yet isolated: whether this is specific to `tls-impersonate` or affects native addons under
-Bun generally.
+**The cause, from the binary's own symbol table.** It is not an addon-loading bug and it is
+not fixable. `nm -u` on the prebuild shows three kinds of undefined symbol that the host
+process must supply:
+
+- 33 `napi_*` — fine, Bun implements N-API.
+- 22 OpenSSL — including `SSL_CTX_set_security_level` and `SSL_CTX_set_security_callback`.
+  BoringSSL **removed security levels**, so these do not exist there. This is the same root
+  cause as defect 2: one BoringSSL design decision, two symptoms.
+- `node::crypto::GetSSLCtx(v8::Local<v8::Context>, v8::Local<v8::Value>)`, plus
+  `v8::Isolate::GetCurrent()` and `GetCurrentContext()`. **This is the decisive one.** The
+  addon reaches into Node's *internal* C++ ABI to pull the `SSL_CTX*` out of a JS TLS
+  object, and into V8 directly. Bun runs JavaScriptCore and is not Node, so these symbols
+  cannot exist in it — no amount of node-compat work produces them.
+
+Node-gyp links addons with `-undefined dynamic_lookup`, so the symbols are unresolved at
+load time rather than at link time; macOS therefore does not fail the `dlopen` cleanly, and
+the process dies when the module's initialiser touches one. Verified as `dlopen`, not
+resolution: both runtimes pick the same `darwin-arm64` Mach-O via `node-gyp-build`, and a
+bare `process.dlopen` of that path crashes Bun while Node loads it with 13 working exports.
+
+So the earlier framing — "BoringSSL can't host it" — was true but understated. Even if Bun
+switched to OpenSSL tomorrow it still could not load this addon. The only arguable Bun bug
+here is the *failure mode*: crashing rather than throwing a resolvable-symbol error. That
+is worth reporting, but it is a robustness ask, not a path to making this work.
 
 ## Decision
 
