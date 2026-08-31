@@ -10,6 +10,9 @@ moat. Every phase ends with something usable headlessly.
 
 - [ ] Mockttp on Bun: MITM + h2 + WebSockets under Bun's node-compat. Fallback
   decision (Node sidecar) made here, not later.
+- [ ] oRPC on Bun: OpenAPIHandler + static serving on `Bun.serve`; validate the
+  contract→CLI and contract→MCP generation path (existing adapters vs. ~200-line
+  walk) with two real procedures.
 - [ ] emulate driven as child processes: start/stop/seed Stripe + GitHub, point real
   SDKs at them, confirm OAuth flow works end-to-end.
 - [ ] Container seal: network namespace + DNS override + baked CA; prove a raw-socket
