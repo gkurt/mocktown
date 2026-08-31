@@ -40,8 +40,10 @@ design decision changes, by editing the relevant `docs/design/*.md` block.
   container's failure to reach IPv6 proves nothing. Re-run in phase 3 on a host with IPv6.
 - **emulate exposes mock services to the LAN** (spike 03). Sandbox mode solves it by
   construction; host mode must warn, and a `--host` flag is worth upstreaming.
-- **Two Bun bugs and two upstream PRs are drafted but unfiled**, in
-  [spikes/01-mockttp-bun/upstream/](01-mockttp-bun/upstream/). The two Bun issues are the
+- **Two Bun bugs filed, two upstream PRs drafted but not opened**, in
+  [spikes/01-mockttp-bun/upstream/](01-mockttp-bun/upstream/).
+  [oven-sh/bun#41060](https://github.com/oven-sh/bun/issues/41060) (silent MITM hang) and
+  [#41061](https://github.com/oven-sh/bun/issues/41061) (silent h2 downgrade) are the
   revisit criteria for the Node-sidecar decision — until they're fixed, the sidecar is
   permanent. Both PRs are verified against fresh clones and their projects' own suites.
 - **`NODE_USE_ENV_PROXY=1` belongs in the launch wrapper** (spike 05): without it,

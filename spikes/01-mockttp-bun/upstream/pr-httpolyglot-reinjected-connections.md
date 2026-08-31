@@ -27,7 +27,7 @@ internally rather than registering it as a listener: `listeners('connection')` i
 and `emit('connection', socket)` never reaches `connectionListener`. Genuine inbound
 connections still work, so a polyglot server looks healthy right up until something
 re-injects a socket — at which point the socket is silently never read and the peer
-hangs with no error on either side. (Filed upstream at oven-sh/bun#TODO.)
+hangs with no error on either side. (Filed upstream at [oven-sh/bun#41060](https://github.com/oven-sh/bun/issues/41060).)
 
 This switches to the explicit form:
 

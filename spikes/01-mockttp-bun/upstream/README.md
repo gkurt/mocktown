@@ -1,18 +1,18 @@
 # Upstream reports — drafts
 
-Four drafts produced by [spike 01](../FINDINGS.md). **None has been filed.** Each needs a
-human to post it under their own account; the two PR descriptions have a `#TODO`
-placeholder for the Bun issue number, which only exists once the issues are filed.
+Four reports produced by [spike 01](../FINDINGS.md). **The two Bun issues are filed; the
+two PRs are not opened yet.**
 
-Suggested order: file the two Bun issues first, paste their numbers into the two PR
-descriptions, then open the PRs.
+| Draft | Target | Fixes | Status |
+|---|---|---|---|
+| [`bun-issue-1-net-server-emit-connection.md`](bun-issue-1-net-server-emit-connection.md) | oven-sh/bun | Defect 1 — the silent MITM hang | [#41060](https://github.com/oven-sh/bun/issues/41060) |
+| [`bun-issue-2-snicallback-suppresses-alpn.md`](bun-issue-2-snicallback-suppresses-alpn.md) | oven-sh/bun | Defect 3 — the silent h2 downgrade | [#41061](https://github.com/oven-sh/bun/issues/41061) |
+| [`pr-httpolyglot-reinjected-connections.md`](pr-httpolyglot-reinjected-connections.md) | httptoolkit/httpolyglot | Works around defect 1 | not opened |
+| [`pr-mockttp-seclevel-feature-detect.md`](pr-mockttp-seclevel-feature-detect.md) | httptoolkit/mockttp | Works around defect 2 | not opened |
 
-| Draft | Target | Fixes |
-|---|---|---|
-| [`bun-issue-1-net-server-emit-connection.md`](bun-issue-1-net-server-emit-connection.md) | oven-sh/bun | Defect 1 — the silent MITM hang |
-| [`bun-issue-2-snicallback-suppresses-alpn.md`](bun-issue-2-snicallback-suppresses-alpn.md) | oven-sh/bun | Defect 3 — the silent h2 downgrade |
-| [`pr-httpolyglot-reinjected-connections.md`](pr-httpolyglot-reinjected-connections.md) | httptoolkit/httpolyglot | Works around defect 1 |
-| [`pr-mockttp-seclevel-feature-detect.md`](pr-mockttp-seclevel-feature-detect.md) | httptoolkit/mockttp | Works around defect 2 |
+Both PR descriptions cite the filed issue numbers and are ready to open against a fork.
+The `.md` files are the drafts as filed, minus the scaffolding header — the issue bodies
+inline their repro rather than referencing it.
 
 The two Bun issues are the ones that matter to us: they are the
 [revisit criteria](../FINDINGS.md) for the Node-sidecar decision. Until they're fixed the

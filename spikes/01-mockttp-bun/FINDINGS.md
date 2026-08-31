@@ -144,14 +144,25 @@ distribution table.
 Return to single-runtime Bun when **all** of these hold, re-verified by re-running
 `spike.ts`:
 
-1. `net.Server` constructor listeners respond to `emit('connection')` (defect 1).
-2. `SNICallback` no longer suppresses ALPN (defect 3) — the h2 blocker.
+1. `net.Server` constructor listeners respond to `emit('connection')` (defect 1) —
+   filed as [oven-sh/bun#41060](https://github.com/oven-sh/bun/issues/41060).
+2. `SNICallback` no longer suppresses ALPN (defect 3) — the h2 blocker, and the one that
+   decides whether the sidecar is permanent. Filed as
+   [oven-sh/bun#41061](https://github.com/oven-sh/bun/issues/41061).
 3. Bun's builtin `ws` is overridable, or gains `PerMessageDeflate`/`extension` and the
    `new WebSocket(null, …)` constructor (defect 4).
 4. No segfault under the full matrix (defect 5).
 
-Defects 1 and 2 are worth upstreaming regardless: 1 as a PR to `@httptoolkit/httpolyglot`,
-2 as a PR to Mockttp. Defects 3, 4 and 5 are Bun bug reports.
+Criteria 1 and 2 are tracked upstream by the two issues above. Defect 4 has been reported
+since 2023 ([#2955](https://github.com/oven-sh/bun/issues/2955),
+[#3613](https://github.com/oven-sh/bun/issues/3613),
+[#4568](https://github.com/oven-sh/bun/issues/4568),
+[#4529](https://github.com/oven-sh/bun/issues/4529)) and was not re-reported. Defect 5 is
+not filed: all we have is "test 5 kills the process when run after tests 1–4", which is a
+symptom, not a reproduction — it needs reducing first.
+
+Defects 1 and 2 are also fixable from the library side, and both fixes are drafted as PRs
+in [`upstream/`](upstream/), verified against fresh clones. Neither is opened yet.
 
 ## Not tested here
 

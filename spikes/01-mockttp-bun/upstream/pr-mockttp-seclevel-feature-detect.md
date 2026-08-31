@@ -68,7 +68,7 @@ For context on where this came from: I was evaluating whether mockttp could run 
 Bun as the interception layer for a project of mine. It can't yet, but for a reason
 that's Bun's to fix and not yours — setting `SNICallback` there suppresses ALPN
 entirely, so an h2-capable proxy silently downgrades every client to HTTP/1.1. Filed at
-oven-sh/bun#TODO.
+[oven-sh/bun#41061](https://github.com/oven-sh/bun/issues/41061).
 
 This change and the companion httpolyglot one are the two things that *are* fixable
 from the library side, and both are no-ops on Node. No expectation that you support Bun
