@@ -128,7 +128,10 @@ Two further consequences, both deliberate:
     it exists to keep honest.
   - **`NODE_EXTRA_CA_CERTS` takes one file, and an app behind stable names has to trust two
     issuers** — the project CA for the front door and portless's for the names. So a combined
-    bundle is written per project and every CA variable points at it.
+    bundle is written per project and every CA variable points at it. A browser reads none of
+    those variables, so the same bundle is also emitted as a list of SPKI fingerprints
+    (`MOCKTOWN_CA_SPKI`) — every certificate in it, because a list naming one issuer leaves
+    the other throwing certificate errors in a window that looks correctly configured.
   - **Off by default and never load-bearing.** portless binds 443 with sudo, edits
     `/etc/hosts` and installs a CA in the system trust store; that is a person's decision,
     not a config default's. Every failure degrades to loopback URLs with the reason attached.

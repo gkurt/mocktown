@@ -88,13 +88,22 @@ export function findBrowser(explicit?: string): string | null {
   return (CANDIDATES[platform()] ?? CANDIDATES.linux!).find((path) => existsSync(path)) ?? null;
 }
 
+const PEM_CERTIFICATE = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+
 /**
- * Base64 of the SHA-256 of the CA's SubjectPublicKeyInfo — the identifier Chrome matches
- * against every certificate in a chain.
+ * Base64 of the SHA-256 of each certificate's SubjectPublicKeyInfo — the identifier Chrome
+ * matches against every certificate in a chain, and the exact syntax of
+ * `--ignore-certificate-errors-spki-list`, which takes a comma-separated list.
+ *
+ * Every block in the PEM, not the first: under portless the project's CA arrives as a bundle
+ * with the stable-name issuer beside it, and a list naming only one of them leaves the other
+ * throwing certificate errors in a window that looks correctly configured.
  */
-export function spkiFingerprint(caCert: string): string {
-  const spki = new X509Certificate(caCert).publicKey.export({ format: 'der', type: 'spki' });
-  return createHash('sha256').update(spki).digest('base64');
+export function spkiFingerprints(pem: string): string[] {
+  return (pem.match(PEM_CERTIFICATE) ?? []).map((block) => {
+    const spki = new X509Certificate(block).publicKey.export({ format: 'der', type: 'spki' });
+    return createHash('sha256').update(spki).digest('base64');
+  });
 }
 
 /**
@@ -121,7 +130,7 @@ const QUIET_FLAGS = [
 ];
 
 export function browserArgs(options: BrowserLaunchOptions): { args: string[]; spkiHash: string } {
-  const spkiHash = spkiFingerprint(options.caCert);
+  const spkiHash = spkiFingerprints(options.caCert).join(',');
   return {
     spkiHash,
     args: [

@@ -10,6 +10,8 @@
  * door while appearing correctly configured.
  */
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { spkiFingerprints } from '#src/capture/browser.ts';
 
 export interface LaunchEnvOptions {
   proxyUrl: string;
@@ -122,6 +124,7 @@ export function isLoopbackName(host: string): boolean {
 export function captureEnv(options: LaunchEnvOptions): Record<string, string> {
   const { proxyUrl, caCertPath } = options;
   const noProxy = (options.noProxy ?? planNoProxy().entries).join(',');
+  const spki = spkiOf(caCertPath);
 
   return {
     HTTP_PROXY: proxyUrl,
@@ -146,7 +149,33 @@ export function captureEnv(options: LaunchEnvOptions): Record<string, string> {
 
     MOCKTOWN_PROXY: proxyUrl,
     MOCKTOWN_CA: caCertPath,
+
+    // A browser reads none of the CA variables above: Chrome's own verifier is the only one
+    // that matters to it, and the narrow way to satisfy that is to name the key rather than
+    // to switch verification off — `--ignore-https-errors` and friends accept *any*
+    // certificate, which is the escape this product exists to close. So a driver that
+    // launches its own Chromium (agent-browser, Playwright, Puppeteer) gets the fingerprint
+    // it has to pass through, and `agent-browser` gets the flag ready to use.
+    //
+    // `AGENT_BROWSER_ARGS` is a whole list, not an addition to one: agent-browser's own
+    // `--args` replaces it rather than merging, so a run needing further switches passes
+    // this one alongside them.
+    ...(spki ? { MOCKTOWN_CA_SPKI: spki, AGENT_BROWSER_ARGS: `--ignore-certificate-errors-spki-list=${spki}` } : {}),
   };
+}
+
+/**
+ * The CA's public keys in the form Chrome's flag wants, or nothing when the file cannot be
+ * read. Best-effort rather than fatal: every other variable here still points a recorded
+ * process at the front door, and a browser knob is not worth failing a launch over.
+ */
+function spkiOf(caCertPath: string): string | null {
+  try {
+    const hashes = spkiFingerprints(readFileSync(caCertPath, 'utf8'));
+    return hashes.length > 0 ? hashes.join(',') : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

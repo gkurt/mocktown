@@ -36,3 +36,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # spike scratch output
 spikes/**/out
 spikes/**/*.sqlite
+
+# test scratch roots — each suite runs against its own tests/.tmp-<name>
+**/tests/.tmp-*

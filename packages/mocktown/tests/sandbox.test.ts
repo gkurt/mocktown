@@ -23,7 +23,8 @@ process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 const { addressIn } = await import('#src/sandbox/sandbox.ts');
 const { imageTag, parsePortMapping, relayCommand, sandboxDockerfile } = await import('#src/sandbox/images.ts');
 const { renderDevcontainer } = await import('#src/sandbox/devcontainer.ts');
-const { browserArgs, launchBrowser, spkiFingerprint } = await import('#src/capture/browser.ts');
+const { browserArgs, launchBrowser, spkiFingerprints } = await import('#src/capture/browser.ts');
+const { captureEnv } = await import('#src/capture/launch.ts');
 const { configHash, stalenessOf } = await import('#src/seal/stamp.ts');
 const { ContainerEngine } = await import('#src/sandbox/engine.ts');
 const { ProjectRuntime } = await import('#src/daemon/runtime.ts');
@@ -137,13 +138,45 @@ describe('the launched browser', () => {
   test('trusts one key for one window, not the machine', async () => {
     const ca = await ensureProjectCa('browser-test');
     const { args, spkiHash } = browserArgs({ proxyUrl: 'http://127.0.0.1:4400', caCert: ca.cert, profileDir: '/tmp/profile' });
-    expect(spkiHash).toBe(spkiFingerprint(ca.cert));
+    expect(spkiHash).toBe(spkiFingerprints(ca.cert).join(','));
     // Narrower than "trusted in that profile": no trust is written to disk at all, and a
     // stray HTTPS error in this window is still an error.
     expect(args).toContain(`--ignore-certificate-errors-spki-list=${spkiHash}`);
     expect(args.some((arg) => arg.startsWith('--user-data-dir='))).toBe(true);
     expect(args).toContain('--proxy-server=http://127.0.0.1:4400');
     expect(args).not.toContain('--ignore-certificate-errors');
+  });
+
+  test('hands a driver that launches its own Chromium the same one key', async () => {
+    // agent-browser, Playwright and Puppeteer all bring their own browser, so they never see
+    // the window `browser launch` opens — but they do inherit the recorded env. Chrome reads
+    // none of the CA variables in there, so without this the proxy works and every navigation
+    // dies on ERR_CERT_AUTHORITY_INVALID.
+    const ca = await ensureProjectCa('browser-test');
+    const env = captureEnv({ proxyUrl: 'http://127.0.0.1:4400', caCertPath: ca.certPath });
+    const { spkiHash } = browserArgs({ proxyUrl: 'http://127.0.0.1:4400', caCert: ca.cert, profileDir: '/tmp/profile' });
+
+    expect(env.MOCKTOWN_CA_SPKI).toBe(spkiHash);
+    expect(env.AGENT_BROWSER_ARGS).toBe(`--ignore-certificate-errors-spki-list=${spkiHash}`);
+    // Naming the key, never switching verification off: `--ignore-certificate-errors` and
+    // agent-browser's `--ignore-https-errors` accept any certificate at all.
+    expect(env.AGENT_BROWSER_ARGS).not.toContain('--ignore-certificate-errors=');
+    expect(env.AGENT_BROWSER_IGNORE_HTTPS_ERRORS).toBeUndefined();
+
+    // A CA that is not there yet is not worth failing a launch over: every other variable
+    // still points the recorded process at the front door.
+    expect(captureEnv({ proxyUrl: 'http://127.0.0.1:4400', caCertPath: '/nope/ca.pem' }).AGENT_BROWSER_ARGS).toBeUndefined();
+  });
+
+  test('names every key in a bundle, not just the first', async () => {
+    // Under portless the CA arrives as a bundle with the stable-name issuer beside the
+    // project's. A list naming one of them leaves the other throwing certificate errors in a
+    // window that looks correctly configured, which is the worst kind of half-working.
+    const ca = await ensureProjectCa('browser-test');
+    const other = await ensureProjectCa('browser-test-two');
+    const bundle = spkiFingerprints(`${ca.cert}\n${other.cert}`);
+    expect(bundle).toEqual([...spkiFingerprints(ca.cert), ...spkiFingerprints(other.cert)]);
+    expect(new Set(bundle).size).toBe(2);
   });
 
   test('does not make the requests it would otherwise have to filter', async () => {

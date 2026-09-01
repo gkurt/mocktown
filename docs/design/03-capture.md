@@ -95,7 +95,8 @@ The escalation ladder — each rung covers the previous rung's failure case:
    nothing else, so a stray HTTPS error in that window is still an error and **no trust is
    written to disk**. *Rejected:* editing the profile's NSS database — more
    platform-specific code, and it leaves trust behind after the window closes.
-   **`--debug-port` publishes a CDP endpoint** so a driver (Playwright, Puppeteer) can
+   **`--debug-port` publishes a CDP endpoint** so a driver (agent-browser, Playwright,
+   Puppeteer) can
    attach to that window instead of launching an unrecorded one of its own; `0` asks Chrome
    for an ephemeral port and the resolved `webSocketDebuggerUrl` comes back on the
    procedure. It is **opt-in, because the endpoint is a capability** — anything that reaches
@@ -105,6 +106,20 @@ The escalation ladder — each rung covers the previous rung's failure case:
    `/json/version`: that is the only way to learn an ephemeral port, and the file is the
    readiness signal as well as the answer. It is deleted before launch, because a stale file
    from the last window answers the wrong port with total confidence.
+   **A driver that brings its own Chromium is rung 1, not rung 2.** `agent-browser`,
+   Playwright and Puppeteer launch a browser of their own, so they never see this window —
+   but run under `mocktown record --`, or with `.env.mocktown` loaded, and that browser is a
+   recorded child process like any other. Verified 2026-09-01 against agent-browser 0.36:
+   it takes the proxy from `HTTP_PROXY`/`NO_PROXY` unaided, and every navigation then dies
+   on `ERR_CERT_AUTHORITY_INVALID`, because Chrome's verifier reads none of the CA variables
+   the wrapper sets — `NODE_EXTRA_CA_CERTS` and its siblings are for runtimes, not browsers.
+   So `captureEnv` also emits the CA's SPKI fingerprint as `MOCKTOWN_CA_SPKI`, and
+   `AGENT_BROWSER_ARGS` with the `--ignore-certificate-errors-spki-list` flag already
+   assembled. *Rejected:* `--ignore-https-errors`, which every such driver offers and which
+   accepts **any** certificate — it would turn the one signal that says the MITM is working
+   into silence, and hide a pinned endpoint that should be filed as `pinned-client`. The
+   fingerprint covers every certificate in the PEM rather than the first, because under
+   portless the CA arrives as a bundle with the stable-name issuer beside it.
    *Rejected:* **CDP as the capture mechanism** (the `Fetch`/`Network` domains in place of
    the proxy). It would be a second capture implementation feeding a second path into the
    corpus, and an interception that fails open is a silent escape with no deny wall behind

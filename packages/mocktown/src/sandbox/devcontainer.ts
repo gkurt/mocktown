@@ -134,7 +134,12 @@ export function renderDevcontainer(inputs: DevcontainerInputs): { files: Record<
         DENO_CERT: CA_PATH_IN_IMAGE,
         MOCKTOWN_SANDBOX: '1',
         ...(inputs.browser
-          ? { CHROME_PATH: CHROMIUM_PATH, PUPPETEER_EXECUTABLE_PATH: CHROMIUM_PATH, PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: CHROMIUM_PATH }
+          ? {
+              CHROME_PATH: CHROMIUM_PATH,
+              PUPPETEER_EXECUTABLE_PATH: CHROMIUM_PATH,
+              PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: CHROMIUM_PATH,
+              AGENT_BROWSER_EXECUTABLE_PATH: CHROMIUM_PATH,
+            }
           : {}),
       },
     },

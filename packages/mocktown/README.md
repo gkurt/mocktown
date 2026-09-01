@@ -96,18 +96,55 @@ stays direct while third-party scripts transit the front door.
 
 ### Driving it
 
-`--debug-port` publishes a CDP endpoint so Playwright or Puppeteer can attach to that
-window and keep its capture:
+`--debug-port` publishes a CDP endpoint so a driver — `agent-browser`, Playwright,
+Puppeteer — can attach to that window and keep its capture:
 
 ```bash
 mocktown browser launch --debug-port 0 --json
 ```
 
+```bash
+agent-browser connect ws://127.0.0.1:<port>/devtools/browser/<id>
+```
+
 `0` asks for an ephemeral port; the response carries the resolved
-`debug.webSocketDebuggerUrl` for `chromium.connectOverCDP()`. It is off by default because
-the endpoint is a **capability**: anything that reaches it drives the browser, reads the
-profile's cookies and navigates it anywhere, with no further authentication. Chrome's only
-defence is that it binds to loopback.
+`debug.webSocketDebuggerUrl`, which is also what `chromium.connectOverCDP()` takes. It is
+off by default because the endpoint is a **capability**: anything that reaches it drives
+the browser, reads the profile's cookies and navigates it anywhere, with no further
+authentication. Chrome's only defence is that it binds to loopback.
+
+### Driving a browser of its own
+
+A CLI browser that brings its own Chromium is rung 1, not rung 2: run it with the recorded
+env and it transits the front door like any other child process. `agent-browser` reads
+`HTTP_PROXY` and `NO_PROXY` on its own; what it cannot work out is the certificate, because
+Chrome's verifier reads none of the CA variables. So the recorded env also carries the
+project CA's public key in the form Chrome's own flag takes:
+
+```
+MOCKTOWN_CA_SPKI=<base64 sha256 of the CA's SubjectPublicKeyInfo>
+AGENT_BROWSER_ARGS=--ignore-certificate-errors-spki-list=<the same key>
+```
+
+That names one key for that process. **Never substitute `--ignore-https-errors`**: it
+accepts any certificate at all, and a certificate error in a recorded run is information —
+the wrong project's CA, or a pinned endpoint that belongs in an issue.
+
+A flow is usually more than one command, so open the session first and load the env:
+
+```bash
+mocktown record start --label checkout
+mocktown env write
+set -a && . ./.env.mocktown && set +a
+agent-browser open https://app.example.com/checkout
+agent-browser snapshot -i
+mocktown record stop
+```
+
+The **first** agent-browser command launches the browser and fixes its proxy and its trust
+for every command after it — `agent-browser close` before a differently configured run, or
+you drive the previous one and record nothing. `mocktown skills get --name record-flow` is
+this page written for an agent.
 
 ### What is not recorded
 

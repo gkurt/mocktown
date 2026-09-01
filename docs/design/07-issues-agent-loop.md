@@ -29,8 +29,8 @@ by an agent that has read nothing but the issue and the files it links.**
    `list_issues`, `get_issue`, `resolve_issue`, `query_recordings`,
    `get_endpoint_recipe`, `run_seal`, `restart_provider`. This is the primary surface.
 2. **Skills / prompt packs**: versioned prompt+house-rules bundles shipped with
-   Mocktown for the three recurring jobs — *generate mock from corpus*, *fix issue
-   backlog*, *apply redirect recipes*. House rules live here (never invent auth-shaped
+   Mocktown for the recurring jobs — *record a flow*, *generate mock from corpus*, *fix
+   issue backlog*, *apply redirect recipes*, *write a panel*. House rules live here (never invent auth-shaped
    fields; prefer widening matchers over duplicating routes; every new mock adds its
    EKB entry; state fidelity over verbatim replay; seed data per auth profile with
    `default` + `empty-org` minimum; prefer profile variation over knob flips for

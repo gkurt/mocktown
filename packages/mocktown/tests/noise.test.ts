@@ -34,6 +34,11 @@ describe('what the default list drops', () => {
       'https://www.gstatic.com/og/_/js/k=og.qtm.en_US',
       'https://www.googleapis.com/chromewebstore/v1.1/items/verify',
       'https://play.google.com/log',
+      // A headless Chromium probes for a captive portal before it will load anything, and on
+      // a run that navigated nowhere else this was the entire corpus.
+      'http://connectivitycheck.gstatic.com/generate_204',
+      'http://clients3.google.com/generate_204',
+      'http://www.gstatic.com/generate_204',
     ]) {
       expect(ignored(url)).toBe(true);
     }

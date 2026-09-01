@@ -95,8 +95,8 @@ house rules ([02-architecture.md](02-architecture.md)).
 - [x] Sealed and record modes over one boundary, with the front door left on the host and
   reached through a relay, so a sandboxed request lands in the same corpus, issue queue and
   providers as a recorded child process.
-- [x] In-sandbox Chromium, reachable by Playwright and Puppeteer through the executable-path
-  variables they already read.
+- [x] In-sandbox Chromium, reachable by Playwright, Puppeteer and agent-browser through the
+  executable-path variables they already read.
 - [x] Seal certification + `mocktown seal verify` for CI
   ([05-redirection.md](05-redirection.md)), reporting `unverifiable` rather than a false
   pass when the instrument is missing.

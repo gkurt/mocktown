@@ -64,6 +64,10 @@ export const DEFAULT_NOISE: NoisePattern[] = [
   { host: 'optimizationguide-pa.googleapis.com', why: "Chrome's optimization hints and on-device models" },
   { host: 'content-autofill.googleapis.com', why: "Chrome's autofill server" },
   { host: 'android.clients.google.com', paths: ['/c2dm/', '/checkin'], why: 'Chrome push registration (GCM)' },
+  // The captive-portal probe, observed on a headless Chromium driven by agent-browser — where
+  // it was the only thing the session recorded. It rotates across hosts; the two it shares
+  // with real content are path-scoped in the block below.
+  { host: 'connectivitycheck.gstatic.com', why: "Chrome's captive-portal probe" },
 
   // ── Shared hostnames: path-scoped, because the app uses these too ──────────────────────
   { host: 'www.google.com', paths: ['/async/', '/complete/search', '/gen_204'], why: 'new tab page and omnibox suggestions' },
@@ -73,6 +77,9 @@ export const DEFAULT_NOISE: NoisePattern[] = [
     why: "Chrome's sign-in probe — a real OAuth flow on this host is still recorded",
   },
   { host: 'www.gstatic.com', paths: ['/og/', '/chrome/', '/ohttp_gateway/', '/images/branding/'], why: 'Chrome UI assets' },
+  // The two hosts the captive-portal probe shares with real content, scoped to its own path.
+  { host: 'www.gstatic.com', paths: ['/generate_204'], why: "Chrome's captive-portal probe" },
+  { host: 'clients3.google.com', paths: ['/generate_204'], why: "Chrome's captive-portal probe" },
   { host: 'play.google.com', paths: ['/log'], why: 'Chrome telemetry' },
 
   // ── Other clients, for the same reason ─────────────────────────────────────────────────
