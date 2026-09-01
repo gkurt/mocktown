@@ -609,12 +609,13 @@ export const router = os.router({
         });
       }
       const ca = await ensureProjectCa(runtime.name);
-      const launched = launchBrowser({
+      const launched = await launchBrowser({
         proxyUrl: `http://127.0.0.1:${frontDoor.port}`,
         caCert: ca.cert,
         profileDir: projectPaths(runtime.name).browserProfile,
         url: input.url,
         executable: input.executable,
+        debugPort: input.debugPort,
       });
       return {
         project: runtime.name,

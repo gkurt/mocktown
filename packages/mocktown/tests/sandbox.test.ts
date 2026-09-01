@@ -13,7 +13,7 @@
  * `seal verify` stamps a pass and refuses one when a flow escapes.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dir, '.tmp-sandbox');
@@ -23,7 +23,7 @@ process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 const { addressIn } = await import('#src/sandbox/sandbox.ts');
 const { imageTag, parsePortMapping, relayCommand, sandboxDockerfile } = await import('#src/sandbox/images.ts');
 const { renderDevcontainer } = await import('#src/sandbox/devcontainer.ts');
-const { browserArgs, spkiFingerprint } = await import('#src/capture/browser.ts');
+const { browserArgs, launchBrowser, spkiFingerprint } = await import('#src/capture/browser.ts');
 const { configHash, stalenessOf } = await import('#src/seal/stamp.ts');
 const { ContainerEngine } = await import('#src/sandbox/engine.ts');
 const { ProjectRuntime } = await import('#src/daemon/runtime.ts');
@@ -144,6 +144,70 @@ describe('the launched browser', () => {
     expect(args.some((arg) => arg.startsWith('--user-data-dir='))).toBe(true);
     expect(args).toContain('--proxy-server=http://127.0.0.1:4400');
     expect(args).not.toContain('--ignore-certificate-errors');
+  });
+
+  test('opens no debug endpoint unless one is asked for', async () => {
+    const ca = await ensureProjectCa('browser-test');
+    const base = { proxyUrl: 'http://127.0.0.1:4400', caCert: ca.cert, profileDir: '/tmp/profile' };
+    // The endpoint is a capability, so its absence is the property worth pinning: a window
+    // opened for attended browsing must not be drivable by whatever else is on loopback.
+    expect(browserArgs(base).args.some((arg) => arg.startsWith('--remote-debugging-port'))).toBe(false);
+    expect(browserArgs({ ...base, debugPort: 0 }).args).toContain('--remote-debugging-port=0');
+    expect(browserArgs({ ...base, debugPort: 9222 }).args).toContain('--remote-debugging-port=9222');
+  });
+
+  /**
+   * A stub browser, because the property under test is ours: Chrome publishes the live port
+   * in `DevToolsActivePort` and we have to read *this* launch's, not the last one's. A stale
+   * file is the realistic failure — the profile dir is reused across launches by design.
+   */
+  test('reports this launch\u2019s CDP endpoint, never a stale one', async () => {
+    const profileDir = join(root, 'cdp-profile');
+    const stub = join(root, 'bin', 'stub-chrome');
+    mkdirSync(join(root, 'bin'), { recursive: true });
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(join(profileDir, 'DevToolsActivePort'), '9222\n/devtools/browser/stale\n');
+    writeFileSync(
+      stub,
+      `#!/usr/bin/env bun
+import { writeFileSync } from 'node:fs';
+const dir = process.argv.slice(2).find((a) => a.startsWith('--user-data-dir=')).split('=')[1];
+await Bun.sleep(50);
+writeFileSync(\`\${dir}/DevToolsActivePort\`, '45999\\n/devtools/browser/fresh\\n');
+await Bun.sleep(30_000);
+`,
+    );
+    chmodSync(stub, 0o755);
+
+    const ca = await ensureProjectCa('browser-test');
+    const launch = await launchBrowser({
+      proxyUrl: 'http://127.0.0.1:4400',
+      caCert: ca.cert,
+      profileDir,
+      debugPort: 0,
+      executable: stub,
+    });
+    expect(launch.debug).toEqual({ port: 45999, webSocketDebuggerUrl: 'ws://127.0.0.1:45999/devtools/browser/fresh' });
+    if (launch.pid) process.kill(launch.pid);
+  });
+
+  test('says why when the browser dies instead of publishing an endpoint', async () => {
+    const stub = join(root, 'bin', 'exits-chrome');
+    mkdirSync(join(root, 'bin'), { recursive: true });
+    writeFileSync(stub, '#!/bin/sh\nexit 3\n');
+    chmodSync(stub, 0o755);
+
+    const ca = await ensureProjectCa('browser-test');
+    const attempt = launchBrowser({
+      proxyUrl: 'http://127.0.0.1:4400',
+      caCert: ca.cert,
+      profileDir: join(root, 'dead-profile'),
+      debugPort: 0,
+      executable: stub,
+    });
+    // The common cause is a window already open on this profile, so the error names it
+    // rather than reporting a bare timeout fifteen seconds later.
+    expect(attempt).rejects.toThrow(/exited \(3\).*already open/s);
   });
 });
 

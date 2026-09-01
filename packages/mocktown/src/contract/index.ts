@@ -581,6 +581,13 @@ export const contract = {
           ...ProjectInput,
           url: z.string().optional(),
           executable: z.string().optional().describe('Explicit browser binary, for one we do not know about'),
+          debugPort: z
+            .number()
+            .int()
+            .min(0)
+            .max(65535)
+            .optional()
+            .describe('Expose CDP so a driver can attach to this window; 0 for an ephemeral port'),
         }),
       )
       .output(
@@ -590,6 +597,10 @@ export const contract = {
           args: z.array(z.string()),
           spkiHash: z.string().describe('The one public key this window accepts beyond the system store'),
           pid: z.number().int().nullable(),
+          debug: z
+            .object({ port: z.number().int(), webSocketDebuggerUrl: z.string() })
+            .nullable()
+            .describe('The CDP endpoint, when one was asked for. A capability: it drives this browser without further auth'),
           note: z.string().describe('The host-browser gap: attended use does not carry the sandbox guarantee'),
         }),
       ),

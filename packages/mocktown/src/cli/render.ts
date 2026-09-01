@@ -357,6 +357,13 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `launched ${r.executable}${r.pid ? ` (pid ${r.pid})` : ''}`,
     `profile: ${r.profileDir}`,
     `trusting one key: ${r.spkiHash}`,
+    ...(r.debug
+      ? [
+          '',
+          `cdp: ${r.debug.webSocketDebuggerUrl}`,
+          '     anything that reaches this endpoint drives the browser — loopback is the only guard',
+        ]
+      : []),
     '',
     `note: ${r.note}`,
   ],

@@ -74,6 +74,67 @@ escaping never look alike.
 > too: under portless the TLD has to bypass, so a `.localhost` upstream is unrecordable in
 > that mode.
 
+## Recording browser traffic
+
+`mocktown record -- <cmd>` covers server-side SDKs by injecting proxy variables into a
+child process. For the traffic a *page* makes, rung 2 of the ladder launches the browser
+itself:
+
+```bash
+mocktown browser launch --url http://localhost:3000
+```
+
+The front door has to be running first — `record start` to capture what the browser does,
+`serve start` to browse against mocks. **No system extension, and nothing added to the
+system trust store.** The window gets a profile the project owns
+(`--user-data-dir`), and the CA is passed as `--ignore-certificate-errors-spki-list`,
+which names *one* public key for *this launch*: a stray HTTPS error in that window is
+still an error, and no trust is written to disk. Chromium-family only.
+
+Loopback is in Chrome's default proxy bypass, which is what you want — your dev server
+stays direct while third-party scripts transit the front door.
+
+### Driving it
+
+`--debug-port` publishes a CDP endpoint so Playwright or Puppeteer can attach to that
+window and keep its capture:
+
+```bash
+mocktown browser launch --debug-port 0 --json
+```
+
+`0` asks for an ephemeral port; the response carries the resolved
+`debug.webSocketDebuggerUrl` for `chromium.connectOverCDP()`. It is off by default because
+the endpoint is a **capability**: anything that reaches it drives the browser, reads the
+profile's cookies and navigates it anywhere, with no further authentication. Chrome's only
+defence is that it binds to loopback.
+
+### What still escapes this window
+
+The note on every launch says the traffic is captured *cooperatively and best-effort*, and
+that is meant literally — a flag on a process we asked nicely, not a boundary. Specifically:
+
+- **Loopback.** By design, per above — but it means a third-party service reached under a
+  `.localhost` name records nothing while looking perfectly wired up, the same trap the
+  `NO_PROXY` note describes. Nothing at loopback is captured.
+- **The HTTP cache and service workers.** A response served from disk cache or Cache
+  Storage never touches the network, so it never reaches the front door. The profile
+  **persists across launches**, so a second `browser launch` records less than the first.
+  Delete the profile dir for a cold run, or drive `Network.setCacheDisabled` over CDP.
+- **Anything that is not HTTP.** WebRTC's ICE/STUN/TURN is UDP and goes direct; an HTTP
+  proxy cannot carry it.
+- **Managed-Chrome proxy policy**, which takes precedence over command-line switches. On a
+  corporate-managed machine the flag can be silently overridden.
+- **Pinned and HSTS-preloaded endpoints**, which refuse the MITM certificate. Detected and
+  filed as a `pinned-client` issue, out of scope by design.
+- **The user.** It is an ordinary browser window with a normal route to the internet: a new
+  browser process it spawns, an extension installed into that persistent profile, or the
+  proxy settings edited in that window all reach the real internet.
+
+Only the sandbox closes these, because inside it there is no route out to close. Never
+present a launched browser as carrying the seal's guarantee. For traffic you can only
+observe with another tool, `mocktown import --path <file.har>` is rung 4.
+
 ## The seal
 
 Everything above is cooperative: an SDK that ignores proxy variables reaches the real API

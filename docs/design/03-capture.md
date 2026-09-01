@@ -87,7 +87,7 @@ The escalation ladder — each rung covers the previous rung's failure case:
    reported by name instead of hidden. The front door recognises the other side of the trade:
    a denied request for a loopback name is filed as the app's own service, with `noProxy` as
    the fix, not as an undeclared third-party dependency.
-2. **Launched browser** — for web-app client traffic: `mocktown browser` starts a
+2. **Launched browser** — for web-app client traffic: `mocktown browser launch` starts a
    Chromium-family browser on a fresh profile with `--proxy-server` set. *Trust is
    narrower than "in that profile"* (phase 3): the CA is passed as an
    `--ignore-certificate-errors-spki-list` entry, which names one public key and applies
@@ -95,6 +95,32 @@ The escalation ladder — each rung covers the previous rung's failure case:
    nothing else, so a stray HTTPS error in that window is still an error and **no trust is
    written to disk**. *Rejected:* editing the profile's NSS database — more
    platform-specific code, and it leaves trust behind after the window closes.
+   **`--debug-port` publishes a CDP endpoint** so a driver (Playwright, Puppeteer) can
+   attach to that window instead of launching an unrecorded one of its own; `0` asks Chrome
+   for an ephemeral port and the resolved `webSocketDebuggerUrl` comes back on the
+   procedure. It is **opt-in, because the endpoint is a capability** — anything that reaches
+   it drives the browser, reads the profile's cookies and navigates it anywhere with no
+   further authentication, and Chrome's only defence is that it binds to loopback. The port
+   is read from the profile's `DevToolsActivePort` file rather than by polling
+   `/json/version`: that is the only way to learn an ephemeral port, and the file is the
+   readiness signal as well as the answer. It is deleted before launch, because a stale file
+   from the last window answers the wrong port with total confidence.
+   *Rejected:* **CDP as the capture mechanism** (the `Fetch`/`Network` domains in place of
+   the proxy). It would be a second capture implementation feeding a second path into the
+   corpus, and an interception that fails open is a silent escape with no deny wall behind
+   it — the failure this product exists to prevent ([02-architecture.md](02-architecture.md)).
+   `Network.getResponseBody` is also not reliably available for every response, and it sees
+   only the one browser where the proxy covers browser, SDK and sandbox uniformly.
+   **What this rung does not capture**, since "cooperative and best-effort" is meant
+   literally — it is a flag on a process we asked nicely, not a boundary: loopback (bypassed
+   by design, so a `.localhost` third party records nothing); responses served from the HTTP
+   cache or a service worker, which never touch the network at all — and the profile dir
+   persists across launches, so a second launch records less than the first; non-HTTP
+   protocols, WebRTC's UDP ICE/STUN/TURN above all; managed-Chrome proxy *policy*, which
+   takes precedence over command-line switches; pinned and HSTS-preloaded endpoints, which
+   refuse the MITM cert and are filed as `pinned-client`; and the human, who can install an
+   extension into that persistent profile or edit its proxy settings. Rung 3 is the answer
+   to all of them, because inside the sandbox there is no route out to close.
 3. **In-sandbox record mode** — for code that ignores proxy env vars: inside the
    namespace there is no "direct"; everything transits the front door by construction.
 4. **HAR import** — `mocktown import <file.har>`: the escape hatch for traffic only
