@@ -16,6 +16,7 @@ import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 import { daemonStateFile, globalConfigDir } from '#src/config/paths.ts';
 import { loadGlobalConfig } from '#src/config/project.ts';
 import { contract } from '#src/contract/index.ts';
+import { contractSignature } from '#src/contract/walk.ts';
 import { router } from '#src/daemon/router.ts';
 import { runtimeFor } from '#src/daemon/runtime.ts';
 import { DriftScheduler } from '#src/drift/scheduler.ts';
@@ -95,9 +96,16 @@ export interface DaemonOptions {
 /** Written where clients look for it, `0600`: it is a capability, not a config value. */
 function writeDaemonState(port: number, token: string): void {
   mkdirSync(globalConfigDir(), { recursive: true });
-  writeFileSync(daemonStateFile(), JSON.stringify({ port, token, pid: process.pid, startedAt: new Date().toISOString() }, null, 2), {
-    mode: 0o600,
-  });
+  // `contract` is what lets a client detect it is older or newer than this process without
+  // a round trip — the state file is already read before every command (contract/walk.ts).
+  const state = {
+    port,
+    token,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    contract: contractSignature(contract),
+  };
+  writeFileSync(daemonStateFile(), JSON.stringify(state, null, 2), { mode: 0o600 });
 }
 
 export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHandle> {
@@ -173,7 +181,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
 }
 
 /** How a client finds a running daemon. Returns null when none has been started. */
-export function readDaemonState(): { port: number; token: string; pid: number } | null {
+export function readDaemonState(): { port: number; token: string; pid: number; contract?: string } | null {
   const file = daemonStateFile();
   if (!existsSync(file)) return null;
   try {

@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createORPCClient } from '@orpc/client';
 import { OpenAPILink } from '@orpc/openapi-client/fetch';
 import { contract } from '#src/contract/index.ts';
+import { contractSignature } from '#src/contract/walk.ts';
 import { readDaemonState } from '#src/daemon/server.ts';
 
 const daemonEntry = join(dirname(fileURLToPath(import.meta.url)), '..', 'daemon', 'index.ts');
@@ -40,6 +41,17 @@ export async function ensureDaemon(): Promise<DaemonConnection> {
 
   const existing = readDaemonState();
   if (existing && (await isAlive(existing.port))) {
+    // The daemon outlives the shell by design, so the one answering may predate the contract
+    // this client was built from. Saying so beats letting a surface read a field the daemon
+    // never learned to send — that surfaces as an unattributable TypeError.
+    const expected = contractSignature(contract);
+    if (existing.contract !== expected) {
+      throw new Error(
+        `the running daemon (pid ${existing.pid}) was built from a different contract than this client ` +
+          `(${existing.contract ?? 'unknown'} != ${expected}) — restart it with \`mocktown daemon stop\`, ` +
+          'and the next command will start a fresh one. A recording or serve session in progress is lost with it.',
+      );
+    }
     return { url: `http://127.0.0.1:${existing.port}/api/v1`, token: existing.token };
   }
 

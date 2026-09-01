@@ -10,6 +10,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { oc } from '@orpc/contract';
+import * as z from 'zod/v4';
 
 const root = join(import.meta.dir, '.tmp-surfaces');
 process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
@@ -22,7 +24,7 @@ const { parseHar } = await import('#src/capture/har.ts');
 const { Recorder, startSession } = await import('#src/capture/recorder.ts');
 const { generateEnv, renderAgentsSection, renderEnvFile } = await import('#src/env/generate.ts');
 const { contract } = await import('#src/contract/index.ts');
-const { walkContract, inputShape, describedAs, fieldInfo } = await import('#src/contract/walk.ts');
+const { walkContract, inputShape, describedAs, fieldInfo, contractSignature } = await import('#src/contract/walk.ts');
 const { captureEnv } = await import('#src/capture/launch.ts');
 const { RENDERERS } = await import('#src/cli/render.ts');
 
@@ -239,6 +241,37 @@ describe("the contract's house rules are structural", () => {
       expect(procedure.route.startsWith('/'), `${procedure.path.join('.')} has no REST path`).toBe(true);
       expect(['GET', 'PUT', 'POST', 'DELETE']).toContain(procedure.method);
     }
+  });
+
+  /**
+   * A long-lived daemon plus an edited contract is the normal state of development, and the
+   * failure it used to produce named nothing: whichever renderer touched a field the daemon
+   * had never learned to send threw `undefined is not an object`.
+   */
+  test('the signature moves when a client-visible shape moves, and not otherwise', () => {
+    const signature = contractSignature(contract);
+    expect(signature).toMatch(/^[0-9a-f]{12}$/);
+    expect(contractSignature(contract)).toBe(signature);
+
+    // Two variants of the same shape, so the assertions are about the function and not
+    // about whichever procedure happened to be convenient to mutate.
+    const base = (summary: string, out: z.ZodType) => ({
+      thing: {
+        get: oc
+          .route({ method: 'GET', path: '/thing', summary })
+          .input(z.object({ project: z.string() }))
+          .output(out),
+      },
+    });
+    const original = base('Get the thing', z.object({ project: z.string(), name: z.string() }));
+
+    // An added output field is exactly the skew that breaks a renderer.
+    const grown = base('Get the thing', z.object({ project: z.string(), name: z.string(), extra: z.string() }));
+    expect(contractSignature(grown)).not.toBe(contractSignature(original));
+
+    // A summary is documentation, not shape: it must not invalidate a running daemon.
+    const reworded = base('Fetch the thing', z.object({ project: z.string(), name: z.string() }));
+    expect(contractSignature(reworded)).toBe(contractSignature(original));
   });
 
   test('every procedure names the project it acts on', () => {

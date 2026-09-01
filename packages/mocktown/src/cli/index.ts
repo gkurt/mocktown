@@ -25,7 +25,7 @@ import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
 import { ProjectFile } from '#src/config/schema.ts';
 import { contract } from '#src/contract/index.ts';
-import { fieldInfo, inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
+import { contractSignature, fieldInfo, inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
 import { readDaemonState } from '#src/daemon/server.ts';
 import { guiDist } from '#src/gui/serve.ts';
 
@@ -317,7 +317,17 @@ daemonCommand
   .description('Whether a daemon is running, and where')
   .action(() => {
     const state = readDaemonState();
-    console.log(state ? `running on 127.0.0.1:${state.port} (pid ${state.pid})` : 'not running');
+    if (!state) {
+      console.log('not running');
+      return;
+    }
+    console.log(`running on 127.0.0.1:${state.port} (pid ${state.pid})`);
+    // The one command that still works under skew, so it is where the reason belongs.
+    const expected = contractSignature(contract);
+    if (state.contract !== expected) {
+      console.log(`  ! built from a different contract than this client (${state.contract ?? 'unknown'} != ${expected})`);
+      console.log('    restart it: `mocktown daemon stop`');
+    }
   });
 
 daemonCommand

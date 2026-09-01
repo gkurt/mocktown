@@ -7,6 +7,7 @@
  * HTTP method, `--json` on every command.
  */
 import type * as z from 'zod/v4';
+import { hash } from '#src/util/id.ts';
 
 export interface ProcedureInfo {
   /** Dotted contract path, e.g. ["services", "list"]. */
@@ -110,4 +111,30 @@ export function fieldInfo(field: z.ZodType): FieldInfo {
     return { type: def.type ?? 'string', optional, description };
   }
   return { type: 'string', optional, description };
+}
+
+/**
+ * A fingerprint of the contract's *shape*, so a client can tell it is talking to a daemon
+ * built from different code.
+ *
+ * The daemon is long-lived by design — it survives shells, and a developer editing the
+ * contract keeps the one that started this morning. Every surface then reads fields the
+ * running daemon never learned to send, and the failure is a bare
+ * `undefined is not an object` from whichever renderer touched the new field first. Nothing
+ * about that names the actual problem.
+ *
+ * Top-level input and output keys are enough: they are exactly what a renderer, an MCP tool
+ * schema and a request body are built from. A changed handler with an unchanged shape is not
+ * skew a client can observe, so it deliberately does not register here.
+ */
+export function contractSignature(router: unknown): string {
+  const keys = (schema?: z.ZodType) =>
+    Object.keys(inputShape(schema as z.ZodType) ?? {})
+      .sort()
+      .join(',');
+  const lines = walkContract(router)
+    .map((procedure) => `${procedure.method} ${procedure.route} in:${keys(procedure.inputSchema)} out:${keys(procedure.outputSchema)}`)
+    .sort();
+  // Truncated: it is written into `daemon.json`, which a human reads.
+  return hash(lines.join('\n')).slice(0, 12);
 }

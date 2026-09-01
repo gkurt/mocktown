@@ -32,7 +32,11 @@ function dataHome(): string {
 export const globalConfigDir = () => join(configHome(), 'mocktown');
 export const globalConfigFile = () => join(globalConfigDir(), 'config.json');
 
-/** Where the daemon writes its port and per-session bearer token (10-security.md). */
+/**
+ * Where the daemon writes its port and per-session bearer token (10-security.md), plus the
+ * signature of the contract it was built from, so a client can spot a daemon older than
+ * itself without a round trip (contract/walk.ts).
+ */
 export const daemonStateFile = () => join(globalConfigDir(), 'daemon.json');
 
 export function projectDataDir(project: string): string {
