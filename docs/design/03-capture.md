@@ -121,6 +121,33 @@ The escalation ladder — each rung covers the previous rung's failure case:
    refuse the MITM cert and are filed as `pinned-client`; and the human, who can install an
    extension into that persistent profile or edit its proxy settings. Rung 3 is the answer
    to all of them, because inside the sandbox there is no route out to close.
+   **What the corpus refuses to hold.** A browser's own traffic is not evidence about a
+   dependency, and it dominates: measured on one attended session against a staging app, 17
+   of the 22 discovered services were Chrome's and 5 were the app's — and every one of the 17
+   also became a service row, an issue and a line in the feed. Two mechanisms, in this order.
+   **First, do not make the request:** `browserArgs` passes the switches that disable
+   component updates, Safe Browsing, sync, domain reliability, metrics and the per-page-load
+   phone-homes, and starts on `about:blank` because the new tab page fetches promos, doodles
+   and omnibox suggestions of its own. Measured on Chrome 152 headless through a logging
+   proxy: attempted hosts 7 -> 5, attempts 23 -> 11 with the blank start page.
+   **Second, `capture/noise.ts`,** for the rest — the flags do not cover everything, they are
+   Chrome's alone, and rungs 1, 3 and 4 never see them. A match is dropped from the corpus,
+   from service discovery and from the issue queue.
+   *An ignore is not a passthrough.* It decides what is written down, never what is allowed
+   out: an ignored request in serve mode still hits the deny wall, it just does not file an
+   issue for a browser update.
+   **A host is ignored wholesale only when it serves nothing else.** Otherwise the pattern is
+   path-scoped, because the same session carried `fonts.googleapis.com/css2` (the app's web
+   font) and `accounts.google.com` is where a real OAuth flow lives. A blanket
+   `*.googleapis.com` would have silently eaten both — a worse failure than the noise it
+   cleaned up, and the reason `accounts.google.com/ListAccounts` is a pattern and
+   `accounts.google.com` is not.
+   **Nothing is dropped silently.** `record stop` reports the count and the reason per
+   pattern, and a session that dropped more than it kept raises it as a warning. `capture` in
+   `mocktown.json` is where a project adds patterns (`ignore`), takes a default back
+   (`keep`, per host or per path) or turns the built-in list off (`ignoreNoise`).
+   *Deferred:* pruning noise a previous run already recorded. There is no delete path in the
+   corpus at all today, so this changes what is captured next, not what is captured already.
 3. **In-sandbox record mode** — for code that ignores proxy env vars: inside the
    namespace there is no "direct"; everything transits the front door by construction.
 4. **HAR import** — `mocktown import <file.har>`: the escape hatch for traffic only

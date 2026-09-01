@@ -89,6 +89,14 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `session ${r.session ?? '(none)'} closed`,
     `${r.recorded} exchange${r.recorded === 1 ? '' : 's'} recorded across ${r.services.length} service${r.services.length === 1 ? '' : 's'}`,
     ...r.services.map((s: string) => `  ${s}`),
+    ...(r.ignored.total
+      ? [
+          '',
+          `ignored ${r.ignored.total} request${r.ignored.total === 1 ? '' : 's'} as client-runtime noise`,
+          ...r.ignored.patterns.slice(0, 10).map((p: any) => `  ${pad(String(p.count), 5)} ${pad(p.pattern, 38)} ${p.why}`),
+          ...(r.ignored.patterns.length > 10 ? [`  ... and ${r.ignored.patterns.length - 10} more patterns`] : []),
+        ]
+      : []),
     ...(r.warnings.length ? ['', 'warnings', ...r.warnings.map((w: string) => `  ! ${w}`)] : []),
   ],
 

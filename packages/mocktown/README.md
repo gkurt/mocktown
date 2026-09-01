@@ -109,6 +109,46 @@ the endpoint is a **capability**: anything that reaches it drives the browser, r
 profile's cookies and navigates it anywhere, with no further authentication. Chrome's only
 defence is that it binds to loopback.
 
+### What is not recorded
+
+A real browser talks to its own vendor constantly, and none of it is evidence about a
+dependency. Measured on one attended session against a staging app: **17 of the 22
+discovered services were Chrome's own** — component updates, Safe Browsing lists, sign-in
+probes, new-tab-page furniture, telemetry — and 5 were the app's. Two mechanisms handle it,
+both on by default:
+
+1. **The launch does not make the requests.** `browser launch` passes the flags that switch
+   this traffic off at the source, and starts on `about:blank` rather than the new tab page.
+2. **The corpus refuses the rest.** A known-noise request is not recorded, does not become
+   a discovered service, and files no issue.
+
+Filtering decides what is *written down*, never what is allowed out: an ignored request in
+serve mode still hits the deny wall, it just does not queue an issue for a browser update.
+
+**Most patterns are path-scoped, because these hostnames are shared.** The same session
+that produced the list also contained `fonts.googleapis.com/css2` — the app's own web font
+— and `accounts.google.com` is where a real OAuth flow lives. So `accounts.google.com/ListAccounts`
+is noise and `accounts.google.com/o/oauth2/*` is not; `www.gstatic.com/og/` is noise and
+`www.gstatic.com/your-app/` is not. A blanket `*.googleapis.com` rule would have silently
+eaten a real dependency, which is worse than the noise it cleaned up.
+
+Nothing is dropped silently. `record stop` reports the count and the reason per pattern, and
+a session that dropped more than it kept says so as a warning.
+
+```jsonc
+// mocktown.json
+{
+  "capture": {
+    "ignoreNoise": true,                        // the built-in list; true by default
+    "ignore": ["telemetry.vendor.com", "cdn.vendor.com/beacon"],
+    "keep": ["accounts.google.com"]             // record it anyway — a real OAuth dependency
+  }
+}
+```
+
+`keep` wins over everything, per host or per path prefix. `ignoreNoise: false` drops the
+built-in list entirely and leaves your own `ignore` entries in force.
+
 ### What still escapes this window
 
 The note on every launch says the traffic is captured *cooperatively and best-effort*, and

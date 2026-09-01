@@ -35,6 +35,27 @@ export const ProjectFile = z.object({
     .array(z.string())
     .default([])
     .describe('Hosts the app reaches directly, bypassing the front door. Every entry is a hole — a host listed here cannot be recorded'),
+  /**
+   * What the corpus refuses to hold. A recorded browser talks to its own vendor constantly,
+   * and none of it is evidence about a dependency — see `capture/noise.ts` for the list and
+   * for why most entries are path-scoped rather than whole-host.
+   */
+  capture: z
+    .object({
+      ignoreNoise: z
+        .boolean()
+        .default(true)
+        .describe("Drop the client runtime's own traffic — browser updates, telemetry, captive-portal probes"),
+      ignore: z
+        .array(z.string())
+        .default([])
+        .describe('Extra noise patterns, as "host" or "host/path-prefix". Matches are not recorded and file no issue'),
+      keep: z
+        .array(z.string())
+        .default([])
+        .describe('Patterns to record even though a default covers them — e.g. "accounts.google.com" for a real OAuth flow'),
+    })
+    .default({ ignoreNoise: true, ignore: [], keep: [] }),
   sandbox: z
     .object({
       image: z.string().default('auto').describe('Base image the sandbox layer is built on; `auto` picks a sane default'),

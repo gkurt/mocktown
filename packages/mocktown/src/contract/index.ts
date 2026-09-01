@@ -256,6 +256,12 @@ export const contract = {
           session: z.string().nullable(),
           recorded: z.number().int(),
           services: z.array(z.string()),
+          ignored: z
+            .object({
+              total: z.number().int(),
+              patterns: z.array(z.object({ pattern: z.string(), count: z.number().int(), why: z.string() })),
+            })
+            .describe("Requests dropped as the client runtime's own traffic — reported, never silent"),
           warnings: z.array(z.string()),
         }),
       ),

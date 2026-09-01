@@ -97,6 +97,29 @@ export function spkiFingerprint(caCert: string): string {
   return createHash('sha256').update(spki).digest('base64');
 }
 
+/**
+ * Switch off the traffic a browser makes on its own behalf, at the source — the first half of
+ * the two-part answer in `noise.ts`, and the better half: a request never made needs no
+ * filter, and cannot spend the bandwidth of a multi-megabyte component update.
+ *
+ * Measured on Chrome 152 headless through a logging proxy, these took the attempted hosts
+ * from 7 to 5; with `about:blank` in place of the new tab page, the attempts went 23 -> 11.
+ * They do not finish the job, which is why the filter exists as well.
+ */
+const QUIET_FLAGS = [
+  // The umbrella switch, and then the specific services that ignore it.
+  '--disable-background-networking',
+  '--disable-component-update',
+  '--disable-client-side-phishing-detection',
+  '--safebrowsing-disable-auto-update',
+  '--disable-sync',
+  '--disable-domain-reliability',
+  '--metrics-recording-only',
+  '--disable-breakpad',
+  // Each of these phones home per page load rather than on a timer.
+  '--disable-features=OptimizationHints,Translate,MediaRouter,AutofillServerCommunication',
+];
+
 export function browserArgs(options: BrowserLaunchOptions): { args: string[]; spkiHash: string } {
   const spkiHash = spkiFingerprint(options.caCert);
   return {
@@ -110,10 +133,13 @@ export function browserArgs(options: BrowserLaunchOptions): { args: string[]; sp
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-search-engine-choice-screen',
+      ...QUIET_FLAGS,
       // Chrome binds the debug endpoint to loopback and refuses it outright on the *default*
       // profile — neither is a concern here, because we always bring our own `--user-data-dir`.
       ...(options.debugPort === undefined ? [] : [`--remote-debugging-port=${options.debugPort}`]),
-      ...(options.url ? [options.url] : []),
+      // The new tab page is not a neutral starting point: it fetches promos, doodles and
+      // omnibox suggestions, all of which would land in the corpus as `www.google.com`.
+      options.url ?? 'about:blank',
     ],
   };
 }

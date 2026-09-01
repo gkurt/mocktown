@@ -29,6 +29,7 @@ const { bypassedByNoProxy } = await import('#src/capture/launch.ts');
 const workspace = join(root, 'app');
 const UPSTREAM_PORT = 5599;
 const SERVICE = 'billing.localhost';
+const NOISE_SERVICE = 'telemetry.localhost';
 
 let upstream: Server;
 let runtime: InstanceType<typeof ProjectRuntime>;
@@ -82,6 +83,9 @@ beforeAll(async () => {
       {
         project: 'loop-test',
         services: { [SERVICE]: { provider: 'record' } },
+        // A stand-in for the browser's own chatter: same upstream, a hostname the corpus
+        // is told is not evidence.
+        capture: { ignore: [NOISE_SERVICE] },
       },
       null,
       2,
@@ -169,10 +173,36 @@ describe("phase 1 — record a real app's traffic, browse the scrubbed corpus", 
     expect(stored).toContain('ada@example.com');
   });
 
+  /**
+   * The corpus's editorial line, end to end. A recorded browser makes far more requests on
+   * its own behalf than the app makes on purpose, and every one of them used to become a
+   * corpus row *and* a discovered service. Filtering the write path is what keeps the
+   * services list a list of dependencies.
+   */
+  test('client-runtime noise reaches the front door and lands nowhere', async () => {
+    const before = runtime.db.select().from(schema.recordings).all().length;
+    await fetch(`http://${NOISE_SERVICE}:${UPSTREAM_PORT}/v1/invoices`, { proxy: proxyUrl });
+    await Bun.sleep(500);
+
+    expect(runtime.db.select().from(schema.recordings).all().length).toBe(before);
+    // The service row is the half that matters most: discovery runs off the write path, so
+    // a filtered host never appears in `mocktown services list` either.
+    const services = runtime.db
+      .select()
+      .from(schema.services)
+      .all()
+      .map((row) => row.id);
+    expect(services).toContain(SERVICE);
+    expect(services).not.toContain(NOISE_SERVICE);
+  }, 30_000);
+
   test('stops cleanly and reports what it captured', async () => {
     const stopped = await runtime.stopRecord();
     expect(stopped.recorded).toBeGreaterThanOrEqual(3);
     expect(stopped.services).toContain(SERVICE);
+    // Dropped, but never silently: the count and the reason come back with the session.
+    expect(stopped.ignored.total).toBeGreaterThanOrEqual(1);
+    expect(stopped.ignored.patterns[0]!.pattern).toBe(NOISE_SERVICE);
   }, 30_000);
 });
 

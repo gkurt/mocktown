@@ -146,6 +146,20 @@ describe('the launched browser', () => {
     expect(args).not.toContain('--ignore-certificate-errors');
   });
 
+  test('does not make the requests it would otherwise have to filter', async () => {
+    const ca = await ensureProjectCa('browser-test');
+    const { args } = browserArgs({ proxyUrl: 'http://127.0.0.1:4400', caCert: ca.cert, profileDir: '/tmp/profile' });
+    // Measured, not assumed: these are the switches that took Chrome's background hosts
+    // from 7 to 5 through a logging proxy (capture/noise.ts).
+    expect(args).toContain('--disable-background-networking');
+    expect(args).toContain('--disable-component-update');
+    // The new tab page is a traffic generator of its own — promos, doodles, suggestions.
+    expect(args.at(-1)).toBe('about:blank');
+    expect(
+      browserArgs({ proxyUrl: 'http://127.0.0.1:4400', caCert: ca.cert, profileDir: '/tmp/p', url: 'https://app.test' }).args.at(-1),
+    ).toBe('https://app.test');
+  });
+
   test('opens no debug endpoint unless one is asked for', async () => {
     const ca = await ensureProjectCa('browser-test');
     const base = { proxyUrl: 'http://127.0.0.1:4400', caCert: ca.cert, profileDir: '/tmp/profile' };

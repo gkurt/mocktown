@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
 import { captureEnv, type NoProxyPlan, planNoProxy } from '#src/capture/launch.ts';
+import { NoiseFilter, NoiseTally } from '#src/capture/noise.ts';
 import { templatePath } from '#src/capture/normalize.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
@@ -65,6 +66,8 @@ export class ProjectRuntime {
   private sessionId: string | null = null;
   private sessionSeed = 'mocktown-default-seed';
   private recordedCount = 0;
+  private noise: NoiseFilter;
+  private readonly noiseTally = new NoiseTally();
   private observation: Observation | null = null;
   private configStamp = '-';
   /**
@@ -101,6 +104,7 @@ export class ProjectRuntime {
       }),
     );
     this.scrubber = new Scrubber(rulesFromConfig(project.file?.scrub), project.file?.scrub?.entropyBackstop ?? true);
+    this.noise = new NoiseFilter(project.file?.capture);
     this.configStamp = this.stampConfig();
   }
 
@@ -123,6 +127,7 @@ export class ProjectRuntime {
     this.configStamp = this.stampConfig();
     this.syncRegistryFromConfig();
     this.scrubber = new Scrubber(rulesFromConfig(this.project.file?.scrub), this.project.file?.scrub?.entropyBackstop ?? true);
+    this.noise = new NoiseFilter(this.project.file?.capture);
   }
 
   /** Modification times of the two config files, so a reload only happens when one changed. */
@@ -195,6 +200,16 @@ export class ProjectRuntime {
     // never touched (05-redirection.md).
     if (this.observation) this.observation.services.add(hostOf(exchange.url));
 
+    // Client-runtime noise never becomes evidence: no corpus row, and so no service row
+    // either, since `touchService` is what discovers one (capture/noise.ts). It still
+    // transited the front door in whatever mode routing chose — filtering the corpus is not
+    // a passthrough, and nothing here lets a request out that would otherwise be denied.
+    const noise = this.noise.match(exchange.url);
+    if (noise) {
+      this.noiseTally.note(noise);
+      return;
+    }
+
     // Only `record` persists. `passthrough` is explicitly not recorded (03-capture.md's
     // mode table), and `mock` traffic is the mock's own output, not evidence about reality.
     const row = exchange.mode === 'record' && this.recorder ? this.recorder.record(exchange) : null;
@@ -264,6 +279,14 @@ export class ProjectRuntime {
 
   private onWallHit(hit: WallHit): void {
     const url = new URL(hit.url);
+    // A denied browser update is not a missing dependency. The request stays denied — this
+    // only keeps it out of a queue a human is expected to work through.
+    const noise = this.noise.match(hit.url);
+    if (noise) {
+      this.noiseTally.note(noise);
+      return;
+    }
+
     if (this.observation && this.observation.wallHits.length < MAX_OBSERVED_WALL_HITS) {
       this.observation.wallHits.push({ host: url.hostname, method: hit.method, path: url.pathname, reason: hit.reason });
     }
@@ -428,9 +451,11 @@ export class ProjectRuntime {
     this.sessionSeed = opts.seed ?? this.sessionSeed;
     this.sessionId = startSession(this.db, 'record', { seed: this.sessionSeed, label: opts.label });
     this.recordedCount = 0;
+    this.noiseTally.reset();
     // A fresh scrubber per session: placeholders are session-scoped by design, which is
     // what makes `{{secret:stripe-secret-key#1}}` mean "the same key as earlier".
     this.scrubber = new Scrubber(rulesFromConfig(this.project.file?.scrub), this.project.file?.scrub?.entropyBackstop ?? true);
+    this.noise = new NoiseFilter(this.project.file?.capture);
     this.recorder = new Recorder(this.db, this.project.name, this.scrubber, this.sessionId);
     this.mode = { kind: 'record', sealed: false };
     this.issues.startBatch();
@@ -453,10 +478,25 @@ export class ProjectRuntime {
     };
   }
 
-  async stopRecord(): Promise<{ session: string | null; recorded: number; services: string[]; warnings: string[] }> {
+  async stopRecord(): Promise<{
+    session: string | null;
+    recorded: number;
+    services: string[];
+    ignored: { total: number; patterns: { pattern: string; count: number; why: string }[] };
+    warnings: string[];
+  }> {
     const session = this.sessionId;
     const recorded = this.recordedCount;
+    const ignored = { total: this.noiseTally.total, patterns: this.noiseTally.entries() };
     const warnings = recorded === 0 ? this.emptyRecordingHints() : [];
+    // A filter nobody can see is how a real dependency goes missing without anyone noticing,
+    // so a session that dropped more than it kept says so rather than looking clean.
+    if (recorded > 0 && ignored.total > recorded) {
+      warnings.push(
+        `Dropped ${ignored.total} request${ignored.total === 1 ? '' : 's'} as client-runtime noise, more than the ${recorded} kept. ` +
+          'If a dependency of yours is missing from the corpus, name it in `capture.keep` in mocktown.json.',
+      );
+    }
     const services = session
       ? [
           ...new Set(
@@ -478,7 +518,7 @@ export class ProjectRuntime {
     this.mode = { kind: 'idle', sealed: false };
     await this.frontDoor?.stop();
     this.frontDoor = undefined;
-    return { session, recorded, services, warnings };
+    return { session, recorded, services, ignored, warnings };
   }
 
   /**
