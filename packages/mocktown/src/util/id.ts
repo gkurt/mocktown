@@ -4,5 +4,5 @@ export function id(prefix: string): string {
 }
 
 export function hash(text: string): string {
-  return new Bun.CryptoHasher("sha256").update(text).digest("hex");
+  return new Bun.CryptoHasher('sha256').update(text).digest('hex');
 }

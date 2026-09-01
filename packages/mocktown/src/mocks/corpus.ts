@@ -7,10 +7,10 @@
  * states the couplings an agent would otherwise have to infer by reading hundreds of
  * exchanges.
  */
-import { and, eq } from "drizzle-orm";
-import type { Db } from "../db/client.ts";
-import { schema } from "../db/client.ts";
-import { routeKey } from "../capture/normalize.ts";
+import { and, eq } from 'drizzle-orm';
+import { routeKey } from '#src/capture/normalize.ts';
+import type { Db } from '#src/db/client.ts';
+import { schema } from '#src/db/client.ts';
 
 export interface RouteExample {
   recordingId: string;
@@ -50,35 +50,37 @@ function statefulHints(routes: Map<string, { method: string; pathTemplate: strin
   for (const route of byTemplate) {
     const notes: string[] = [];
 
-    if (route.method === "POST" && !route.pathTemplate.endsWith("}")) {
+    if (route.method === 'POST' && !route.pathTemplate.endsWith('}')) {
       // A collection POST plus an item GET underneath it is the create/read coupling.
-      const reader = byTemplate.find((r) =>
-        r.method === "GET" &&
-        r.pathTemplate.startsWith(`${route.pathTemplate}/{`) &&
-        r.pathTemplate.split("/").length === route.pathTemplate.split("/").length + 1);
+      const reader = byTemplate.find(
+        (r) =>
+          r.method === 'GET' &&
+          r.pathTemplate.startsWith(`${route.pathTemplate}/{`) &&
+          r.pathTemplate.split('/').length === route.pathTemplate.split('/').length + 1,
+      );
       if (reader) {
         notes.push(
           `Create/read coupling: an entity created by \`POST ${route.pathTemplate}\` must be ` +
-          `retrievable at \`GET ${reader.pathTemplate}\`. Store it in \`ctx.state\` keyed by the id you return.`,
+            `retrievable at \`GET ${reader.pathTemplate}\`. Store it in \`ctx.state\` keyed by the id you return.`,
         );
       }
-      const lister = byTemplate.find((r) => r.method === "GET" && r.pathTemplate === route.pathTemplate);
+      const lister = byTemplate.find((r) => r.method === 'GET' && r.pathTemplate === route.pathTemplate);
       if (lister) {
         notes.push(`Entities created by \`POST ${route.pathTemplate}\` must also appear in \`GET ${route.pathTemplate}\`.`);
       }
     }
 
-    if ((route.method === "DELETE" || route.method === "PATCH" || route.method === "PUT") && route.pathTemplate.endsWith("}")) {
-      const reader = byTemplate.find((r) => r.method === "GET" && r.pathTemplate === route.pathTemplate);
+    if ((route.method === 'DELETE' || route.method === 'PATCH' || route.method === 'PUT') && route.pathTemplate.endsWith('}')) {
+      const reader = byTemplate.find((r) => r.method === 'GET' && r.pathTemplate === route.pathTemplate);
       if (reader) {
         notes.push(
           `\`${route.method} ${route.pathTemplate}\` must be observable through ` +
-          `\`GET ${route.pathTemplate}\` afterwards — the update or deletion has to stick.`,
+            `\`GET ${route.pathTemplate}\` afterwards — the update or deletion has to stick.`,
         );
       }
     }
 
-    if (notes.length) hints.set(routeKey(route.method, "", route.pathTemplate), notes);
+    if (notes.length) hints.set(routeKey(route.method, '', route.pathTemplate), notes);
   }
 
   return hints;
@@ -89,7 +91,7 @@ export function exportCorpus(db: Db, service: string, limitPerRoute = 5): Corpus
 
   const routes = new Map<string, { method: string; pathTemplate: string; rows: typeof rows }>();
   for (const row of rows) {
-    const key = routeKey(row.method, "", row.pathTemplate);
+    const key = routeKey(row.method, '', row.pathTemplate);
     const entry = routes.get(key) ?? { method: row.method, pathTemplate: row.pathTemplate, rows: [] as typeof rows };
     entry.rows.push(row);
     routes.set(key, entry);
@@ -148,10 +150,20 @@ export function routeTable(db: Db, service?: string) {
     ? db.select().from(schema.recordings).where(eq(schema.recordings.service, service)).all()
     : db.select().from(schema.recordings).all();
 
-  const table = new Map<string, { service: string; method: string; pathTemplate: string; count: number; statuses: Set<number>; lastSeenAt: string | null }>();
+  const table = new Map<
+    string,
+    { service: string; method: string; pathTemplate: string; count: number; statuses: Set<number>; lastSeenAt: string | null }
+  >();
   for (const row of rows) {
     const key = routeKey(row.method, row.service, row.pathTemplate);
-    const entry = table.get(key) ?? { service: row.service, method: row.method, pathTemplate: row.pathTemplate, count: 0, statuses: new Set<number>(), lastSeenAt: null };
+    const entry = table.get(key) ?? {
+      service: row.service,
+      method: row.method,
+      pathTemplate: row.pathTemplate,
+      count: 0,
+      statuses: new Set<number>(),
+      lastSeenAt: null,
+    };
     entry.count++;
     entry.statuses.add(row.statusCode);
     if (!entry.lastSeenAt || row.recordedAt > entry.lastSeenAt) entry.lastSeenAt = row.recordedAt;
@@ -165,9 +177,11 @@ export function routeTable(db: Db, service?: string) {
 
 /** Recordings for one service, oldest first — the replay order the verify harness uses. */
 export function recordingsForService(db: Db, service: string, session?: string, limit = 100) {
-  const conditions = [
-    eq(schema.recordings.service, service),
-    ...(session ? [eq(schema.recordings.sessionId, session)] : []),
-  ];
-  return db.select().from(schema.recordings).where(and(...conditions)).limit(limit).all();
+  const conditions = [eq(schema.recordings.service, service), ...(session ? [eq(schema.recordings.sessionId, session)] : [])];
+  return db
+    .select()
+    .from(schema.recordings)
+    .where(and(...conditions))
+    .limit(limit)
+    .all();
 }

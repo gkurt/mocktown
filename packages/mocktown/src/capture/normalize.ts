@@ -9,24 +9,55 @@
 
 /** Headers that change every request and would only add noise to a diff. */
 const VOLATILE_REQUEST_HEADERS = new Set([
-  "date", "connection", "keep-alive", "proxy-connection", "content-length",
-  "if-none-match", "if-modified-since", "traceparent", "tracestate", "b3",
-  "x-request-id", "x-correlation-id", "x-amzn-trace-id", "sec-fetch-dest",
-  "sec-fetch-mode", "sec-fetch-site", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+  'date',
+  'connection',
+  'keep-alive',
+  'proxy-connection',
+  'content-length',
+  'if-none-match',
+  'if-modified-since',
+  'traceparent',
+  'tracestate',
+  'b3',
+  'x-request-id',
+  'x-correlation-id',
+  'x-amzn-trace-id',
+  'sec-fetch-dest',
+  'sec-fetch-mode',
+  'sec-fetch-site',
+  'sec-ch-ua',
+  'sec-ch-ua-mobile',
+  'sec-ch-ua-platform',
 ]);
 
 const VOLATILE_RESPONSE_HEADERS = new Set([
-  "date", "connection", "keep-alive", "content-length", "transfer-encoding",
-  "x-request-id", "x-runtime", "cf-ray", "cf-cache-status", "age", "server-timing",
-  "x-served-by", "x-timer", "report-to", "nel", "alt-svc", "x-amz-request-id",
-  "x-amz-id-2", "x-github-request-id", "request-id",
+  'date',
+  'connection',
+  'keep-alive',
+  'content-length',
+  'transfer-encoding',
+  'x-request-id',
+  'x-runtime',
+  'cf-ray',
+  'cf-cache-status',
+  'age',
+  'server-timing',
+  'x-served-by',
+  'x-timer',
+  'report-to',
+  'nel',
+  'alt-svc',
+  'x-amz-request-id',
+  'x-amz-id-2',
+  'x-github-request-id',
+  'request-id',
 ]);
 
 export function stripVolatile(
   headers: Record<string, string | string[]>,
-  direction: "request" | "response",
+  direction: 'request' | 'response',
 ): Record<string, string | string[]> {
-  const volatile = direction === "request" ? VOLATILE_REQUEST_HEADERS : VOLATILE_RESPONSE_HEADERS;
+  const volatile = direction === 'request' ? VOLATILE_REQUEST_HEADERS : VOLATILE_RESPONSE_HEADERS;
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !volatile.has(name.toLowerCase())));
 }
 
@@ -41,17 +72,17 @@ export function stripVolatile(
  */
 function looksLikeId(segment: string): boolean {
   if (!segment) return false;
-  if (/^\d+$/.test(segment)) return true;                                    // 8812
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment)) return true;  // uuid
-  if (/^[0-9a-f]{16,}$/i.test(segment)) return true;                         // long hex
-  if (/^\{\{secret:/.test(segment)) return true;                             // a scrubbed credential in the path
+  if (/^\d+$/.test(segment)) return true; // 8812
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment)) return true; // uuid
+  if (/^[0-9a-f]{16,}$/i.test(segment)) return true; // long hex
+  if (/^\{\{secret:/.test(segment)) return true; // a scrubbed credential in the path
 
   // Prefixed ids: `inv_000001`, `cus_MR7dlLEfqZuUiAwY`, `ord_42`.
   const prefixed = /^[a-z]{2,6}_([A-Za-z0-9]+)$/.exec(segment);
   if (prefixed) {
     const suffix = prefixed[1]!;
-    if (/^\d+$/.test(suffix)) return true;                                   // sequential ids
-    if (suffix.length >= 8 && /\d/.test(suffix)) return true;                // opaque ids
+    if (/^\d+$/.test(suffix)) return true; // sequential ids
+    if (suffix.length >= 8 && /\d/.test(suffix)) return true; // opaque ids
   }
 
   // Mixed-case alphanumerics with digits and no separators, long enough to be an id
@@ -62,15 +93,21 @@ function looksLikeId(segment: string): boolean {
 
 /** Singular parameter name derived from the collection segment before it. */
 function paramName(previous: string | undefined, index: number): string {
-  if (!previous || looksLikeId(previous)) return index === 0 ? "id" : `id${index + 1}`;
-  const word = previous.replace(/[^A-Za-z0-9]/g, "");
-  if (!word) return "id";
-  const singular = word.endsWith("ies") ? `${word.slice(0, -3)}y` : word.endsWith("ses") ? word.slice(0, -2) : word.endsWith("s") ? word.slice(0, -1) : word;
+  if (!previous || looksLikeId(previous)) return index === 0 ? 'id' : `id${index + 1}`;
+  const word = previous.replace(/[^A-Za-z0-9]/g, '');
+  if (!word) return 'id';
+  const singular = word.endsWith('ies')
+    ? `${word.slice(0, -3)}y`
+    : word.endsWith('ses')
+      ? word.slice(0, -2)
+      : word.endsWith('s')
+        ? word.slice(0, -1)
+        : word;
   return `${singular.charAt(0).toLowerCase()}${singular.slice(1)}Id`;
 }
 
 export function templatePath(path: string): string {
-  const segments = path.split("/");
+  const segments = path.split('/');
   let idIndex = 0;
   const out = segments.map((segment, i) => {
     if (!looksLikeId(segment)) return segment;
@@ -78,7 +115,7 @@ export function templatePath(path: string): string {
     idIndex++;
     return `{${name}}`;
   });
-  return out.join("/");
+  return out.join('/');
 }
 
 export interface NormalizedUrl {
@@ -97,5 +134,4 @@ export function normalizeUrl(rawUrl: string): NormalizedUrl {
 }
 
 /** The corpus's route key: what "the same endpoint" means everywhere downstream. */
-export const routeKey = (method: string, service: string, pathTemplate: string) =>
-  `${method.toUpperCase()} ${service}${pathTemplate}`;
+export const routeKey = (method: string, service: string, pathTemplate: string) => `${method.toUpperCase()} ${service}${pathTemplate}`;

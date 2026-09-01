@@ -1,6 +1,6 @@
 // Self-contained repro: ALPN is not negotiated when SNICallback is set.
 // Run with `node alpn-repro.mjs` and `bun run alpn-repro.mjs` and compare.
-import tls from "node:tls";
+import tls from 'node:tls';
 
 const cert = `-----BEGIN CERTIFICATE-----
 MIIDHzCCAgegAwIBAgIUQwR8W/wGTeEr5/cSnLVURaUH1DEwDQYJKoZIhvcNAQEL
@@ -51,18 +51,20 @@ S4qBSnebFW9O0W6kPW+uHLc=
 -----END PRIVATE KEY-----`;
 
 const ctx = tls.createSecureContext({ cert, key });
-const ALPN = ["h2", "http/1.1"];
+const ALPN = ['h2', 'http/1.1'];
 
 const cases = {
-  "ALPN in server options": { cert, key, ALPNProtocols: ALPN },
-  "ALPN + SNICallback": { cert, key, ALPNProtocols: ALPN, SNICallback: (_s, cb) => cb(null, ctx) },
-  "SNICallback, ALPN only on returned context": {
-    cert, key,
+  'ALPN in server options': { cert, key, ALPNProtocols: ALPN },
+  'ALPN + SNICallback': { cert, key, ALPNProtocols: ALPN, SNICallback: (_s, cb) => cb(null, ctx) },
+  'SNICallback, ALPN only on returned context': {
+    cert,
+    key,
     SNICallback: (_s, cb) => cb(null, tls.createSecureContext({ cert, key, ALPNProtocols: ALPN })),
   },
-  "ALPNCallback": { cert, key, ALPNCallback: ({ protocols }) => protocols.find((p) => ALPN.includes(p)) },
-  "ALPNCallback + SNICallback": {
-    cert, key,
+  ALPNCallback: { cert, key, ALPNCallback: ({ protocols }) => protocols.find((p) => ALPN.includes(p)) },
+  'ALPNCallback + SNICallback': {
+    cert,
+    key,
     ALPNCallback: ({ protocols }) => protocols.find((p) => ALPN.includes(p)),
     SNICallback: (_s, cb) => cb(null, ctx),
   },
@@ -73,20 +75,24 @@ console.log(`\n  ${runtime}   client offers ALPN ["h2", "http/1.1"]\n`);
 
 for (const [name, options] of Object.entries(cases)) {
   const server = tls.createServer(options, (s) => s.end());
-  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address();
 
   const negotiated = await new Promise((resolve) => {
-    const timer = setTimeout(() => resolve("TIMEOUT"), 4000);
-    const socket = tls.connect(
-      { port, host: "127.0.0.1", servername: "localhost", rejectUnauthorized: false, ALPNProtocols: ALPN },
-      () => { clearTimeout(timer); resolve(socket.alpnProtocol); socket.destroy(); }
-    );
-    socket.on("error", (e) => { clearTimeout(timer); resolve(`ERROR ${e.code ?? e.message}`); });
+    const timer = setTimeout(() => resolve('TIMEOUT'), 4000);
+    const socket = tls.connect({ port, host: '127.0.0.1', servername: 'localhost', rejectUnauthorized: false, ALPNProtocols: ALPN }, () => {
+      clearTimeout(timer);
+      resolve(socket.alpnProtocol);
+      socket.destroy();
+    });
+    socket.on('error', (e) => {
+      clearTimeout(timer);
+      resolve(`ERROR ${e.code ?? e.message}`);
+    });
   });
 
-  const ok = negotiated === "h2";
-  console.log(`  ${ok ? "ok  " : "FAIL"}  ${name.padEnd(44)} alpnProtocol = ${JSON.stringify(negotiated)}`);
+  const ok = negotiated === 'h2';
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name.padEnd(44)} alpnProtocol = ${JSON.stringify(negotiated)}`);
   server.close();
 }
 console.log();

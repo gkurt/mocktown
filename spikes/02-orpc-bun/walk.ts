@@ -4,7 +4,7 @@
  * 02-architecture.md budgeted "worst case … a couple hundred lines we own" for this.
  * This file is the measurement.
  */
-import { z } from "zod";
+import type * as z from 'zod/v4';
 
 export interface ProcedureInfo {
   /** Dotted contract path, e.g. "services.list" */
@@ -23,22 +23,24 @@ export interface ProcedureInfo {
  * one function needs updating and the CLI/MCP generators are untouched.
  */
 function procedureDef(node: unknown): any {
-  const def = (node as any)?.["~orpc"];
-  return def && "route" in def && "inputSchema" in def ? def : undefined;
+  const def = (node as any)?.['~orpc'];
+  return def && 'route' in def && 'inputSchema' in def ? def : undefined;
 }
 
 export function walkContract(router: unknown, prefix: string[] = []): ProcedureInfo[] {
   const def = procedureDef(router);
   if (def) {
-    return [{
-      path: prefix,
-      method: def.route?.method ?? "POST",
-      route: def.route?.path ?? "/" + prefix.join("/"),
-      summary: def.route?.summary,
-      inputSchema: def.inputSchema,
-      outputSchema: def.outputSchema,
-    }];
+    return [
+      {
+        path: prefix,
+        method: def.route?.method ?? 'POST',
+        route: def.route?.path ?? `/${prefix.join('/')}`,
+        summary: def.route?.summary,
+        inputSchema: def.inputSchema,
+        outputSchema: def.outputSchema,
+      },
+    ];
   }
-  if (typeof router !== "object" || router === null) return [];
+  if (typeof router !== 'object' || router === null) return [];
   return Object.entries(router).flatMap(([key, child]) => walkContract(child, [...prefix, key]));
 }

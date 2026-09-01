@@ -11,12 +11,12 @@
  * override. Profile overrides come last because a profile is a whole world of data and
  * should win over a dial someone left turned.
  */
-import { and, eq } from "drizzle-orm";
-import { z } from "zod";
-import type { Db } from "../db/client.ts";
-import { schema } from "../db/client.ts";
-import type { KnobManifest } from "../mocks/types.ts";
-import { id } from "../util/id.ts";
+import { and, eq } from 'drizzle-orm';
+import * as z from 'zod/v4';
+import type { Db } from '#src/db/client.ts';
+import { schema } from '#src/db/client.ts';
+import type { KnobManifest } from '#src/mocks/types.ts';
+import { id } from '#src/util/id.ts';
 
 export interface ResolvedKnob {
   key: string;
@@ -57,7 +57,7 @@ export function describeKnobs(db: Db, manifest: KnobManifest | undefined, servic
     key,
     description: definition.description,
     // The GUI renders the form from this, so it has to be JSON Schema and not a Zod object.
-    jsonSchema: z.toJSONSchema(definition.schema, { io: "input", unrepresentable: "any" }),
+    jsonSchema: z.toJSONSchema(definition.schema, { io: 'input', unrepresentable: 'any' }),
     default: definition.default,
     value: effective[key],
   }));
@@ -107,7 +107,7 @@ export function setKnobs(
 
   if (Object.keys(applied).length > 0) {
     db.insert(schema.journal)
-      .values({ id: id("jrn"), sessionId, kind: "knob-set", service, payload: applied })
+      .values({ id: id('jrn'), sessionId, kind: 'knob-set', service, payload: applied })
       .run();
   }
 
@@ -122,7 +122,9 @@ export function clearKnobs(db: Db, service?: string): void {
 }
 
 export function knobValue(db: Db, service: string, key: string): unknown {
-  return db.select().from(schema.knobValues)
+  return db
+    .select()
+    .from(schema.knobValues)
     .where(and(eq(schema.knobValues.service, service), eq(schema.knobValues.key, key)))
     .get()?.value;
 }

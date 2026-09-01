@@ -6,7 +6,7 @@
  * Owning it is also what lets house rules be structural: `readOnlyHint` derived from the
  * HTTP method, `--json` on every command.
  */
-import type { z } from "zod";
+import type * as z from 'zod/v4';
 
 export interface ProcedureInfo {
   /** Dotted contract path, e.g. ["services", "list"]. */
@@ -25,23 +25,25 @@ export interface ProcedureInfo {
  * changes and every generator is untouched.
  */
 function procedureDef(node: unknown): any {
-  const def = (node as any)?.["~orpc"];
-  return def && "route" in def && "inputSchema" in def ? def : undefined;
+  const def = (node as any)?.['~orpc'];
+  return def && 'route' in def && 'inputSchema' in def ? def : undefined;
 }
 
 export function walkContract(router: unknown, prefix: string[] = []): ProcedureInfo[] {
   const def = procedureDef(router);
   if (def) {
-    return [{
-      path: prefix,
-      method: def.route?.method ?? "POST",
-      route: def.route?.path ?? "/" + prefix.join("/"),
-      summary: def.route?.summary,
-      inputSchema: def.inputSchema,
-      outputSchema: def.outputSchema,
-    }];
+    return [
+      {
+        path: prefix,
+        method: def.route?.method ?? 'POST',
+        route: def.route?.path ?? `/${prefix.join('/')}`,
+        summary: def.route?.summary,
+        inputSchema: def.inputSchema,
+        outputSchema: def.outputSchema,
+      },
+    ];
   }
-  if (typeof router !== "object" || router === null) return [];
+  if (typeof router !== 'object' || router === null) return [];
   return Object.entries(router).flatMap(([key, child]) => walkContract(child, [...prefix, key]));
 }
 

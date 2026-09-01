@@ -7,17 +7,21 @@
  * the thing emulator-backed services cannot do, since they reset by process restart
  * (12-scenario-controls.md, spike 03).
  */
-import { and, eq } from "drizzle-orm";
-import type { Db } from "../db/client.ts";
-import { schema } from "../db/client.ts";
-import type { StateStore } from "./types.ts";
+import { and, eq } from 'drizzle-orm';
+import type { Db } from '#src/db/client.ts';
+import { schema } from '#src/db/client.ts';
+import type { StateStore } from '#src/mocks/types.ts';
 
 export class SqliteStateStore implements StateStore {
-  constructor(
-    private readonly db: Db,
-    private readonly service: string,
-    private readonly profile: string,
-  ) {}
+  private readonly db: Db;
+  private readonly service: string;
+  private readonly profile: string;
+
+  constructor(db: Db, service: string, profile: string) {
+    this.db = db;
+    this.service = service;
+    this.profile = profile;
+  }
 
   private scope(collection: string, key: string) {
     return and(
@@ -54,11 +58,13 @@ export class SqliteStateStore implements StateStore {
     return this.db
       .select()
       .from(schema.mockState)
-      .where(and(
-        eq(schema.mockState.service, this.service),
-        eq(schema.mockState.profile, this.profile),
-        eq(schema.mockState.collection, collection),
-      ))
+      .where(
+        and(
+          eq(schema.mockState.service, this.service),
+          eq(schema.mockState.profile, this.profile),
+          eq(schema.mockState.collection, collection),
+        ),
+      )
       .all()
       .map((row) => ({ key: row.key, value: row.value as T }));
   }
@@ -71,9 +77,9 @@ export class SqliteStateStore implements StateStore {
    * Sequential rather than random, on purpose: an id an agent can predict makes a failing
    * replay readable, and the determinism contract holds without consuming a PRNG stream.
    */
-  nextId(collection: string, prefix = "id"): string {
+  nextId(collection: string, prefix = 'id'): string {
     const next = this.count(collection) + 1;
-    return `${prefix}_${String(next).padStart(6, "0")}`;
+    return `${prefix}_${String(next).padStart(6, '0')}`;
   }
 }
 
@@ -89,5 +95,8 @@ export function dropState(db: Db, scope: ResetScope): void {
     ...(scope.profile ? [eq(schema.mockState.profile, scope.profile)] : []),
   ];
   if (filters.length === 0) db.delete(schema.mockState).run();
-  else db.delete(schema.mockState).where(and(...filters)).run();
+  else
+    db.delete(schema.mockState)
+      .where(and(...filters))
+      .run();
 }

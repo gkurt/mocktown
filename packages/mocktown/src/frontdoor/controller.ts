@@ -14,16 +14,16 @@
  * Two more are structural because the remote client made us learn them the hard way; see
  * `subscribe` and `applyRouting`.
  */
-import { spawn, type ChildProcess } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import * as mockttp from "mockttp";
-import { completionCheckers, matchers, requestSteps, webSocketSteps } from "mockttp";
-import type { Mockttp, RequestRuleData, WebSocketRuleData } from "mockttp";
-import { findFreePort } from "../util/ports.ts";
-import { tableSignature, type Route, type RoutingTable } from "./routing.ts";
+import { type ChildProcess, spawn } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Mockttp, RequestRuleData, WebSocketRuleData } from 'mockttp';
+import * as mockttp from 'mockttp';
+import { completionCheckers, matchers, requestSteps, webSocketSteps } from 'mockttp';
+import { type Route, type RoutingTable, tableSignature } from '#src/frontdoor/routing.ts';
+import { findFreePort } from '#src/util/ports.ts';
 
-const sidecarPath = join(dirname(fileURLToPath(import.meta.url)), "sidecar.ts");
+const sidecarPath = join(dirname(fileURLToPath(import.meta.url)), 'sidecar.ts');
 
 /** Mockttp's own fallback priority, so an unmatched-request rule loses to every route. */
 const FALLBACK_PRIORITY = 0;
@@ -61,7 +61,7 @@ export interface WallHit {
   url: string;
   headers: Record<string, string | string[]>;
   body: string;
-  reason: "deny" | "unknown-host" | "provider-down";
+  reason: 'deny' | 'unknown-host' | 'provider-down';
   /** For `provider-down`: the provider the registry expected to be serving this host. */
   provider?: string;
 }
@@ -108,7 +108,13 @@ export class FrontDoor {
   port = 0;
   adminPort = 0;
 
-  constructor(private readonly options: FrontDoorOptions, private readonly events: FrontDoorEvents = {}) {}
+  private readonly options: FrontDoorOptions;
+  private readonly events: FrontDoorEvents;
+
+  constructor(options: FrontDoorOptions, events: FrontDoorEvents = {}) {
+    this.options = options;
+    this.events = events;
+  }
 
   get isRunning(): boolean {
     return !!this.proxy && !!this.sidecar && this.sidecar.exitCode === null;
@@ -119,20 +125,26 @@ export class FrontDoor {
     this.adminPort = await findFreePort(4700);
     this.port = this.options.port ?? (await findFreePort(4400));
 
-    this.sidecar = spawn(this.options.nodePath ?? "node", [sidecarPath, String(this.adminPort)], {
-      stdio: ["pipe", "pipe", "pipe"],
+    this.sidecar = spawn(this.options.nodePath ?? 'node', [sidecarPath, String(this.adminPort)], {
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`front door sidecar did not start within 20s\n${this.log.join("")}`)), 20_000);
+      const timer = setTimeout(() => reject(new Error(`front door sidecar did not start within 20s\n${this.log.join('')}`)), 20_000);
       const onData = (buf: Buffer) => {
         const text = buf.toString();
         this.log.push(text);
-        if (text.includes('"ready":true')) { clearTimeout(timer); resolve(); }
+        if (text.includes('"ready":true')) {
+          clearTimeout(timer);
+          resolve();
+        }
       };
-      this.sidecar!.stdout?.on("data", onData);
-      this.sidecar!.stderr?.on("data", onData);
-      this.sidecar!.once("exit", (code) => { clearTimeout(timer); reject(new Error(`front door sidecar exited with code ${code}\n${this.log.join("")}`)); });
+      this.sidecar!.stdout?.on('data', onData);
+      this.sidecar!.stderr?.on('data', onData);
+      this.sidecar!.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`front door sidecar exited with code ${code}\n${this.log.join('')}`));
+      });
     });
 
     this.proxy = mockttp.getRemote({
@@ -155,34 +167,36 @@ export class FrontDoor {
   private async subscribe(): Promise<void> {
     const proxy = this.proxy!;
 
-    await proxy.on("request", async (request) => {
+    await proxy.on('request', async (request) => {
       this.join(request.id, {
         request: {
           method: request.method,
           url: request.url,
           headers: request.headers as Record<string, string | string[]>,
-          body: (await request.body.getText().catch(() => "")) ?? "",
+          body: (await request.body.getText().catch(() => '')) ?? '',
           startedAt: Date.now(),
         },
       });
     });
 
-    await proxy.on("response", async (response) => {
+    await proxy.on('response', async (response) => {
       this.join(response.id, {
         response: {
           statusCode: response.statusCode,
           headers: response.headers as Record<string, string | string[]>,
-          body: (await response.body.getText().catch(() => "")) ?? "",
+          body: (await response.body.getText().catch(() => '')) ?? '',
         },
       });
     });
 
     // An aborted request never gets a response half; drop it rather than let it linger.
-    await proxy.on("abort", (request) => { this.exchanges.delete(request.id); });
+    await proxy.on('abort', (request) => {
+      this.exchanges.delete(request.id);
+    });
 
     // A client that refuses our certificate is pinned; documented out of scope, but it
     // must be surfaced rather than looking like a network failure (03-capture.md).
-    await proxy.on("tls-client-error", (event) => {
+    await proxy.on('tls-client-error', (event) => {
       this.events.onPinnedClient?.({ hostname: event.tlsMetadata?.sniHostname, reason: event.failureCause });
     });
   }
@@ -200,15 +214,18 @@ export class FrontDoor {
     const { request, response } = entry;
     const mode = this.modeFor(request.url);
 
-    if (mode === "deny") {
+    if (mode === 'deny') {
       const route = this.routes.get(hostOf(request.url));
       this.events.onWallHit?.({
-        method: request.method, url: request.url, headers: request.headers, body: request.body,
+        method: request.method,
+        url: request.url,
+        headers: request.headers,
+        body: request.body,
         // A route carrying a provider is one whose provider never came up — the registry
         // said `generated:x`, routing had nowhere to send it, and denying was the safe
         // answer. A route with no provider is a registry `deny`; no route at all is a
         // host nobody has decided about yet.
-        reason: !route ? "unknown-host" : route.provider ? "provider-down" : "deny",
+        reason: !route ? 'unknown-host' : route.provider ? 'provider-down' : 'deny',
         provider: route?.provider,
       });
       return;
@@ -242,7 +259,7 @@ export class FrontDoor {
     return this.routes.get(hostOf(url))?.mode ?? this.fallthroughMode;
   }
 
-  private fallthroughMode: "record" | "deny" = "deny";
+  private fallthroughMode: 'record' | 'deny' = 'deny';
 
   /**
    * Re-apply the whole rule set. Mockttp has no incremental rule editing, and rebuilding
@@ -258,7 +275,7 @@ export class FrontDoor {
    * subscriptions from `start()` alone.
    */
   async applyRouting(table: RoutingTable): Promise<void> {
-    if (!this.proxy) throw new Error("front door is not running");
+    if (!this.proxy) throw new Error('front door is not running');
     const signature = tableSignature(table);
     if (signature === this.appliedSignature) return;
 
@@ -279,7 +296,7 @@ export class FrontDoor {
       completionChecker: new completionCheckers.Always(),
     }));
 
-    if (table.fallthrough === "record") {
+    if (table.fallthrough === 'record') {
       requestRules.push({
         priority: FALLBACK_PRIORITY,
         matchers: [new matchers.WildcardMatcher()],
@@ -296,13 +313,13 @@ export class FrontDoor {
       requestRules.push({
         priority: FALLBACK_PRIORITY,
         matchers: [new matchers.WildcardMatcher()],
-        steps: [jsonStep(502, denyBody(null, "No provider is registered for this host and the front door is sealed."))],
+        steps: [jsonStep(502, denyBody(null, 'No provider is registered for this host and the front door is sealed.'))],
         completionChecker: new completionCheckers.Always(),
       });
       webSocketRules.push({
         priority: FALLBACK_PRIORITY,
         matchers: [new matchers.WildcardMatcher()],
-        steps: [new webSocketSteps.RejectWebSocketStep(502, "Denied by mocktown")],
+        steps: [new webSocketSteps.RejectWebSocketStep(502, 'Denied by mocktown')],
         completionChecker: new completionCheckers.Always(),
       });
     }
@@ -313,7 +330,11 @@ export class FrontDoor {
   }
 
   async stop(): Promise<void> {
-    try { await this.proxy?.stop(); } catch { /* the sidecar is about to go anyway */ }
+    try {
+      await this.proxy?.stop();
+    } catch {
+      /* the sidecar is about to go anyway */
+    }
     this.proxy = undefined;
     this.appliedSignature = undefined;
     this.exchanges.clear();
@@ -322,43 +343,46 @@ export class FrontDoor {
     this.sidecar = undefined;
     if (!child || child.exitCode !== null) return;
     await new Promise<void>((resolve) => {
-      const force = setTimeout(() => child.kill("SIGKILL"), 3000);
-      child.once("exit", () => { clearTimeout(force); resolve(); });
-      child.kill("SIGTERM");
+      const force = setTimeout(() => child.kill('SIGKILL'), 3000);
+      child.once('exit', () => {
+        clearTimeout(force);
+        resolve();
+      });
+      child.kill('SIGTERM');
     });
   }
 }
 
 function requestStepFor(route: Route) {
   switch (route.mode) {
-    case "record":
-    case "passthrough":
+    case 'record':
+    case 'passthrough':
       return new requestSteps.PassThroughStep();
-    case "mock":
+    case 'mock':
       return new requestSteps.PassThroughStep({
         transformRequest: {
           // The scheme is rewritten too: a client calling `https://api.stripe.com` must
           // reach an emulator that speaks plain HTTP. Inheriting the incoming protocol
           // would send TLS at a cleartext listener and fail as a 502.
-          setProtocol: route.targetProtocol ?? "http",
+          setProtocol: route.targetProtocol ?? 'http',
           // Keep the original Host header: a generated mock for api.stripe.com should
           // see `Host: api.stripe.com`, not the loopback address it listens on.
           replaceHost: { targetHost: route.target!, updateHostHeader: false },
         },
       });
-    case "deny":
+    case 'deny':
       return jsonStep(502, denyBody(route.host, "This service is set to deny in the project's service registry."));
   }
 }
 
 function webSocketStepFor(route: Route) {
   switch (route.mode) {
-    case "deny":
-      return new webSocketSteps.RejectWebSocketStep(502, "Denied by mocktown");
-    case "mock":
+    case 'deny':
+      return new webSocketSteps.RejectWebSocketStep(502, 'Denied by mocktown');
+    case 'mock':
       return new webSocketSteps.PassThroughWebSocketStep({
         transformRequest: {
-          setProtocol: route.targetProtocol === "https" ? "wss" : "ws",
+          setProtocol: route.targetProtocol === 'https' ? 'wss' : 'ws',
           replaceHost: { targetHost: route.target!, updateHostHeader: false },
         },
       });
@@ -369,12 +393,16 @@ function webSocketStepFor(route: Route) {
 
 function jsonStep(status: number, body: unknown) {
   return new requestSteps.FixedResponseStep(status, undefined, JSON.stringify(body), {
-    "content-type": "application/json",
+    'content-type': 'application/json',
   });
 }
 
 function hostOf(url: string): string {
-  try { return new URL(url).hostname; } catch { return ""; }
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -383,9 +411,9 @@ function hostOf(url: string): string {
  */
 function denyBody(host: string | null, why: string) {
   return {
-    error: "mocktown_denied",
+    error: 'mocktown_denied',
     message: why,
     host,
-    hint: "Run `mocktown issues list` — this request was filed as an issue with the request that triggered it.",
+    hint: 'Run `mocktown issues list` — this request was filed as an issue with the request that triggered it.',
   };
 }

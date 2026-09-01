@@ -5,12 +5,12 @@
  *
  *   bun src/daemon/index.ts [--port <n>]
  */
-import { existsSync, rmSync } from "node:fs";
-import { daemonStateFile } from "../config/paths.ts";
-import { startDaemon } from "./server.ts";
-import { shutdownAllRuntimes } from "./runtime.ts";
+import { existsSync, rmSync } from 'node:fs';
+import { daemonStateFile } from '#src/config/paths.ts';
+import { shutdownAllRuntimes } from '#src/daemon/runtime.ts';
+import { startDaemon } from '#src/daemon/server.ts';
 
-const portArg = process.argv.indexOf("--port");
+const portArg = process.argv.indexOf('--port');
 const port = portArg !== -1 ? Number(process.argv[portArg + 1]) : undefined;
 
 const daemon = await startDaemon({ port });
@@ -28,5 +28,5 @@ async function shutdown() {
   process.exit(0);
 }
 
-process.on("SIGINT", () => void shutdown());
-process.on("SIGTERM", () => void shutdown());
+process.on('SIGINT', () => void shutdown());
+process.on('SIGTERM', () => void shutdown());

@@ -8,8 +8,8 @@
  * the port-allocation scheme, the stdout parsing, the config format. Callers see only
  * `start()` / `stop()` / `baseUrlFor()`.
  */
-import { spawn, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
+import { type ChildProcess, spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 
 export interface EmulateProviderOptions {
   services: string[];
@@ -31,30 +31,35 @@ export class EmulateProvider {
   private static async findFreePortRun(count: number, from = 4400): Promise<number> {
     for (let base = from; base < from + 500; base += count) {
       const free = await Promise.all(
-        Array.from({ length: count }, (_, i) =>
-          new Promise<boolean>((resolve) => {
-            const s = createServer();
-            s.once("error", () => resolve(false));
-            s.listen(base + i, "127.0.0.1", () => s.close(() => resolve(true)));
-          }),
+        Array.from(
+          { length: count },
+          (_, i) =>
+            new Promise<boolean>((resolve) => {
+              const s = createServer();
+              s.once('error', () => resolve(false));
+              s.listen(base + i, '127.0.0.1', () => s.close(() => resolve(true)));
+            }),
         ),
       );
       if (free.every(Boolean)) return base;
     }
-    throw new Error("no free port run available for the emulate provider");
+    throw new Error('no free port run available for the emulate provider');
   }
 
   async start(): Promise<Map<string, string>> {
     const basePort = this.options.basePort ?? (await EmulateProvider.findFreePortRun(this.options.services.length));
-    const args = ["emulate", "start", "-p", String(basePort), "-s", this.options.services.join(",")];
-    if (this.options.seedFile) args.push("--seed", this.options.seedFile);
+    const args = ['emulate', 'start', '-p', String(basePort), '-s', this.options.services.join(',')];
+    if (this.options.seedFile) args.push('--seed', this.options.seedFile);
 
-    this.child = spawn("bunx", args, { stdio: ["ignore", "pipe", "pipe"] });
-    this.child.on("exit", (code, signal) => { this.exited = { code, signal }; });
+    this.child = spawn('bunx', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    this.child.on('exit', (code, signal) => {
+      this.exited = { code, signal };
+    });
 
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
-        () => reject(new Error(`emulate did not report all services within ${this.options.startupTimeoutMs ?? 20000}ms\n${this.log.join("")}`)),
+        () =>
+          reject(new Error(`emulate did not report all services within ${this.options.startupTimeoutMs ?? 20000}ms\n${this.log.join('')}`)),
         this.options.startupTimeoutMs ?? 20000,
       );
       const onChunk = (buf: Buffer) => {
@@ -64,13 +69,19 @@ export class EmulateProvider {
         for (const [, service, url] of text.matchAll(/^\s*(\S+)\s+(https?:\/\/\S+)\s*$/gm)) {
           // Rewrite localhost -> 127.0.0.1: emulate binds all interfaces, and we only
           // ever want loopback (10-security.md).
-          this.urls.set(service, url.replace("//localhost:", "//127.0.0.1:"));
+          this.urls.set(service, url.replace('//localhost:', '//127.0.0.1:'));
         }
-        if (this.options.services.every((s) => this.urls.has(s))) { clearTimeout(timer); resolve(); }
+        if (this.options.services.every((s) => this.urls.has(s))) {
+          clearTimeout(timer);
+          resolve();
+        }
       };
-      this.child!.stdout?.on("data", onChunk);
-      this.child!.stderr?.on("data", onChunk);
-      this.child!.on("exit", (code) => { clearTimeout(timer); reject(new Error(`emulate exited during startup with code ${code}\n${this.log.join("")}`)); });
+      this.child!.stdout?.on('data', onChunk);
+      this.child!.stderr?.on('data', onChunk);
+      this.child!.on('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`emulate exited during startup with code ${code}\n${this.log.join('')}`));
+      });
     });
 
     await ready;
@@ -85,7 +96,7 @@ export class EmulateProvider {
 
   private async waitForListening(service: string, url: string, timeoutMs = 20000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    let lastError = "no attempt made";
+    let lastError = 'no attempt made';
     while (Date.now() < deadline) {
       if (this.exited) throw new Error(`emulate exited before "${service}" was listening`);
       try {
@@ -114,9 +125,12 @@ export class EmulateProvider {
     if (!this.child || this.exited) return;
     const child = this.child;
     await new Promise<void>((resolve) => {
-      const force = setTimeout(() => child.kill("SIGKILL"), 3000);
-      child.once("exit", () => { clearTimeout(force); resolve(); });
-      child.kill("SIGTERM");
+      const force = setTimeout(() => child.kill('SIGKILL'), 3000);
+      child.once('exit', () => {
+        clearTimeout(force);
+        resolve();
+      });
+      child.kill('SIGTERM');
     });
   }
 }

@@ -17,7 +17,7 @@
  * "a Stripe secret key was required here" and `reinject()` can put a well-formed fake
  * back for replay, without a real secret ever reaching disk.
  */
-import { DEFAULT_RULES, type ScrubRule } from "./rules.ts";
+import { DEFAULT_RULES, type ScrubRule } from '#src/scrub/rules.ts';
 
 /** Shannon entropy per character, for the backstop below. */
 export function entropy(value: string): number {
@@ -38,7 +38,7 @@ const ENTROPY_ALLOWLIST = /^(?:[A-Za-z]+[-_][A-Za-z]+)+$/;
 
 export function looksHighEntropy(value: string): boolean {
   if (value.length < HIGH_ENTROPY_MIN_LENGTH) return false;
-  if (/\s/.test(value)) return false;                 // prose, not a credential
+  if (/\s/.test(value)) return false; // prose, not a credential
   if (ENTROPY_ALLOWLIST.test(value)) return false;
 
   // Long pure hex is a digest, a session id or a key — never business data. Shannon
@@ -46,18 +46,23 @@ export function looksHighEntropy(value: string): boolean {
   // id measures ~3.59, just under any threshold loose enough to exclude timestamps.
   if (value.length >= 32 && /^[0-9a-f]+$/i.test(value)) return true;
 
-  if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return false;  // needs mixed classes
+  if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return false; // needs mixed classes
   return entropy(value) >= HIGH_ENTROPY_MIN_BITS;
 }
 
 export function passesLuhn(value: string): boolean {
-  const digits = value.replace(/\D/g, "");
+  const digits = value.replace(/\D/g, '');
   if (digits.length < 13 || digits.length > 19) return false;
-  let sum = 0, double = false;
+  let sum = 0,
+    double = false;
   for (let i = digits.length - 1; i >= 0; i--) {
     let d = digits.charCodeAt(i) - 48;
-    if (double) { d *= 2; if (d > 9) d -= 9; }
-    sum += d; double = !double;
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
   }
   return sum % 10 === 0;
 }
@@ -87,17 +92,19 @@ export interface AuditFinding {
  * requests without ever seeing it.
  */
 export class Scrubber {
-  private readonly registry = new Map<string, string>();   // secret value -> placeholder
+  private readonly registry = new Map<string, string>(); // secret value -> placeholder
   private readonly kindCounts = new Map<string, number>();
   readonly rules: ScrubRule[];
+  private readonly entropyBackstop: boolean;
 
   /**
    * @param entropyBackstop the heuristic catch-all from 10-security.md. Switchable so its
    * contribution stays measurable — with it off, removing a vendor rule leaks; with it on,
    * the same removal is covered. Defence in depth should be demonstrable, not assumed.
    */
-  constructor(rules: ScrubRule[] = DEFAULT_RULES, private readonly entropyBackstop = true) {
+  constructor(rules: ScrubRule[] = DEFAULT_RULES, entropyBackstop = true) {
     this.rules = rules;
+    this.entropyBackstop = entropyBackstop;
   }
 
   /**
@@ -110,7 +117,7 @@ export class Scrubber {
     for (const rule of this.rules) {
       if (!rule.pattern) continue;
       if (new RegExp(`^(?:${rule.pattern.source})$`).test(trimmed)) {
-        if (rule.kind === "card-number" && !passesLuhn(trimmed)) continue;
+        if (rule.kind === 'card-number' && !passesLuhn(trimmed)) continue;
         return rule.kind;
       }
     }
@@ -133,17 +140,17 @@ export class Scrubber {
     for (const rule of this.rules) {
       if (!rule.pattern) continue;
       out = out.replace(rule.pattern, (match) => {
-        if (match.startsWith("{{secret:")) return match;
-        if (rule.kind === "card-number" && !passesLuhn(match)) return match;
+        if (match.startsWith('{{secret:')) return match;
+        if (rule.kind === 'card-number' && !passesLuhn(match)) return match;
         return this.placeholderFor(match, rule.kind);
       });
     }
     if (!this.entropyBackstop) return out;
     out = out.replace(/[A-Za-z0-9_\-.]{24,}/g, (token) => {
-      if (token.startsWith("{{secret:")) return token;
+      if (token.startsWith('{{secret:')) return token;
       const known = this.registry.get(token);
       if (known) return known;
-      return looksHighEntropy(token) ? this.placeholderFor(token, "high-entropy") : token;
+      return looksHighEntropy(token) ? this.placeholderFor(token, 'high-entropy') : token;
     });
     return out;
   }
@@ -163,7 +170,7 @@ export class Scrubber {
           const credential = v.slice(scheme[0]!.length);
           return `${scheme[1]} ${this.placeholderFor(credential, this.classify(credential, rule.kind))}`;
         }
-        if (lower === "cookie" || lower === "set-cookie") {
+        if (lower === 'cookie' || lower === 'set-cookie') {
           return scrubCookie(v, (secret) => this.placeholderFor(secret, this.classify(secret, rule.kind)));
         }
         return this.placeholderFor(v, this.classify(v, rule.kind));
@@ -184,14 +191,14 @@ export class Scrubber {
     return this.scrubValue(value);
   }
 
-  private scrubJson(node: unknown, keyName = ""): unknown {
-    if (typeof node === "string") return this.scrubField(keyName, node);
-    if (typeof node === "number") {
+  private scrubJson(node: unknown, keyName = ''): unknown {
+    if (typeof node === 'string') return this.scrubField(keyName, node);
+    if (typeof node === 'number') {
       const rule = this.fieldRule(keyName);
       if (rule) return this.placeholderFor(String(node), this.classify(String(node), rule.kind));
     }
     if (Array.isArray(node)) return node.map((item) => this.scrubJson(item, keyName));
-    if (node && typeof node === "object") {
+    if (node && typeof node === 'object') {
       return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, this.scrubJson(v, k)]));
     }
     return node;
@@ -200,14 +207,14 @@ export class Scrubber {
   /** Pass 1 for bodies: redact by field name, keeping the document's structure intact. */
   scrubBody(body: string, contentType: string): string {
     if (!body) return body;
-    if (contentType.includes("json")) {
+    if (contentType.includes('json')) {
       try {
         return JSON.stringify(this.scrubJson(JSON.parse(body)));
       } catch {
-        return this.scrubValue(body);   // not valid JSON after all
+        return this.scrubValue(body); // not valid JSON after all
       }
     }
-    if (contentType.includes("x-www-form-urlencoded")) {
+    if (contentType.includes('x-www-form-urlencoded')) {
       const out = new URLSearchParams();
       for (const [key, value] of new URLSearchParams(body)) out.append(key, this.scrubField(key, value));
       return out.toString();
@@ -216,8 +223,8 @@ export class Scrubber {
   }
 
   scrub(exchange: Exchange): Exchange {
-    const reqType = String(exchange.requestHeaders["content-type"] ?? "");
-    const resType = String(exchange.responseHeaders["content-type"] ?? "");
+    const reqType = String(exchange.requestHeaders['content-type'] ?? '');
+    const resType = String(exchange.responseHeaders['content-type'] ?? '');
     const url = new URL(exchange.url);
     for (const [key, value] of [...url.searchParams]) url.searchParams.set(key, this.scrubField(key, value));
 
@@ -248,18 +255,18 @@ export class Scrubber {
     const findings: AuditFinding[] = [];
     for (const exchange of corpus) {
       const places: [string, string][] = [
-        ["url", exchange.url],
-        ["requestHeaders", JSON.stringify(exchange.requestHeaders)],
-        ["responseHeaders", JSON.stringify(exchange.responseHeaders)],
-        ["requestBody", exchange.requestBody],
-        ["responseBody", exchange.responseBody],
+        ['url', exchange.url],
+        ['requestHeaders', JSON.stringify(exchange.requestHeaders)],
+        ['responseHeaders', JSON.stringify(exchange.responseHeaders)],
+        ['requestBody', exchange.requestBody],
+        ['responseBody', exchange.responseBody],
       ];
       for (const [where, text] of places) {
         if (!text) continue;
         for (const rule of this.rules) {
           if (!rule.pattern) continue;
           for (const match of text.matchAll(rule.pattern)) {
-            if (rule.kind === "card-number" && !passesLuhn(match[0])) continue;
+            if (rule.kind === 'card-number' && !passesLuhn(match[0])) continue;
             findings.push({ exchangeId: exchange.id, where, kind: rule.kind, sample: match[0].slice(0, 24) });
           }
         }
@@ -278,11 +285,11 @@ function scrubCookie(value: string, redact: (secret: string) => string): string 
   return value
     .split(/;\s*/)
     .map((part) => {
-      const eq = part.indexOf("=");
-      if (eq < 1) return part;                       // flags like HttpOnly, Secure
+      const eq = part.indexOf('=');
+      if (eq < 1) return part; // flags like HttpOnly, Secure
       const name = part.slice(0, eq);
       if (/^(Path|Domain|Expires|Max-Age|SameSite|Priority|Version)$/i.test(name)) return part;
       return `${name}=${redact(part.slice(eq + 1))}`;
     })
-    .join("; ");
+    .join('; ');
 }

@@ -6,15 +6,15 @@
  * route matched" tells an agent nothing; an issue saying "`GET /v1/orders/{orderId}`
  * matched the path but this request was a PATCH" tells it exactly what to widen.
  */
-import type { MockRoute } from "./types.ts";
+import type { MockRoute } from '#src/mocks/types.ts';
 
 export interface RouteMatch {
   route: MockRoute;
   params: Record<string, string>;
 }
 
-const segmentsOf = (path: string) => path.split("/").filter(Boolean);
-const isParam = (segment: string) => segment.startsWith("{") && segment.endsWith("}");
+const segmentsOf = (path: string) => path.split('/').filter(Boolean);
+const isParam = (segment: string) => segment.startsWith('{') && segment.endsWith('}');
 
 export function matchRoute(routes: MockRoute[], method: string, path: string): RouteMatch | null {
   const wanted = segmentsOf(path);
@@ -29,7 +29,10 @@ export function matchRoute(routes: MockRoute[], method: string, path: string): R
       const t = template[i]!;
       const w = wanted[i]!;
       if (isParam(t)) params[t.slice(1, -1)] = decodeURIComponent(w);
-      else if (t !== w) { ok = false; break; }
+      else if (t !== w) {
+        ok = false;
+        break;
+      }
     }
     if (ok) return { route, params };
   }
@@ -38,7 +41,7 @@ export function matchRoute(routes: MockRoute[], method: string, path: string): R
 
 export interface NearMiss {
   /** `unmatched-request` when nothing is close, `near-miss` when one route almost fit. */
-  kind: "unmatched-request" | "near-miss";
+  kind: 'unmatched-request' | 'near-miss';
   closest: { method: string; path: string; describe?: string } | null;
   /** Human- and agent-readable reasons, most specific first. */
   reasons: string[];
@@ -71,8 +74,14 @@ export function diagnose(routes: MockRoute[], method: string, path: string): Nea
       for (let i = 0; i < template.length; i++) {
         const t = template[i]!;
         const w = wanted[i]!;
-        if (isParam(t)) { score += 1; continue; }
-        if (t === w) { score += 2; continue; }
+        if (isParam(t)) {
+          score += 1;
+          continue;
+        }
+        if (t === w) {
+          score += 2;
+          continue;
+        }
         mismatched.push(`segment ${i + 1}: route expects "${t}", request had "${w}"`);
       }
       reasons.push(...mismatched);
@@ -83,19 +92,19 @@ export function diagnose(routes: MockRoute[], method: string, path: string): Nea
 
   if (!best || best.score < 4) {
     return {
-      kind: "unmatched-request",
+      kind: 'unmatched-request',
       closest: best ? { method: best.route.method, path: best.route.path, describe: best.route.describe } : null,
-      reasons: best ? best.reasons : ["the mock declares no routes for this service"],
-      suggestedResolution: "Add a route for this method and path template to the generated mock, using the corpus examples linked below.",
+      reasons: best ? best.reasons : ['the mock declares no routes for this service'],
+      suggestedResolution: 'Add a route for this method and path template to the generated mock, using the corpus examples linked below.',
     };
   }
 
   // A route that shares the verb and the path shape failed on detail — that is drift in
   // an existing route, and widening it beats duplicating it (07's house rules).
   return {
-    kind: "near-miss",
+    kind: 'near-miss',
     closest: { method: best.route.method, path: best.route.path, describe: best.route.describe },
-    reasons: best.reasons.length ? best.reasons : ["the route matched structurally but the handler rejected the request"],
+    reasons: best.reasons.length ? best.reasons : ['the route matched structurally but the handler rejected the request'],
     suggestedResolution: `Widen the existing \`${best.route.method.toUpperCase()} ${best.route.path}\` route rather than adding a second one.`,
   };
 }

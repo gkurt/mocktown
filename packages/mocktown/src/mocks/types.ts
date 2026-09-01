@@ -11,8 +11,8 @@
  * `GET /orders/{orderId}` must return the created order. That is why every handler gets
  * a `state` store rather than a canned response list.
  */
-import { z } from "zod";
-import type { Prng } from "./prng.ts";
+import * as z from 'zod/v4';
+import type { Prng } from '#src/mocks/prng.ts';
 
 // Re-exported so a generated mock has exactly one dependency. Knob schemas need Zod, and
 // requiring every mocked app to add it — at a version matching ours — is friction with no

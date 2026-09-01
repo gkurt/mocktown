@@ -1,14 +1,6 @@
 {
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "Preserve",
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "noEmit": true,
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "skipLibCheck": true,
     "types": ["bun", "node"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]

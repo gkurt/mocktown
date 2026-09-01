@@ -1,5 +1,33 @@
 {
-  "name": "mocktown-repo",
+  "name": "@mocktown/root",
   "private": true,
-  "workspaces": ["packages/*", "spikes/*"]
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "spikes/*"
+  ],
+  "scripts": {
+    "typecheck": "bun --filter='*' typecheck",
+    "lint": "biome lint",
+    "format": "biome format",
+    "check": "biome check",
+    "fix": "biome check --write",
+    "test": "bun test",
+    "checks": "bun check && bun typecheck && bun run test",
+    "prepare": "husky",
+    "tegami": "bun scripts/tegami.mts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.1",
+    "@types/bun": "^1.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "tegami": "^1.4.0",
+    "typescript": "7.0.2"
+  },
+  "lint-staged": {
+    "*": [
+      "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"
+    ]
+  }
 }

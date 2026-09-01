@@ -6,33 +6,33 @@
  * Drizzle gives us a free state viewer through Drizzle Studio (09-gui-plugins.md), so
  * table and column names are chosen to read well in it rather than to be terse.
  */
-import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from 'drizzle-orm';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
 
 /** The service registry, as the daemon sees it: config plus observed runtime facts. */
-export const services = sqliteTable("services", {
-  id: text("id").primaryKey(),                       // hostname or logical service id
-  provider: text("provider").notNull(),              // ProviderRef, see config/schema.ts
-  seed: text("seed"),
+export const services = sqliteTable('services', {
+  id: text('id').primaryKey(), // hostname or logical service id
+  provider: text('provider').notNull(), // ProviderRef, see config/schema.ts
+  seed: text('seed'),
   /** Set when the registry entry came from observed traffic rather than mocktown.json. */
-  discovered: integer("discovered", { mode: "boolean" }).notNull().default(false),
-  lastSeenAt: text("last_seen_at"),
-  createdAt: text("created_at").notNull().default(now),
+  discovered: integer('discovered', { mode: 'boolean' }).notNull().default(false),
+  lastSeenAt: text('last_seen_at'),
+  createdAt: text('created_at').notNull().default(now),
 });
 
 /**
  * One continuous run of the mock environment (12-scenario-controls.md). Owns the
  * session seed every PRNG stream derives from, so a session is reproducible.
  */
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  mode: text("mode", { enum: ["record", "serve", "import", "verify"] }).notNull(),
-  seed: text("seed").notNull(),
-  label: text("label"),
-  startedAt: text("started_at").notNull().default(now),
-  endedAt: text("ended_at"),
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  mode: text('mode', { enum: ['record', 'serve', 'import', 'verify'] }).notNull(),
+  seed: text('seed').notNull(),
+  label: text('label'),
+  startedAt: text('started_at').notNull().default(now),
+  endedAt: text('ended_at'),
 });
 
 /**
@@ -41,110 +41,116 @@ export const sessions = sqliteTable("sessions", {
  * never persisted (10-security.md).
  */
 export const recordings = sqliteTable(
-  "recordings",
+  'recordings',
   {
-    id: text("id").primaryKey(),
-    sessionId: text("session_id").notNull().references(() => sessions.id),
-    service: text("service").notNull(),
-    method: text("method").notNull(),
-    path: text("path").notNull(),
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id),
+    service: text('service').notNull(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
     /** Path with ids replaced, e.g. `/orders/{id}` — the grouping key agents reason about. */
-    pathTemplate: text("path_template").notNull(),
-    query: text("query", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
-    statusCode: integer("status_code").notNull(),
-    requestHeaders: text("request_headers", { mode: "json" }).$type<Record<string, string | string[]>>().notNull(),
-    responseHeaders: text("response_headers", { mode: "json" }).$type<Record<string, string | string[]>>().notNull(),
+    pathTemplate: text('path_template').notNull(),
+    query: text('query', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+    statusCode: integer('status_code').notNull(),
+    requestHeaders: text('request_headers', { mode: 'json' }).$type<Record<string, string | string[]>>().notNull(),
+    responseHeaders: text('response_headers', { mode: 'json' }).$type<Record<string, string | string[]>>().notNull(),
     /** Inline body, or null when it was large enough to land in `blobs/` instead. */
-    requestBody: text("request_body"),
-    responseBody: text("response_body"),
-    requestBlob: text("request_blob"),
-    responseBlob: text("response_blob"),
-    durationMs: integer("duration_ms"),
+    requestBody: text('request_body'),
+    responseBody: text('response_body'),
+    requestBlob: text('request_blob'),
+    responseBlob: text('response_blob'),
+    durationMs: integer('duration_ms'),
     /** What the scrubber found: kinds and counts only, never values. */
-    scrubSummary: text("scrub_summary", { mode: "json" }).$type<{ kind: string; count: number }[]>().notNull().default([]),
-    source: text("source", { enum: ["front-door", "har"] }).notNull().default("front-door"),
-    recordedAt: text("recorded_at").notNull().default(now),
+    scrubSummary: text('scrub_summary', { mode: 'json' }).$type<{ kind: string; count: number }[]>().notNull().default([]),
+    source: text('source', { enum: ['front-door', 'har'] })
+      .notNull()
+      .default('front-door'),
+    recordedAt: text('recorded_at').notNull().default(now),
   },
   (t) => [
-    index("recordings_service_idx").on(t.service),
-    index("recordings_route_idx").on(t.service, t.method, t.pathTemplate),
-    index("recordings_session_idx").on(t.sessionId),
+    index('recordings_service_idx').on(t.service),
+    index('recordings_route_idx').on(t.service, t.method, t.pathTemplate),
+    index('recordings_session_idx').on(t.sessionId),
   ],
 );
 
 /** The issue taxonomy from 07-issues-agent-loop.md. */
 export const issues = sqliteTable(
-  "issues",
+  'issues',
   {
-    id: text("id").primaryKey(),
-    type: text("type", {
-      enum: ["unknown-service", "unmatched-request", "near-miss", "state-violation", "redirect-gap", "pinned-client", "provider-drift"],
+    id: text('id').primaryKey(),
+    type: text('type', {
+      enum: ['unknown-service', 'unmatched-request', 'near-miss', 'state-violation', 'redirect-gap', 'pinned-client', 'provider-drift'],
     }).notNull(),
-    status: text("status", { enum: ["open", "resolved", "verifying", "reopened"] }).notNull().default("open"),
-    service: text("service").notNull(),
-    method: text("method"),
-    path: text("path"),
-    pathTemplate: text("path_template"),
+    status: text('status', { enum: ['open', 'resolved', 'verifying', 'reopened'] })
+      .notNull()
+      .default('open'),
+    service: text('service').notNull(),
+    method: text('method'),
+    path: text('path'),
+    pathTemplate: text('path_template'),
     /** Groups one run's issues so an agent fixes a coherent set (07's batching). */
-    batchId: text("batch_id"),
-    sessionId: text("session_id"),
+    batchId: text('batch_id'),
+    sessionId: text('session_id'),
     /** The full scrubbed request, so an issue is self-contained. */
-    request: text("request", { mode: "json" }).$type<unknown>(),
+    request: text('request', { mode: 'json' }).$type<unknown>(),
     /** Nearest existing behavior and *why* it didn't match (WireMock-style near-miss). */
-    diagnosis: text("diagnosis", { mode: "json" }).$type<unknown>(),
-    suggestedResolution: text("suggested_resolution"),
+    diagnosis: text('diagnosis', { mode: 'json' }).$type<unknown>(),
+    suggestedResolution: text('suggested_resolution'),
     /** Corpus rows and files an agent should read; an issue links its own evidence. */
-    links: text("links", { mode: "json" }).$type<string[]>().notNull().default([]),
-    occurrences: integer("occurrences").notNull().default(1),
-    resolutionNote: text("resolution_note"),
-    createdAt: text("created_at").notNull().default(now),
-    updatedAt: text("updated_at").notNull().default(now),
+    links: text('links', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    occurrences: integer('occurrences').notNull().default(1),
+    resolutionNote: text('resolution_note'),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
   },
   (t) => [
-    index("issues_status_idx").on(t.status),
+    index('issues_status_idx').on(t.status),
     // One issue per distinct failure, incremented rather than duplicated.
-    uniqueIndex("issues_dedupe_idx").on(t.type, t.service, t.method, t.pathTemplate),
+    uniqueIndex('issues_dedupe_idx').on(t.type, t.service, t.method, t.pathTemplate),
   ],
 );
 
 /** The endpoint knowledge base (05-redirection.md) — an accreting project asset. */
 export const ekb = sqliteTable(
-  "ekb",
+  'ekb',
   {
-    id: text("id").primaryKey(),
-    service: text("service").notNull(),
+    id: text('id').primaryKey(),
+    service: text('service').notNull(),
     /** 1 = env var, 2 = SDK constructor option, 3 = code patch (05's preference order). */
-    rung: integer("rung").notNull(),
-    envVar: text("env_var"),
-    language: text("language"),
-    snippet: text("snippet"),
-    note: text("note"),
+    rung: integer('rung').notNull(),
+    envVar: text('env_var'),
+    language: text('language'),
+    snippet: text('snippet'),
+    note: text('note'),
     /** `builtin` | `emulate-skill` | `generated:<service>` | `user`. */
-    source: text("source").notNull().default("builtin"),
-    createdAt: text("created_at").notNull().default(now),
+    source: text('source').notNull().default('builtin'),
+    createdAt: text('created_at').notNull().default(now),
   },
-  (t) => [index("ekb_service_idx").on(t.service)],
+  (t) => [index('ekb_service_idx').on(t.service)],
 );
 
 /** Seal stamps (05-redirection.md): a seal is only as good as the flows exercised. */
-export const sealStamps = sqliteTable("seal_stamps", {
-  id: text("id").primaryKey(),
-  commit: text("commit"),
-  configHash: text("config_hash").notNull(),
-  sealed: integer("sealed", { mode: "boolean" }).notNull(),
-  flows: text("flows", { mode: "json" }).$type<string[]>().notNull().default([]),
-  wallHits: integer("wall_hits").notNull().default(0),
-  createdAt: text("created_at").notNull().default(now),
+export const sealStamps = sqliteTable('seal_stamps', {
+  id: text('id').primaryKey(),
+  commit: text('commit'),
+  configHash: text('config_hash').notNull(),
+  sealed: integer('sealed', { mode: 'boolean' }).notNull(),
+  flows: text('flows', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  wallHits: integer('wall_hits').notNull().default(0),
+  createdAt: text('created_at').notNull().default(now),
 });
 
 /** Knob values are project state, not config (12-scenario-controls.md). */
 export const knobValues = sqliteTable(
-  "knob_values",
+  'knob_values',
   {
-    service: text("service").notNull(),
-    key: text("key").notNull(),
-    value: text("value", { mode: "json" }).$type<unknown>().notNull(),
-    updatedAt: text("updated_at").notNull().default(now),
+    service: text('service').notNull(),
+    key: text('key').notNull(),
+    value: text('value', { mode: 'json' }).$type<unknown>().notNull(),
+    updatedAt: text('updated_at').notNull().default(now),
   },
   (t) => [primaryKey({ columns: [t.service, t.key] })],
 );
@@ -154,38 +160,42 @@ export const knobValues = sqliteTable(
  * its knob events too (12-scenario-controls.md).
  */
 export const journal = sqliteTable(
-  "journal",
+  'journal',
   {
-    id: text("id").primaryKey(),
-    sessionId: text("session_id").notNull(),
-    kind: text("kind", { enum: ["knob-set", "state-reset", "profile-session", "session-start"] }).notNull(),
-    service: text("service"),
-    payload: text("payload", { mode: "json" }).$type<unknown>().notNull(),
-    at: text("at").notNull().default(now),
+    id: text('id').primaryKey(),
+    sessionId: text('session_id').notNull(),
+    kind: text('kind', { enum: ['knob-set', 'state-reset', 'profile-session', 'session-start'] }).notNull(),
+    service: text('service'),
+    payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
+    at: text('at').notNull().default(now),
   },
-  (t) => [index("journal_session_idx").on(t.sessionId)],
+  (t) => [index('journal_session_idx').on(t.sessionId)],
 );
 
 /** Auth profiles: named personas with credentials and a distinct world of data. */
-export const profiles = sqliteTable("profiles", {
-  name: text("name").primaryKey(),
+export const profiles = sqliteTable('profiles', {
+  name: text('name').primaryKey(),
   /** REQUIRED, and must say how this persona differs from the others. */
-  description: text("description").notNull(),
-  credentials: text("credentials", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
-  context: text("context", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
-  knobOverrides: text("knob_overrides", { mode: "json" }).$type<Record<string, Record<string, unknown>>>().notNull().default({}),
+  description: text('description').notNull(),
+  credentials: text('credentials', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+  context: text('context', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+  knobOverrides: text('knob_overrides', { mode: 'json' }).$type<Record<string, Record<string, unknown>>>().notNull().default({}),
   /** How this persona signs in per provider kind — a consent POST is not a credential
    *  exchange, and the roster has to say so (spike 03, 12-scenario-controls.md). */
-  signIn: text("sign_in", { enum: ["credentials", "consent-picker", "token-only"] }).notNull().default("credentials"),
-  createdAt: text("created_at").notNull().default(now),
+  signIn: text('sign_in', { enum: ['credentials', 'consent-picker', 'token-only'] })
+    .notNull()
+    .default('credentials'),
+  createdAt: text('created_at').notNull().default(now),
 });
 
 /** Tokens minted by `POST /profiles/<name>/session` for API-level testing. */
-export const profileSessions = sqliteTable("profile_sessions", {
-  token: text("token").primaryKey(),
-  profile: text("profile").notNull().references(() => profiles.name),
-  sessionId: text("session_id").notNull(),
-  createdAt: text("created_at").notNull().default(now),
+export const profileSessions = sqliteTable('profile_sessions', {
+  token: text('token').primaryKey(),
+  profile: text('profile')
+    .notNull()
+    .references(() => profiles.name),
+  sessionId: text('session_id').notNull(),
+  createdAt: text('created_at').notNull().default(now),
 });
 
 /**
@@ -193,26 +203,26 @@ export const profileSessions = sqliteTable("profile_sessions", {
  * delete + re-seed per scope (12-scenario-controls.md).
  */
 export const mockState = sqliteTable(
-  "mock_state",
+  'mock_state',
   {
-    service: text("service").notNull(),
-    profile: text("profile").notNull().default("default"),
-    collection: text("collection").notNull(),
-    key: text("key").notNull(),
-    value: text("value", { mode: "json" }).$type<unknown>().notNull(),
-    seeded: integer("seeded", { mode: "boolean" }).notNull().default(false),
-    updatedAt: text("updated_at").notNull().default(now),
+    service: text('service').notNull(),
+    profile: text('profile').notNull().default('default'),
+    collection: text('collection').notNull(),
+    key: text('key').notNull(),
+    value: text('value', { mode: 'json' }).$type<unknown>().notNull(),
+    seeded: integer('seeded', { mode: 'boolean' }).notNull().default(false),
+    updatedAt: text('updated_at').notNull().default(now),
   },
   (t) => [
     primaryKey({ columns: [t.service, t.profile, t.collection, t.key] }),
-    index("mock_state_scope_idx").on(t.service, t.profile, t.collection),
+    index('mock_state_scope_idx').on(t.service, t.profile, t.collection),
   ],
 );
 
 /** Metadata for content-addressed bodies living under the project's `blobs/`. */
-export const blobs = sqliteTable("blobs", {
-  hash: text("hash").primaryKey(),
-  size: integer("size").notNull(),
-  contentType: text("content_type"),
-  createdAt: text("created_at").notNull().default(now),
+export const blobs = sqliteTable('blobs', {
+  hash: text('hash').primaryKey(),
+  size: integer('size').notNull(),
+  contentType: text('content_type'),
+  createdAt: text('created_at').notNull().default(now),
 });

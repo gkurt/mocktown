@@ -6,9 +6,9 @@
  * with a cache-busting query so an agent's edit takes effect on the next
  * `mocktown serve` without restarting the daemon.
  */
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
-import type { MockModule } from "./types.ts";
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import type { MockModule } from '#src/mocks/types.ts';
 
 export interface LoadedMock {
   module: MockModule;
@@ -25,7 +25,7 @@ export interface LoadResult {
 
 /** Directory name -> service hostname. A directory name is a hint; the module decides. */
 function candidateEntry(dir: string): string | null {
-  for (const name of ["index.ts", "index.js", "mock.ts"]) {
+  for (const name of ['index.ts', 'index.js', 'mock.ts']) {
     const file = join(dir, name);
     if (existsSync(file)) return file;
   }
@@ -41,7 +41,7 @@ export async function loadMocks(mocksDir: string): Promise<LoadResult> {
     if (!statSync(dir).isDirectory()) continue;
     const file = candidateEntry(dir);
     if (!file) {
-      result.failures.push({ service: entry, file: dir, reason: "no index.ts in the mock directory" });
+      result.failures.push({ service: entry, file: dir, reason: 'no index.ts in the mock directory' });
       continue;
     }
 
@@ -50,9 +50,9 @@ export async function loadMocks(mocksDir: string): Promise<LoadResult> {
       // serve picks it up, which is the whole point of the incremental loop.
       const imported = await import(`${file}?v=${statSync(file).mtimeMs}`);
       const module: MockModule | undefined = imported.default ?? imported.mock;
-      if (!module || typeof module !== "object") throw new Error("module has no default export");
-      if (!module.service) throw new Error("module does not declare a `service`");
-      if (!Array.isArray(module.routes)) throw new Error("module does not declare a `routes` array");
+      if (!module || typeof module !== 'object') throw new Error('module has no default export');
+      if (!module.service) throw new Error('module does not declare a `service`');
+      if (!Array.isArray(module.routes)) throw new Error('module does not declare a `routes` array');
       result.mocks.push({ module, dir, file });
     } catch (error) {
       result.failures.push({ service: entry, file, reason: error instanceof Error ? error.message : String(error) });

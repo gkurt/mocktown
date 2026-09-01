@@ -2,12 +2,13 @@
  * The package's public surface. Generated mocks import from `mocktown/mock`; everything
  * else here exists for tests and for embedding the daemon in another Bun process.
  */
-export { contract } from "./contract/index.ts";
-export { walkContract, inputShape, type ProcedureInfo } from "./contract/walk.ts";
-export { startDaemon, readDaemonState, openapi } from "./daemon/server.ts";
-export { ProjectRuntime, runtimeFor, shutdownAllRuntimes } from "./daemon/runtime.ts";
-export { resolveProject, type ResolvedProject } from "./config/project.ts";
-export { Scrubber, type Exchange } from "./scrub/scrubber.ts";
-export { DEFAULT_RULES, rulesFromConfig, type ScrubRule } from "./scrub/rules.ts";
-export { defineMock } from "./mocks/types.ts";
-export type { MockModule, MockRoute, MockCtx, MockRequest, MockResponse, KnobManifest, StateStore } from "./mocks/types.ts";
+
+export { type ResolvedProject, resolveProject } from '#src/config/project.ts';
+export { contract } from '#src/contract/index.ts';
+export { inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
+export { ProjectRuntime, runtimeFor, shutdownAllRuntimes } from '#src/daemon/runtime.ts';
+export { openapi, readDaemonState, startDaemon } from '#src/daemon/server.ts';
+export type { KnobManifest, MockCtx, MockModule, MockRequest, MockResponse, MockRoute, StateStore } from '#src/mocks/types.ts';
+export { defineMock } from '#src/mocks/types.ts';
+export { DEFAULT_RULES, rulesFromConfig, type ScrubRule } from '#src/scrub/rules.ts';
+export { type Exchange, Scrubber } from '#src/scrub/scrubber.ts';

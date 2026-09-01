@@ -1,0 +1,11 @@
+# NOTE: the imprint's `[run] bun = true` is deliberately omitted. It shims `node` to Bun
+# inside `bun run` scripts, which would send the front door's Node sidecar through Bun —
+# the Mockttp native TLS path that segfaults there (spikes/01-mockttp-bun/FINDINGS.md).
+
+# Isolated installs — strict, symlinked node_modules (like pnpm), no phantom deps.
+[install]
+linker = "isolated"
+
+# Only re-print failing tests on reruns.
+[test]
+onlyFailures = true

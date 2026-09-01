@@ -6,8 +6,8 @@
  * this module only translates the format. Everything else is `Recorder`'s job, which is
  * what keeps a HAR-sourced row indistinguishable from a front-door one downstream.
  */
-import { z } from "zod";
-import type { CapturedExchange } from "../frontdoor/controller.ts";
+import * as z from 'zod/v4';
+import type { CapturedExchange } from '#src/frontdoor/controller.ts';
 
 const HarHeader = z.object({ name: z.string(), value: z.string() });
 const HarPostData = z.object({ mimeType: z.string().optional(), text: z.string().optional() });
@@ -24,11 +24,13 @@ const HarEntry = z.object({
   response: z.object({
     status: z.number(),
     headers: z.array(HarHeader).default([]),
-    content: z.object({
-      mimeType: z.string().optional(),
-      text: z.string().optional(),
-      encoding: z.string().optional(),
-    }).default({}),
+    content: z
+      .object({
+        mimeType: z.string().optional(),
+        text: z.string().optional(),
+        encoding: z.string().optional(),
+      })
+      .default({}),
   }),
 });
 
@@ -38,7 +40,7 @@ function headers(list: { name: string; value: string }[]): Record<string, string
   const out: Record<string, string | string[]> = {};
   for (const { name, value } of list) {
     // HAR keeps pseudo-headers from h2 captures; they are transport framing, not headers.
-    if (name.startsWith(":")) continue;
+    if (name.startsWith(':')) continue;
     const key = name.toLowerCase();
     const existing = out[key];
     if (existing === undefined) out[key] = value;
@@ -63,16 +65,22 @@ export function parseHar(text: string): HarParseResult {
 
   parsed.data.log.entries.forEach((entry, index) => {
     const url = entry.request.url;
-    if (!/^https?:/i.test(url)) { skipped.push({ url, reason: "not an HTTP(S) request" }); return; }
+    if (!/^https?:/i.test(url)) {
+      skipped.push({ url, reason: 'not an HTTP(S) request' });
+      return;
+    }
 
     const content = entry.response.content;
-    let responseBody = content.text ?? "";
-    if (content.encoding === "base64" && responseBody) {
-      const decoded = Buffer.from(responseBody, "base64");
+    let responseBody = content.text ?? '';
+    if (content.encoding === 'base64' && responseBody) {
+      const decoded = Buffer.from(responseBody, 'base64');
       // A binary body cannot be scrubbed by pattern, and storing it unscrubbed would
       // break the promise that nothing unscrubbed reaches disk. Record the shape only.
-      if (decoded.includes(0)) { skipped.push({ url, reason: "binary response body" }); return; }
-      responseBody = decoded.toString("utf8");
+      if (decoded.includes(0)) {
+        skipped.push({ url, reason: 'binary response body' });
+        return;
+      }
+      responseBody = decoded.toString('utf8');
     }
 
     exchanges.push({
@@ -82,10 +90,10 @@ export function parseHar(text: string): HarParseResult {
       statusCode: entry.response.status,
       requestHeaders: headers(entry.request.headers),
       responseHeaders: headers(entry.response.headers),
-      requestBody: entry.request.postData?.text ?? "",
+      requestBody: entry.request.postData?.text ?? '',
       responseBody,
       durationMs: entry.time !== undefined ? Math.round(entry.time) : null,
-      mode: "record",
+      mode: 'record',
     });
   });
 

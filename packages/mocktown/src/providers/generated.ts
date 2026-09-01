@@ -7,33 +7,36 @@
  * why reset here is a drop + re-seed of SQLite rather than a process restart, and cheap
  * enough to run between test cases (12-scenario-controls.md).
  */
-import { and, eq } from "drizzle-orm";
-import type { Db } from "../db/client.ts";
-import { schema } from "../db/client.ts";
-import { MockHost, type MockHostDeps } from "../mocks/host.ts";
-import { loadMocks, type LoadedMock } from "../mocks/loader.ts";
-import { SqliteStateStore } from "../mocks/state.ts";
-import { Prng, streamKey } from "../mocks/prng.ts";
-import type { KnobManifest, StateStore } from "../mocks/types.ts";
-import type { EndpointRecipe } from "../mocks/types.ts";
-import type { Provider, ProviderCtx, ResetScope, StateSnapshot } from "./types.ts";
+import { and, eq } from 'drizzle-orm';
+import type { Db } from '#src/db/client.ts';
+import { schema } from '#src/db/client.ts';
+import { MockHost, type MockHostDeps } from '#src/mocks/host.ts';
+import { type LoadedMock, loadMocks } from '#src/mocks/loader.ts';
+import { Prng, streamKey } from '#src/mocks/prng.ts';
+import { SqliteStateStore } from '#src/mocks/state.ts';
+import type { EndpointRecipe, KnobManifest, StateStore } from '#src/mocks/types.ts';
+import type { Provider, ProviderCtx, ResetScope, StateSnapshot } from '#src/providers/types.ts';
 
 export interface GeneratedProviderOptions {
   db: Db;
   mocksDir: string;
-  knobsFor: MockHostDeps["knobsFor"];
-  onUnmatched: MockHostDeps["onUnmatched"];
+  knobsFor: MockHostDeps['knobsFor'];
+  onUnmatched: MockHostDeps['onUnmatched'];
 }
 
 export class GeneratedProvider implements Provider {
-  readonly name = "generated";
-  readonly kind = "generated" as const;
+  readonly name = 'generated';
+  readonly kind = 'generated' as const;
   private host?: MockHost;
   private loaded: LoadedMock[] = [];
   private ctx?: ProviderCtx;
   warnings: string[] = [];
 
-  constructor(private readonly options: GeneratedProviderOptions) {}
+  private readonly options: GeneratedProviderOptions;
+
+  constructor(options: GeneratedProviderOptions) {
+    this.options = options;
+  }
 
   get services(): string[] {
     return this.loaded.map((m) => m.module.service);
@@ -86,11 +89,13 @@ export class GeneratedProvider implements Provider {
         const alreadySeeded = this.options.db
           .select()
           .from(schema.mockState)
-          .where(and(
-            eq(schema.mockState.service, module.service),
-            eq(schema.mockState.profile, profile.name),
-            eq(schema.mockState.seeded, true),
-          ))
+          .where(
+            and(
+              eq(schema.mockState.service, module.service),
+              eq(schema.mockState.profile, profile.name),
+              eq(schema.mockState.seeded, true),
+            ),
+          )
           .get();
         if (alreadySeeded) continue;
         this.seedOne(ctx, module.service, profile.name);
@@ -102,9 +107,15 @@ export class GeneratedProvider implements Provider {
     const module = this.loaded.find((m) => m.module.service === service)?.module;
     if (!module?.seed) return;
     const state = new SqliteStateStore(this.options.db, service, profile);
-    const prng = new Prng(streamKey({
-      sessionSeed: ctx.sessionSeed, service, endpoint: "__seed__", profile, requestIdentity: "seed",
-    }));
+    const prng = new Prng(
+      streamKey({
+        sessionSeed: ctx.sessionSeed,
+        service,
+        endpoint: '__seed__',
+        profile,
+        requestIdentity: 'seed',
+      }),
+    );
     // Seeded rows are marked, so `state reset` can tell fixture data from what the app made.
     const marking: StateStore = {
       get: state.get.bind(state),
@@ -119,18 +130,22 @@ export class GeneratedProvider implements Provider {
 
   async reset(scope: ResetScope): Promise<void> {
     const ctx = this.ctx;
-    if (!ctx) throw new Error("generated provider was never started");
+    if (!ctx) throw new Error('generated provider was never started');
     const services = scope.service ? [scope.service] : this.services;
     const profiles = scope.profile
       ? [scope.profile]
-      : this.options.db.select().from(schema.profiles).all().map((p) => p.name);
+      : this.options.db
+          .select()
+          .from(schema.profiles)
+          .all()
+          .map((p) => p.name);
 
     for (const service of services) {
       for (const profile of profiles) {
-        this.options.db.delete(schema.mockState).where(and(
-          eq(schema.mockState.service, service),
-          eq(schema.mockState.profile, profile),
-        )).run();
+        this.options.db
+          .delete(schema.mockState)
+          .where(and(eq(schema.mockState.service, service), eq(schema.mockState.profile, profile)))
+          .run();
         this.seedOne(ctx, service, profile);
       }
     }
@@ -145,11 +160,13 @@ export class GeneratedProvider implements Provider {
     const rows = this.options.db
       .select()
       .from(schema.mockState)
-      .where(and(
-        eq(schema.mockState.service, service),
-        ...(opts.profile ? [eq(schema.mockState.profile, opts.profile)] : []),
-        ...(opts.collection ? [eq(schema.mockState.collection, opts.collection)] : []),
-      ))
+      .where(
+        and(
+          eq(schema.mockState.service, service),
+          ...(opts.profile ? [eq(schema.mockState.profile, opts.profile)] : []),
+          ...(opts.collection ? [eq(schema.mockState.collection, opts.collection)] : []),
+        ),
+      )
       .all();
 
     const byCollection = new Map<string, { key: string; profile: string; seeded: boolean; value: unknown }[]>();
@@ -166,8 +183,7 @@ export class GeneratedProvider implements Provider {
   }
 
   ekbEntries(): { service: string; recipe: EndpointRecipe }[] {
-    return this.loaded.flatMap(({ module }) =>
-      (module.ekb ?? []).map((recipe) => ({ service: module.service, recipe })));
+    return this.loaded.flatMap(({ module }) => (module.ekb ?? []).map((recipe) => ({ service: module.service, recipe })));
   }
 
   /** The file each service's module was loaded from — issues link to it directly. */

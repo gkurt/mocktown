@@ -12,13 +12,13 @@
  * Verified 7/8 in spike 03. The failing test is test 6 and it is not ours to fix:
  * emulate binds every interface with no way to constrain it, so host mode warns.
  */
-import { spawn, type ChildProcess } from "node:child_process";
-import { networkInterfaces } from "node:os";
-import { isAbsolute, resolve } from "node:path";
-import { findFreePortRun, waitForListening } from "../util/ports.ts";
-import type { Provider, ProviderCtx, ResetScope, StateSnapshot } from "./types.ts";
-import type { EndpointRecipe } from "../mocks/types.ts";
-import { EMULATE_RECIPES } from "../ekb/emulate-recipes.ts";
+import { type ChildProcess, spawn } from 'node:child_process';
+import { networkInterfaces } from 'node:os';
+import { isAbsolute, resolve } from 'node:path';
+import { EMULATE_RECIPES } from '#src/ekb/emulate-recipes.ts';
+import type { EndpointRecipe } from '#src/mocks/types.ts';
+import type { Provider, ProviderCtx, ResetScope, StateSnapshot } from '#src/providers/types.ts';
+import { findFreePortRun, waitForListening } from '#src/util/ports.ts';
 
 export interface EmulateProviderOptions {
   /** emulate service ids, e.g. `stripe`, `github`. */
@@ -30,16 +30,20 @@ export interface EmulateProviderOptions {
 }
 
 export class EmulateProvider implements Provider {
-  readonly name = "emulate";
-  readonly kind = "emulator" as const;
+  readonly name = 'emulate';
+  readonly kind = 'emulator' as const;
   private child?: ChildProcess;
-  private urls = new Map<string, string>();     // emulate service id -> baseUrl
+  private urls = new Map<string, string>(); // emulate service id -> baseUrl
   private exited?: { code: number | null };
   private ctx?: ProviderCtx;
   readonly log: string[] = [];
   warnings: string[] = [];
 
-  constructor(private readonly options: EmulateProviderOptions) {}
+  private readonly options: EmulateProviderOptions;
+
+  constructor(options: EmulateProviderOptions) {
+    this.options = options;
+  }
 
   get services(): string[] {
     return this.options.emulateServices.map((s) => this.options.hostnames.get(s) ?? s);
@@ -65,20 +69,25 @@ export class EmulateProvider implements Provider {
     // One process, base port plus an offset per service — so we need a contiguous run of
     // free ports, not one free port (spike 03).
     const basePort = await findFreePortRun(this.options.emulateServices.length);
-    const args = ["emulate", "start", "-p", String(basePort), "-s", this.options.emulateServices.join(",")];
+    const args = ['emulate', 'start', '-p', String(basePort), '-s', this.options.emulateServices.join(',')];
     const seed = this.resolveSeed(ctx);
-    if (seed) args.push("--seed", seed);
+    if (seed) args.push('--seed', seed);
 
-    this.child = spawn("bunx", args, { stdio: ["ignore", "pipe", "pipe"] });
-    this.child.on("exit", (code) => { this.exited = { code }; });
+    this.child = spawn('bunx', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    this.child.on('exit', (code) => {
+      this.exited = { code };
+    });
 
     await this.awaitBanner();
     // The banner announces every service before they are all listening; with three
     // services the third was still refusing connections seconds later (spike 03).
-    await Promise.all([...this.urls].map(([service, url]) =>
-      waitForListening(url).catch(() => {
-        throw new Error(`emulate announced "${service}" at ${url} but it never started listening`);
-      })));
+    await Promise.all(
+      [...this.urls].map(([service, url]) =>
+        waitForListening(url).catch(() => {
+          throw new Error(`emulate announced "${service}" at ${url} but it never started listening`);
+        }),
+      ),
+    );
 
     this.warnings = this.exposureWarnings();
     return this.baseUrls();
@@ -94,7 +103,7 @@ export class EmulateProvider implements Provider {
     const timeoutMs = this.options.startupTimeoutMs ?? 20_000;
     return new Promise<void>((resolvePromise, reject) => {
       const timer = setTimeout(
-        () => reject(new Error(`emulate did not report all services within ${timeoutMs}ms\n${this.log.join("")}`)),
+        () => reject(new Error(`emulate did not report all services within ${timeoutMs}ms\n${this.log.join('')}`)),
         timeoutMs,
       );
       const onChunk = (buf: Buffer) => {
@@ -103,15 +112,18 @@ export class EmulateProvider implements Provider {
         // emulate announces one line per service: "  stripe  http://localhost:4300"
         for (const [, service, url] of text.matchAll(/^\s*(\S+)\s+(https?:\/\/\S+)\s*$/gm)) {
           // Rewrite localhost -> 127.0.0.1 so nothing downstream resolves to ::1 and misses.
-          this.urls.set(service!, url!.replace("//localhost:", "//127.0.0.1:"));
+          this.urls.set(service!, url!.replace('//localhost:', '//127.0.0.1:'));
         }
-        if (this.options.emulateServices.every((s) => this.urls.has(s))) { clearTimeout(timer); resolvePromise(); }
+        if (this.options.emulateServices.every((s) => this.urls.has(s))) {
+          clearTimeout(timer);
+          resolvePromise();
+        }
       };
-      this.child!.stdout?.on("data", onChunk);
-      this.child!.stderr?.on("data", onChunk);
-      this.child!.on("exit", (code) => {
+      this.child!.stdout?.on('data', onChunk);
+      this.child!.stderr?.on('data', onChunk);
+      this.child!.on('exit', (code) => {
         clearTimeout(timer);
-        reject(new Error(`emulate exited during startup with code ${code}\n${this.log.join("")}`));
+        reject(new Error(`emulate exited during startup with code ${code}\n${this.log.join('')}`));
       });
     });
   }
@@ -125,13 +137,13 @@ export class EmulateProvider implements Provider {
   private exposureWarnings(): string[] {
     const external = Object.values(networkInterfaces())
       .flatMap((list) => list ?? [])
-      .filter((iface) => !iface.internal && iface.family === "IPv4")
+      .filter((iface) => !iface.internal && iface.family === 'IPv4')
       .map((iface) => iface.address);
     if (external.length === 0) return [];
     return [
       `emulate binds every interface: its mock services (including OAuth token issuance) ` +
-      `are reachable from this machine's LAN address${external.length > 1 ? "es" : ""} ${external.join(", ")}. ` +
-      `Sealed sandbox mode removes this by construction.`,
+        `are reachable from this machine's LAN address${external.length > 1 ? 'es' : ''} ${external.join(', ')}. ` +
+        `Sealed sandbox mode removes this by construction.`,
     ];
   }
 
@@ -142,7 +154,7 @@ export class EmulateProvider implements Provider {
    */
   async reset(_scope: ResetScope): Promise<void> {
     const ctx = this.ctx;
-    if (!ctx) throw new Error("emulate provider was never started");
+    if (!ctx) throw new Error('emulate provider was never started');
     await this.stop();
     await this.start(ctx);
   }
@@ -171,12 +183,18 @@ export class EmulateProvider implements Provider {
     const child = this.child;
     this.child = undefined;
     this.urls.clear();
-    if (!child || child.exitCode !== null) { this.exited = { code: child?.exitCode ?? 0 }; return; }
+    if (!child || child.exitCode !== null) {
+      this.exited = { code: child?.exitCode ?? 0 };
+      return;
+    }
     // SIGTERM with a SIGKILL fallback; 3s is what the spike found sufficient.
     await new Promise<void>((resolvePromise) => {
-      const force = setTimeout(() => child.kill("SIGKILL"), 3000);
-      child.once("exit", () => { clearTimeout(force); resolvePromise(); });
-      child.kill("SIGTERM");
+      const force = setTimeout(() => child.kill('SIGKILL'), 3000);
+      child.once('exit', () => {
+        clearTimeout(force);
+        resolvePromise();
+      });
+      child.kill('SIGTERM');
     });
     this.exited = { code: child.exitCode };
   }
@@ -184,5 +202,5 @@ export class EmulateProvider implements Provider {
 
 /** `emulator:stripe` -> `stripe`. The registry names providers, not emulate internals. */
 export function emulateServiceId(providerRef: string): string | null {
-  return providerRef.startsWith("emulator:") ? providerRef.slice("emulator:".length) : null;
+  return providerRef.startsWith('emulator:') ? providerRef.slice('emulator:'.length) : null;
 }

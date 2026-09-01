@@ -55,9 +55,9 @@ const HOUSE_RULES = `
 
 export const SKILLS: Skill[] = [
   {
-    name: "generate-mock",
-    version: "1.0.0",
-    summary: "Build a generated mock for one service from its recorded corpus.",
+    name: 'generate-mock',
+    version: '1.0.0',
+    summary: 'Build a generated mock for one service from its recorded corpus.',
     body: `
 # Generate a mock from the corpus
 
@@ -81,7 +81,7 @@ ${HOUSE_RULES}
 
 \`\`\`ts
 import { defineMock } from "mocktown/mock";
-import { z } from "zod";
+import * as z from 'zod/v4';
 
 export default defineMock({
   service: "<hostname>",
@@ -112,9 +112,9 @@ ${UNTRUSTED}
   },
 
   {
-    name: "fix-issues",
-    version: "1.0.0",
-    summary: "Work the issue backlog: unmatched requests, near misses, state violations.",
+    name: 'fix-issues',
+    version: '1.0.0',
+    summary: 'Work the issue backlog: unmatched requests, near misses, state violations.',
     body: `
 # Fix the issue backlog
 
@@ -161,8 +161,8 @@ ${UNTRUSTED}
   },
 
   {
-    name: "apply-redirects",
-    version: "1.0.0",
+    name: 'apply-redirects',
+    version: '1.0.0',
     summary: "Point the application's SDKs at their mocks, and record the recipe.",
     body: `
 # Apply the redirect recipes

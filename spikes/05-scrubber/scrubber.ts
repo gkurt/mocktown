@@ -35,35 +35,60 @@ export const DEFAULT_RULES: ScrubRule[] = [
   // ── Shape-recognised vendor credentials. Listed before the generic ones so a Stripe
   //    key is labelled `stripe-key`, not `bearer-token` — the label is what a generated
   //    mock reasons about.
-  { kind: "stripe-secret-key", pattern: /\bsk_(?:test|live)_[A-Za-z0-9]{8,}/g, fake: (n) => `sk_test_mocktown${String(n).padStart(16, "0")}` },
-  { kind: "stripe-publishable-key", pattern: /\bpk_(?:test|live)_[A-Za-z0-9]{8,}/g, fake: (n) => `pk_test_mocktown${String(n).padStart(16, "0")}` },
-  { kind: "github-token", pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}/g, fake: (n) => `ghp_mocktown${String(n).padStart(28, "0")}` },
-  { kind: "google-client-secret", pattern: /\bGOCSPX-[A-Za-z0-9_-]{5,}/g, fake: (n) => `GOCSPX-mocktown${n}` },
-  { kind: "aws-access-key-id", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, fake: (n) => `AKIAMOCKTOWN${String(n).padStart(8, "0")}` },
-  { kind: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}/g, fake: (n) => `xoxb-mocktown-${n}` },
+  {
+    kind: 'stripe-secret-key',
+    pattern: /\bsk_(?:test|live)_[A-Za-z0-9]{8,}/g,
+    fake: (n) => `sk_test_mocktown${String(n).padStart(16, '0')}`,
+  },
+  {
+    kind: 'stripe-publishable-key',
+    pattern: /\bpk_(?:test|live)_[A-Za-z0-9]{8,}/g,
+    fake: (n) => `pk_test_mocktown${String(n).padStart(16, '0')}`,
+  },
+  { kind: 'github-token', pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}/g, fake: (n) => `ghp_mocktown${String(n).padStart(28, '0')}` },
+  { kind: 'google-client-secret', pattern: /\bGOCSPX-[A-Za-z0-9_-]{5,}/g, fake: (n) => `GOCSPX-mocktown${n}` },
+  { kind: 'aws-access-key-id', pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, fake: (n) => `AKIAMOCKTOWN${String(n).padStart(8, '0')}` },
+  { kind: 'slack-token', pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}/g, fake: (n) => `xoxb-mocktown-${n}` },
 
   // ── JWTs anywhere, per 10-security.md. Three base64url segments.
-  { kind: "jwt", pattern: /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g, fake: (n) => makeFakeJwt(n) },
+  { kind: 'jwt', pattern: /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g, fake: (n) => makeFakeJwt(n) },
 
   // ── PII with recognisable shapes.
-  { kind: "card-number", pattern: /\b(?:\d[ -]?){13,19}\b/g, fake: () => "4242424242424242" },
-  { kind: "ssn", pattern: /\b\d{3}-\d{2}-\d{4}\b/g, fake: (n) => `900-00-${String(1000 + (n % 9000))}` },
+  { kind: 'card-number', pattern: /\b(?:\d[ -]?){13,19}\b/g, fake: () => '4242424242424242' },
+  { kind: 'ssn', pattern: /\b\d{3}-\d{2}-\d{4}\b/g, fake: (n) => `900-00-${String(1000 + (n % 9000))}` },
 
   // ── Location-based: whole-value auth headers.
-  { kind: "auth-header", headers: ["authorization", "proxy-authorization", "x-api-key", "x-auth-token", "x-amz-security-token", "api-key", "x-goog-api-key", "x-stripe-signature"], fake: (n) => `mocktown-credential-${n}` },
-  { kind: "cookie", headers: ["cookie", "set-cookie"], fake: (n) => `mocktown-cookie-${n}` },
+  {
+    kind: 'auth-header',
+    headers: [
+      'authorization',
+      'proxy-authorization',
+      'x-api-key',
+      'x-auth-token',
+      'x-amz-security-token',
+      'api-key',
+      'x-goog-api-key',
+      'x-stripe-signature',
+    ],
+    fake: (n) => `mocktown-credential-${n}`,
+  },
+  { kind: 'cookie', headers: ['cookie', 'set-cookie'], fake: (n) => `mocktown-cookie-${n}` },
 
   // ── Location-based: deny-pattern field names in bodies and query strings.
-  { kind: "password", fields: ["password", "passwd", "pwd"], fake: (n) => `mocktown-password-${n}` },
-  { kind: "secret", fields: ["secret", "client_secret", "private_key", "signing_key"], fake: (n) => `mocktown-secret-${n}` },
-  { kind: "token", fields: ["token", "access_token", "refresh_token", "id_token", "api_key", "apikey"], fake: (n) => `mocktown-token-${n}` },
-  { kind: "card", fields: ["card", "cardnumber", "card_number", "cvc", "cvv"], fake: () => "4242424242424242" },
-  { kind: "ssn-field", fields: ["ssn", "social_security", "tax_id"], fake: (n) => `900-00-${String(1000 + (n % 9000))}` },
+  { kind: 'password', fields: ['password', 'passwd', 'pwd'], fake: (n) => `mocktown-password-${n}` },
+  { kind: 'secret', fields: ['secret', 'client_secret', 'private_key', 'signing_key'], fake: (n) => `mocktown-secret-${n}` },
+  {
+    kind: 'token',
+    fields: ['token', 'access_token', 'refresh_token', 'id_token', 'api_key', 'apikey'],
+    fake: (n) => `mocktown-token-${n}`,
+  },
+  { kind: 'card', fields: ['card', 'cardnumber', 'card_number', 'cvc', 'cvv'], fake: () => '4242424242424242' },
+  { kind: 'ssn-field', fields: ['ssn', 'social_security', 'tax_id'], fake: (n) => `900-00-${String(1000 + (n % 9000))}` },
 ];
 
 function makeFakeJwt(n: number): string {
-  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
-  return `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: `mocktown-${n}`, iss: "mocktown", iat: 0 })}.mocktownsignature${n}`;
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: `mocktown-${n}`, iss: 'mocktown', iat: 0 })}.mocktownsignature${n}`;
 }
 
 /**
@@ -89,7 +114,7 @@ const ENTROPY_ALLOWLIST = /^(?:[A-Za-z]+[-_][A-Za-z]+)+$/;
 
 export function looksHighEntropy(value: string): boolean {
   if (value.length < HIGH_ENTROPY_MIN_LENGTH) return false;
-  if (/\s/.test(value)) return false;                 // prose, not a credential
+  if (/\s/.test(value)) return false; // prose, not a credential
   if (ENTROPY_ALLOWLIST.test(value)) return false;
 
   // Long pure hex is a digest, a session id or a key — never business data. Shannon
@@ -97,7 +122,7 @@ export function looksHighEntropy(value: string): boolean {
   // id measures ~3.59, just under any threshold loose enough to exclude timestamps.
   if (value.length >= 32 && /^[0-9a-f]+$/i.test(value)) return true;
 
-  if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return false;  // needs mixed classes
+  if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return false; // needs mixed classes
   return entropy(value) >= HIGH_ENTROPY_MIN_BITS;
 }
 
@@ -119,7 +144,7 @@ export interface Exchange {
  * requests without ever seeing it.
  */
 export class Scrubber {
-  private readonly registry = new Map<string, string>();   // secret value -> placeholder
+  private readonly registry = new Map<string, string>(); // secret value -> placeholder
   private readonly kindCounts = new Map<string, number>();
   private readonly placeholderKinds = new Map<string, string>(); // placeholder -> kind
   readonly rules: ScrubRule[];
@@ -130,7 +155,10 @@ export class Scrubber {
    * the same removal is covered. That is the definition of defence in depth, and it should
    * be demonstrable rather than assumed.
    */
-  constructor(rules: ScrubRule[] = DEFAULT_RULES, private readonly entropyBackstop = true) {
+  constructor(
+    rules: ScrubRule[] = DEFAULT_RULES,
+    private readonly entropyBackstop = true,
+  ) {
     this.rules = rules;
   }
 
@@ -146,7 +174,7 @@ export class Scrubber {
       if (!rule.pattern) continue;
       const whole = new RegExp(`^(?:${rule.pattern.source})$`);
       if (whole.test(trimmed)) {
-        if (rule.kind === "card-number" && !passesLuhn(trimmed)) continue;
+        if (rule.kind === 'card-number' && !passesLuhn(trimmed)) continue;
         return rule.kind;
       }
     }
@@ -170,18 +198,18 @@ export class Scrubber {
     for (const rule of this.rules) {
       if (!rule.pattern) continue;
       out = out.replace(rule.pattern, (match) => {
-        if (match.startsWith("{{secret:")) return match;
+        if (match.startsWith('{{secret:')) return match;
         // A card-number pattern also matches long digit runs like timestamps; require the
         // Luhn check so amounts and ids survive.
-        if (rule.kind === "card-number" && !passesLuhn(match)) return match;
+        if (rule.kind === 'card-number' && !passesLuhn(match)) return match;
         return this.placeholderFor(match, rule.kind);
       });
     }
     if (!this.entropyBackstop) return out;
     // Entropy backstop, on whole tokens only.
     out = out.replace(/[A-Za-z0-9_\-.]{24,}/g, (token) => {
-      if (token.startsWith("{{secret:") || this.registry.has(token)) return this.registry.get(token) ?? token;
-      return looksHighEntropy(token) ? this.placeholderFor(token, "high-entropy") : token;
+      if (token.startsWith('{{secret:') || this.registry.has(token)) return this.registry.get(token) ?? token;
+      return looksHighEntropy(token) ? this.placeholderFor(token, 'high-entropy') : token;
     });
     return out;
   }
@@ -202,7 +230,7 @@ export class Scrubber {
           return `${scheme[1]} ${this.placeholderFor(credential, this.classify(credential, rule.kind))}`;
         }
         // Cookies are name=value pairs: redact each value, keep each name.
-        if (lower === "cookie" || lower === "set-cookie") {
+        if (lower === 'cookie' || lower === 'set-cookie') {
           return scrubCookie(v, (secret) => this.placeholderFor(secret, this.classify(secret, rule.kind)));
         }
         return this.placeholderFor(v, this.classify(v, rule.kind));
@@ -216,14 +244,14 @@ export class Scrubber {
   private scrubBody(body: string, contentType: string): string {
     if (!body) return body;
 
-    if (contentType.includes("json")) {
+    if (contentType.includes('json')) {
       try {
         return JSON.stringify(this.scrubJson(JSON.parse(body)));
       } catch {
-        return this.scrubValue(body);   // not valid JSON after all
+        return this.scrubValue(body); // not valid JSON after all
       }
     }
-    if (contentType.includes("x-www-form-urlencoded")) {
+    if (contentType.includes('x-www-form-urlencoded')) {
       const params = new URLSearchParams(body);
       const out = new URLSearchParams();
       for (const [key, value] of params) out.append(key, this.scrubField(key, value));
@@ -243,21 +271,21 @@ export class Scrubber {
     return this.scrubValue(value);
   }
 
-  private scrubJson(node: unknown, keyName = ""): unknown {
-    if (typeof node === "string") return this.scrubField(keyName, node);
-    if (typeof node === "number" && this.fieldRule(keyName)) {
+  private scrubJson(node: unknown, keyName = ''): unknown {
+    if (typeof node === 'string') return this.scrubField(keyName, node);
+    if (typeof node === 'number' && this.fieldRule(keyName)) {
       return this.placeholderFor(String(node), this.classify(String(node), this.fieldRule(keyName)!.kind));
     }
     if (Array.isArray(node)) return node.map((item) => this.scrubJson(item, keyName));
-    if (node && typeof node === "object") {
+    if (node && typeof node === 'object') {
       return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, this.scrubJson(v, k)]));
     }
     return node;
   }
 
   scrub(exchange: Exchange): Exchange {
-    const reqType = String(exchange.requestHeaders["content-type"] ?? "");
-    const resType = String(exchange.responseHeaders["content-type"] ?? "");
+    const reqType = String(exchange.requestHeaders['content-type'] ?? '');
+    const resType = String(exchange.responseHeaders['content-type'] ?? '');
     const url = new URL(exchange.url);
     for (const [key, value] of [...url.searchParams]) url.searchParams.set(key, this.scrubField(key, value));
 
@@ -288,18 +316,18 @@ export class Scrubber {
     const findings: { exchangeId: string; where: string; sample: string; kind: string }[] = [];
     for (const exchange of scrubbedCorpus) {
       const places: [string, string][] = [
-        ["url", exchange.url],
-        ["requestHeaders", JSON.stringify(exchange.requestHeaders)],
-        ["responseHeaders", JSON.stringify(exchange.responseHeaders)],
-        ["requestBody", exchange.requestBody],
-        ["responseBody", exchange.responseBody],
+        ['url', exchange.url],
+        ['requestHeaders', JSON.stringify(exchange.requestHeaders)],
+        ['responseHeaders', JSON.stringify(exchange.responseHeaders)],
+        ['requestBody', exchange.requestBody],
+        ['responseBody', exchange.responseBody],
       ];
       for (const [where, text] of places) {
         if (!text) continue;
         for (const rule of this.rules) {
           if (!rule.pattern) continue;
           for (const match of text.matchAll(rule.pattern)) {
-            if (rule.kind === "card-number" && !passesLuhn(match[0])) continue;
+            if (rule.kind === 'card-number' && !passesLuhn(match[0])) continue;
             findings.push({ exchangeId: exchange.id, where, kind: rule.kind, sample: match[0].slice(0, 24) });
           }
         }
@@ -318,24 +346,29 @@ function scrubCookie(value: string, redact: (secret: string) => string): string 
   return value
     .split(/;\s*/)
     .map((part) => {
-      const eq = part.indexOf("=");
-      if (eq < 1) return part;                       // flags like HttpOnly, Secure
+      const eq = part.indexOf('=');
+      if (eq < 1) return part; // flags like HttpOnly, Secure
       const name = part.slice(0, eq);
       // Cookie attributes are metadata, not credentials.
       if (/^(Path|Domain|Expires|Max-Age|SameSite|Priority|Version)$/i.test(name)) return part;
       return `${name}=${redact(part.slice(eq + 1))}`;
     })
-    .join("; ");
+    .join('; ');
 }
 
 function passesLuhn(value: string): boolean {
-  const digits = value.replace(/\D/g, "");
+  const digits = value.replace(/\D/g, '');
   if (digits.length < 13 || digits.length > 19) return false;
-  let sum = 0, double = false;
+  let sum = 0,
+    double = false;
   for (let i = digits.length - 1; i >= 0; i--) {
     let d = digits.charCodeAt(i) - 48;
-    if (double) { d *= 2; if (d > 9) d -= 9; }
-    sum += d; double = !double;
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
   }
   return sum % 10 === 0;
 }

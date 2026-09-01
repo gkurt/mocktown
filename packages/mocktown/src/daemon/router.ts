@@ -7,28 +7,26 @@
  * are HTTP clients of exactly this surface, so a capability that is not here does not
  * exist for any of them.
  */
-import { readFileSync } from "node:fs";
-import { existsSync, mkdirSync } from "node:fs";
-import { and, desc, eq } from "drizzle-orm";
-import { implement } from "@orpc/server";
-import { ORPCError } from "@orpc/client";
-import { contract } from "../contract/index.ts";
-import { schema } from "../db/client.ts";
-import { runtimeFor } from "./runtime.ts";
-import { projectPaths } from "../config/paths.ts";
-import { exportCorpus, recordingsForService, routeTable } from "../mocks/corpus.ts";
-import { scaffoldMock } from "../mocks/scaffold.ts";
-import { verifyRecordings } from "../mocks/verify.ts";
-import { parseHar } from "../capture/har.ts";
-import { Recorder, endSession, startSession } from "../capture/recorder.ts";
-import { listProfiles, mintProfileSession } from "../scenario/profiles.ts";
-import { setKnobs } from "../scenario/knobs.ts";
-import { generateEnv, renderAgentsSection, renderEnvFile, writeAgentsSection } from "../env/generate.ts";
-import { join } from "node:path";
-import { writeFileSync } from "node:fs";
-import { id } from "../util/id.ts";
-import { SKILLS, findSkill } from "../skills/index.ts";
-import type { ProviderRef, Recording, Service } from "../contract/schemas.ts";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ORPCError } from '@orpc/client';
+import { implement } from '@orpc/server';
+import { and, desc, eq } from 'drizzle-orm';
+import { parseHar } from '#src/capture/har.ts';
+import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
+import { projectPaths } from '#src/config/paths.ts';
+import { contract } from '#src/contract/index.ts';
+import type { ProviderRef, Recording, Service } from '#src/contract/schemas.ts';
+import { runtimeFor } from '#src/daemon/runtime.ts';
+import { schema } from '#src/db/client.ts';
+import { generateEnv, renderAgentsSection, renderEnvFile, writeAgentsSection } from '#src/env/generate.ts';
+import { exportCorpus, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
+import { scaffoldMock } from '#src/mocks/scaffold.ts';
+import { verifyRecordings } from '#src/mocks/verify.ts';
+import { setKnobs } from '#src/scenario/knobs.ts';
+import { listProfiles, mintProfileSession } from '#src/scenario/profiles.ts';
+import { findSkill, SKILLS } from '#src/skills/index.ts';
+import { id } from '#src/util/id.ts';
 
 const os = implement(contract);
 
@@ -53,7 +51,7 @@ function toRecording(project: string, row: typeof schema.recordings.$inferSelect
   const readBlob = (hash: string | null) => {
     if (!hash) return null;
     const path = join(blobDir, hash);
-    return existsSync(path) ? readFileSync(path, "utf8") : null;
+    return existsSync(path) ? readFileSync(path, 'utf8') : null;
   };
   return {
     ...row,
@@ -71,15 +69,17 @@ export const router = os.router({
     get: os.status.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
       const recordings = runtime.db.select().from(schema.recordings).all().length;
-      const openIssues = runtime.issues.list({ status: "open" }).length;
+      const openIssues = runtime.issues.list({ status: 'open' }).length;
       const services = runtime.services().map(toService);
 
       const warnings = [
         ...runtime.providerStatuses().flatMap((p) => p.warnings),
         // Silent passthroughs are forbidden (06-emulation.md), so every one is announced.
-        ...services.filter((s) => s.provider === "passthrough")
+        ...services
+          .filter((s) => s.provider === 'passthrough')
           .map((s) => `${s.id} is set to passthrough: its traffic goes to the real service and is not recorded.`),
-        ...services.filter((s) => s.discovered)
+        ...services
+          .filter((s) => s.discovered)
           .map((s) => `${s.id} was discovered from traffic and is not in mocktown.json. Add it to commit the decision.`),
       ];
 
@@ -90,7 +90,7 @@ export const router = os.router({
         // The daemon only ever receives a project *name*; the surface that resolved it
         // says how. A surface that stays silent gets "unknown" rather than a guess —
         // misreported resolution is exactly the confusion 08-projects-config.md warns of.
-        source: input.source ?? "unknown",
+        source: input.source ?? 'unknown',
         workspace: runtime.resolved.workspace,
         frontDoor: runtime.frontDoorStatus(),
         services,
@@ -106,7 +106,8 @@ export const router = os.router({
   services: {
     list: os.services.list.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const services = runtime.services()
+      const services = runtime
+        .services()
         .map(toService)
         .filter((s) => !input.provider || s.provider === input.provider);
       return { project: runtime.name, services };
@@ -114,7 +115,8 @@ export const router = os.router({
 
     set: os.services.set.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      runtime.db.insert(schema.services)
+      runtime.db
+        .insert(schema.services)
         .values({ id: input.id, provider: input.provider, seed: input.seed ?? null, discovered: false })
         .onConflictDoUpdate({
           target: schema.services.id,
@@ -137,9 +139,14 @@ export const router = os.router({
       const base = runtime.db.select().from(schema.recordings);
       const filtered = conditions.length ? base.where(and(...conditions)) : base;
       const rows = filtered.orderBy(desc(schema.recordings.recordedAt)).limit(input.limit).offset(input.offset).all();
-      const total = (conditions.length
-        ? runtime.db.select().from(schema.recordings).where(and(...conditions))
-        : runtime.db.select().from(schema.recordings)).all().length;
+      const total = (
+        conditions.length
+          ? runtime.db
+              .select()
+              .from(schema.recordings)
+              .where(and(...conditions))
+          : runtime.db.select().from(schema.recordings)
+      ).all().length;
 
       return { project: runtime.name, total, recordings: rows.map((row) => toRecording(runtime.name, row)) };
     }),
@@ -147,7 +154,7 @@ export const router = os.router({
     get: os.recordings.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
       const row = runtime.db.select().from(schema.recordings).where(eq(schema.recordings.id, input.id)).get();
-      if (!row) throw new ORPCError("NOT_FOUND", { message: `no recording "${input.id}"` });
+      if (!row) throw new ORPCError('NOT_FOUND', { message: `no recording "${input.id}"` });
       return { project: runtime.name, recording: toRecording(runtime.name, row) };
     }),
 
@@ -193,16 +200,16 @@ export const router = os.router({
   import: {
     har: os.import.har.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      if (!existsSync(input.path)) throw new ORPCError("NOT_FOUND", { message: `no such file: ${input.path}` });
+      if (!existsSync(input.path)) throw new ORPCError('NOT_FOUND', { message: `no such file: ${input.path}` });
 
-      const { exchanges, skipped } = parseHar(readFileSync(input.path, "utf8"));
-      const session = startSession(runtime.db, "import", { label: input.label ?? input.path });
+      const { exchanges, skipped } = parseHar(readFileSync(input.path, 'utf8'));
+      const session = startSession(runtime.db, 'import', { label: input.label ?? input.path });
       // Imported exchanges run through the same scrubber and land in the same corpus
       // (03-capture.md), so downstream cannot tell a HAR row from a front-door one.
       const recorder = new Recorder(runtime.db, runtime.name, runtime.currentScrubber, session);
       const services = new Set<string>();
       for (const exchange of exchanges) {
-        const row = recorder.record(exchange, "har");
+        const row = recorder.record(exchange, 'har');
         if (row) services.add(row.service);
       }
       endSession(runtime.db, session);
@@ -214,18 +221,27 @@ export const router = os.router({
   scrub: {
     audit: os.scrub.audit.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const rows = (input.service
-        ? runtime.db.select().from(schema.recordings).where(eq(schema.recordings.service, input.service))
-        : runtime.db.select().from(schema.recordings)).all();
+      const rows = (
+        input.service
+          ? runtime.db.select().from(schema.recordings).where(eq(schema.recordings.service, input.service))
+          : runtime.db.select().from(schema.recordings)
+      ).all();
 
-      const findings = runtime.currentScrubber.audit(rows.map((row) => {
-        const recording = toRecording(runtime.name, row);
-        return {
-          id: row.id, method: row.method, url: `https://${row.service}${row.path}`, statusCode: row.statusCode,
-          requestHeaders: row.requestHeaders, responseHeaders: row.responseHeaders,
-          requestBody: recording.requestBody ?? "", responseBody: recording.responseBody ?? "",
-        };
-      }));
+      const findings = runtime.currentScrubber.audit(
+        rows.map((row) => {
+          const recording = toRecording(runtime.name, row);
+          return {
+            id: row.id,
+            method: row.method,
+            url: `https://${row.service}${row.path}`,
+            statusCode: row.statusCode,
+            requestHeaders: row.requestHeaders,
+            responseHeaders: row.responseHeaders,
+            requestBody: recording.requestBody ?? '',
+            responseBody: recording.responseBody ?? '',
+          };
+        }),
+      );
 
       return {
         project: runtime.name,
@@ -247,7 +263,7 @@ export const router = os.router({
     get: os.issues.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
       const issue = runtime.issues.get(input.id);
-      if (!issue) throw new ORPCError("NOT_FOUND", { message: `no issue "${input.id}"` });
+      if (!issue) throw new ORPCError('NOT_FOUND', { message: `no issue "${input.id}"` });
       return { project: runtime.name, issue: toIssue(issue) };
     }),
 
@@ -259,23 +275,27 @@ export const router = os.router({
     resolve: os.issues.resolve.handler(async ({ input }) => {
       const runtime = runtimeFor(input.project);
       const issue = runtime.issues.get(input.id);
-      if (!issue) throw new ORPCError("NOT_FOUND", { message: `no issue "${input.id}"` });
+      if (!issue) throw new ORPCError('NOT_FOUND', { message: `no issue "${input.id}"` });
 
       // Some issue types have nothing to replay — a pinned client never reaches a mock.
-      const unverifiable = issue.type === "pinned-client" || issue.type === "redirect-gap";
+      const unverifiable = issue.type === 'pinned-client' || issue.type === 'redirect-gap';
       if (input.skipVerify || unverifiable) {
-        runtime.issues.setStatus(input.id, "resolved", input.note ?? (unverifiable ? "closed without replay: this issue type has no request to replay" : undefined));
+        runtime.issues.setStatus(
+          input.id,
+          'resolved',
+          input.note ?? (unverifiable ? 'closed without replay: this issue type has no request to replay' : undefined),
+        );
         return { project: runtime.name, issue: toIssue(runtime.issues.get(input.id)!), verified: false, verification: null };
       }
 
       const baseUrl = runtime.baseUrlFor(issue.service);
       if (!baseUrl) {
-        throw new ORPCError("CONFLICT", {
+        throw new ORPCError('CONFLICT', {
           message: `no provider is running for "${issue.service}", so the fix cannot be verified. Start one with \`mocktown serve start\` and resolve again.`,
         });
       }
 
-      runtime.issues.setStatus(input.id, "verifying");
+      runtime.issues.setStatus(input.id, 'verifying');
       const recordings = recordingsForService(runtime.db, issue.service, undefined, 100)
         .filter((row) => !issue.pathTemplate || row.pathTemplate === issue.pathTemplate)
         .map((row) => toRecording(runtime.name, row));
@@ -284,7 +304,7 @@ export const router = os.router({
       const passed = result.failed === 0;
       runtime.issues.setStatus(
         input.id,
-        passed ? "resolved" : "reopened",
+        passed ? 'resolved' : 'reopened',
         passed ? input.note : `verification failed: ${result.failed}/${result.total} replayed requests did not match`,
       );
 
@@ -301,7 +321,7 @@ export const router = os.router({
     restart: os.providers.restart.handler(async ({ input }) => {
       const runtime = runtimeFor(input.project);
       const provider = runtime.providerStatuses().find((p) => p.name === input.name);
-      if (!provider) throw new ORPCError("NOT_FOUND", { message: `no running provider named "${input.name}"` });
+      if (!provider) throw new ORPCError('NOT_FOUND', { message: `no running provider named "${input.name}"` });
       await runtime.resetState({});
       const after = runtime.providerStatuses().find((p) => p.name === input.name)!;
       return { project: runtime.name, provider: after };
@@ -313,25 +333,31 @@ export const router = os.router({
       const runtime = runtimeFor(input.project);
       const baseUrl = runtime.baseUrlFor(input.service);
       if (!baseUrl) {
-        throw new ORPCError("CONFLICT", {
+        throw new ORPCError('CONFLICT', {
           message: `no provider is running for "${input.service}". Run \`mocktown serve start\` first.`,
         });
       }
-      const recordings = recordingsForService(runtime.db, input.service, input.session, input.limit)
-        .map((row) => toRecording(runtime.name, row));
+      const recordings = recordingsForService(runtime.db, input.service, input.session, input.limit).map((row) =>
+        toRecording(runtime.name, row),
+      );
       const result = await verifyRecordings(recordings, { baseUrl, service: input.service }, runtime.currentScrubber);
 
       // A failing replay is evidence, so it becomes work rather than console output.
       for (const failure of result.failures) {
         runtime.issues.file({
-          type: "state-violation",
+          type: 'state-violation',
           service: input.service,
           method: failure.method,
           path: failure.path,
           pathTemplate: failure.path,
           sessionId: runtime.session,
           request: { method: failure.method, path: failure.path },
-          diagnosis: { reason: failure.reason, diff: failure.diff, expectedStatus: failure.expectedStatus, actualStatus: failure.actualStatus },
+          diagnosis: {
+            reason: failure.reason,
+            diff: failure.diff,
+            expectedStatus: failure.expectedStatus,
+            actualStatus: failure.actualStatus,
+          },
           suggestedResolution: `Replay of recording ${failure.recordingId} did not match. ${failure.reason}`,
           links: [`mocktown recordings get --id ${failure.recordingId}`],
         });
@@ -344,13 +370,13 @@ export const router = os.router({
       const runtime = runtimeFor(input.project);
       const paths = runtime.resolved.paths;
       if (!paths) {
-        throw new ORPCError("CONFLICT", {
-          message: "scaffolding writes into the repo, so it needs a workspace. Run `mocktown init` in the repo first.",
+        throw new ORPCError('CONFLICT', {
+          message: 'scaffolding writes into the repo, so it needs a workspace. Run `mocktown init` in the repo first.',
         });
       }
       const corpus = exportCorpus(runtime.db, input.service, 5);
       if (corpus.routes.length === 0) {
-        throw new ORPCError("CONFLICT", {
+        throw new ORPCError('CONFLICT', {
           message: `no recordings for "${input.service}" — record some traffic first, or import a HAR file.`,
         });
       }
@@ -370,7 +396,10 @@ export const router = os.router({
       const runtime = runtimeFor(input.project);
       const artifacts = envArtifacts(runtime);
       const paths = runtime.resolved.paths;
-      if (!paths) throw new ORPCError("BAD_REQUEST", { message: "This project has no workspace, so there is nowhere to write. Run `mocktown init` in the repo first." });
+      if (!paths)
+        throw new ORPCError('BAD_REQUEST', {
+          message: 'This project has no workspace, so there is nowhere to write. Run `mocktown init` in the repo first.',
+        });
 
       writeFileSync(paths.envFile, renderEnvFile(runtime.name, artifacts.variables));
       const written = [
@@ -391,7 +420,7 @@ export const router = os.router({
       const runtime = runtimeFor(input.project);
       const skill = findSkill(input.name);
       if (!skill) {
-        throw new ORPCError("NOT_FOUND", { message: `no skill "${input.name}" — available: ${SKILLS.map((s) => s.name).join(", ")}` });
+        throw new ORPCError('NOT_FOUND', { message: `no skill "${input.name}" — available: ${SKILLS.map((s) => s.name).join(', ')}` });
       }
       return { project: runtime.name, skill };
     }),
@@ -400,25 +429,30 @@ export const router = os.router({
   ekb: {
     list: os.ekb.list.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const rows = (input.service
-        ? runtime.db.select().from(schema.ekb).where(eq(schema.ekb.service, input.service))
-        : runtime.db.select().from(schema.ekb)).all();
+      const rows = (
+        input.service
+          ? runtime.db.select().from(schema.ekb).where(eq(schema.ekb.service, input.service))
+          : runtime.db.select().from(schema.ekb)
+      ).all();
       return { project: runtime.name, entries: rows.map((row) => ({ ...row })) };
     }),
 
     add: os.ekb.add.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const entryId = id("ekb");
-      runtime.db.insert(schema.ekb).values({
-        id: entryId,
-        service: input.service,
-        rung: input.rung,
-        envVar: input.envVar ?? null,
-        language: input.language ?? null,
-        snippet: input.snippet ?? null,
-        note: input.note ?? null,
-        source: "user",
-      }).run();
+      const entryId = id('ekb');
+      runtime.db
+        .insert(schema.ekb)
+        .values({
+          id: entryId,
+          service: input.service,
+          rung: input.rung,
+          envVar: input.envVar ?? null,
+          language: input.language ?? null,
+          snippet: input.snippet ?? null,
+          note: input.note ?? null,
+          source: 'user',
+        })
+        .run();
       const row = runtime.db.select().from(schema.ekb).where(eq(schema.ekb.id, entryId)).get()!;
       return { project: runtime.name, entry: { ...row } };
     }),
@@ -430,7 +464,7 @@ export const router = os.router({
       return {
         project: runtime.name,
         service: input.service,
-        knobs: runtime.describeKnobsFor(input.service, input.profile ?? "default"),
+        knobs: runtime.describeKnobsFor(input.service, input.profile ?? 'default'),
       };
     }),
 
@@ -438,17 +472,17 @@ export const router = os.router({
       const runtime = runtimeFor(input.project);
       const manifest = runtime.knobManifest(input.service);
       if (!manifest) {
-        throw new ORPCError("CONFLICT", {
+        throw new ORPCError('CONFLICT', {
           message: `no running mock for "${input.service}" declares knobs. Start it with \`mocktown serve start\`.`,
         });
       }
-      const { rejected } = setKnobs(runtime.db, manifest, input.service, input.values, runtime.session ?? "no-session");
+      const { rejected } = setKnobs(runtime.db, manifest, input.service, input.values, runtime.session ?? 'no-session');
       if (rejected.length > 0) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: rejected.map((r) => `${r.key}: ${r.reason}`).join("; "),
+        throw new ORPCError('BAD_REQUEST', {
+          message: rejected.map((r) => `${r.key}: ${r.reason}`).join('; '),
         });
       }
-      return { project: runtime.name, service: input.service, knobs: runtime.describeKnobsFor(input.service, "default") };
+      return { project: runtime.name, service: input.service, knobs: runtime.describeKnobsFor(input.service, 'default') };
     }),
   },
 
@@ -460,30 +494,34 @@ export const router = os.router({
 
     set: os.profiles.set.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      runtime.db.insert(schema.profiles).values({
-        name: input.name,
-        description: input.description,
-        credentials: input.credentials ?? {},
-        context: input.context ?? {},
-        knobOverrides: input.knobOverrides ?? {},
-        signIn: input.signIn ?? "credentials",
-      }).onConflictDoUpdate({
-        target: schema.profiles.name,
-        set: {
+      runtime.db
+        .insert(schema.profiles)
+        .values({
+          name: input.name,
           description: input.description,
-          ...(input.credentials ? { credentials: input.credentials } : {}),
-          ...(input.context ? { context: input.context } : {}),
-          ...(input.knobOverrides ? { knobOverrides: input.knobOverrides } : {}),
-          ...(input.signIn ? { signIn: input.signIn } : {}),
-        },
-      }).run();
+          credentials: input.credentials ?? {},
+          context: input.context ?? {},
+          knobOverrides: input.knobOverrides ?? {},
+          signIn: input.signIn ?? 'credentials',
+        })
+        .onConflictDoUpdate({
+          target: schema.profiles.name,
+          set: {
+            description: input.description,
+            ...(input.credentials ? { credentials: input.credentials } : {}),
+            ...(input.context ? { context: input.context } : {}),
+            ...(input.knobOverrides ? { knobOverrides: input.knobOverrides } : {}),
+            ...(input.signIn ? { signIn: input.signIn } : {}),
+          },
+        })
+        .run();
       const row = runtime.db.select().from(schema.profiles).where(eq(schema.profiles.name, input.name)).get()!;
       return { project: runtime.name, profile: { ...row } };
     }),
 
     session: os.profiles.session.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const minted = mintProfileSession(runtime.db, input.name, runtime.session ?? startSession(runtime.db, "serve"));
+      const minted = mintProfileSession(runtime.db, input.name, runtime.session ?? startSession(runtime.db, 'serve'));
       return { project: runtime.name, profile: input.name, ...minted };
     }),
   },
@@ -493,12 +531,14 @@ export const router = os.router({
       const runtime = runtimeFor(input.project);
       const provider = runtime.providerFor(input.service);
       if (!provider) {
-        throw new ORPCError("NOT_FOUND", {
+        throw new ORPCError('NOT_FOUND', {
           message: `no running provider serves "${input.service}". Run \`mocktown serve start\` first.`,
         });
       }
-      const snapshot = provider.state?.(input.service, { profile: input.profile, collection: input.collection })
-        ?? { collections: [], note: `The ${provider.kind} provider does not implement state introspection.` };
+      const snapshot = provider.state?.(input.service, { profile: input.profile, collection: input.collection }) ?? {
+        collections: [],
+        note: `The ${provider.kind} provider does not implement state introspection.`,
+      };
       return { project: runtime.name, service: input.service, ...snapshot };
     }),
 
@@ -519,7 +559,11 @@ function envArtifacts(runtime: ReturnType<typeof runtimeFor>) {
     proxyUrl: `http://127.0.0.1:${frontDoor.port ?? runtime.resolved.local.frontDoorPort ?? 4400}`,
     caCertPath: projectPaths(runtime.name).caCert,
     baseUrls: runtime.allBaseUrls(),
-    ekb: runtime.db.select().from(schema.ekb).all().map((row) => ({ ...row })),
+    ekb: runtime.db
+      .select()
+      .from(schema.ekb)
+      .all()
+      .map((row) => ({ ...row })),
     services: runtime.services().map((s) => s.id),
   });
 }

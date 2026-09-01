@@ -3,12 +3,12 @@
  * services on consecutive ports (spike 03), so probing a single port and assuming the
  * next is free is a race on a developer's machine.
  */
-import { createServer } from "node:net";
+import { createServer } from 'node:net';
 
 function bindable(port: number, host?: string): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
-    server.once("error", () => resolve(false));
+    server.once('error', () => resolve(false));
     const done = () => server.close(() => resolve(true));
     host ? server.listen(port, host, done) : server.listen(port, done);
   });
@@ -21,7 +21,7 @@ function bindable(port: number, host?: string): Promise<boolean> {
  * that then dies with an opaque `EADDRINUSE` inside whichever process claimed it second.
  */
 async function probe(port: number): Promise<boolean> {
-  return (await bindable(port, "127.0.0.1")) && (await bindable(port));
+  return (await bindable(port, '127.0.0.1')) && (await bindable(port));
 }
 
 export async function findFreePort(from = 4500, span = 500): Promise<number> {
@@ -40,7 +40,7 @@ export async function findFreePortRun(count: number, from = 4600, span = 500): P
 /** A child process's stdout is evidence of intent, not of readiness (spike 03). */
 export async function waitForListening(url: string, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  let lastError = "no attempt made";
+  let lastError = 'no attempt made';
   while (Date.now() < deadline) {
     try {
       await fetch(url, { signal: AbortSignal.timeout(1000) });

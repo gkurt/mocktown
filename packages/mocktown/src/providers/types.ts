@@ -7,8 +7,7 @@
  * so `start()` returns a service -> baseUrl map rather than a single URL, and port
  * allocation has to reserve a contiguous run.
  */
-import type { KnobManifest } from "../mocks/types.ts";
-import type { EndpointRecipe } from "../mocks/types.ts";
+import type { EndpointRecipe, KnobManifest } from '#src/mocks/types.ts';
 
 export interface ProviderCtx {
   project: string;
@@ -32,7 +31,7 @@ export interface StateSnapshot {
 export interface Provider {
   /** Stable name used by `mocktown providers restart <name>`. */
   name: string;
-  kind: "emulator" | "generated" | "passthrough";
+  kind: 'emulator' | 'generated' | 'passthrough';
   /** Hostnames or logical service ids this backend serves. */
   services: string[];
   running: boolean;

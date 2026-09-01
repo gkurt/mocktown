@@ -7,30 +7,30 @@
  * in `router.ts` are a thin projection of this class, which is what makes the CLI, the
  * MCP server and (later) the GUI equivalent by construction rather than by care.
  */
-import { existsSync, mkdirSync } from "node:fs";
-import { and, eq } from "drizzle-orm";
-import type { Db } from "../db/client.ts";
-import { openProjectDb, schema } from "../db/client.ts";
-import { ensureRegistered, resolveProject, type ResolvedProject } from "../config/project.ts";
-import { projectPaths } from "../config/paths.ts";
-import { ensureProjectCa } from "../frontdoor/ca.ts";
-import { FrontDoor, type CapturedExchange, type WallHit } from "../frontdoor/controller.ts";
-import { routeForProvider, type Route, type RoutingTable } from "../frontdoor/routing.ts";
-import { Recorder, endSession, startSession } from "../capture/recorder.ts";
-import { captureEnv } from "../capture/launch.ts";
-import { Scrubber } from "../scrub/scrubber.ts";
-import { rulesFromConfig } from "../scrub/rules.ts";
-import { IssueEngine } from "../issues/engine.ts";
-import { EmulateProvider, emulateServiceId } from "../providers/emulate.ts";
-import { GeneratedProvider } from "../providers/generated.ts";
-import type { Provider } from "../providers/types.ts";
-import { ensureDefaultProfiles } from "../scenario/profiles.ts";
-import { describeKnobs, effectiveKnobs } from "../scenario/knobs.ts";
-import { templatePath } from "../capture/normalize.ts";
-import { id } from "../util/id.ts";
+import { existsSync, mkdirSync } from 'node:fs';
+import { and, eq } from 'drizzle-orm';
+import { captureEnv } from '#src/capture/launch.ts';
+import { templatePath } from '#src/capture/normalize.ts';
+import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
+import { projectPaths } from '#src/config/paths.ts';
+import { ensureRegistered, type ResolvedProject, resolveProject } from '#src/config/project.ts';
+import type { Db } from '#src/db/client.ts';
+import { openProjectDb, schema } from '#src/db/client.ts';
+import { ensureProjectCa } from '#src/frontdoor/ca.ts';
+import { type CapturedExchange, FrontDoor, type WallHit } from '#src/frontdoor/controller.ts';
+import { type Route, type RoutingTable, routeForProvider } from '#src/frontdoor/routing.ts';
+import { IssueEngine } from '#src/issues/engine.ts';
+import { EmulateProvider, emulateServiceId } from '#src/providers/emulate.ts';
+import { GeneratedProvider } from '#src/providers/generated.ts';
+import type { Provider } from '#src/providers/types.ts';
+import { describeKnobs, effectiveKnobs } from '#src/scenario/knobs.ts';
+import { ensureDefaultProfiles } from '#src/scenario/profiles.ts';
+import { rulesFromConfig } from '#src/scrub/rules.ts';
+import { Scrubber } from '#src/scrub/scrubber.ts';
+import { id } from '#src/util/id.ts';
 
 export interface RuntimeMode {
-  kind: "idle" | "record" | "serve";
+  kind: 'idle' | 'record' | 'serve';
   sealed: boolean;
 }
 
@@ -43,9 +43,9 @@ export class ProjectRuntime {
   private recorder?: Recorder;
   private providers: Provider[] = [];
   private sessionId: string | null = null;
-  private sessionSeed = "mocktown-default-seed";
+  private sessionSeed = 'mocktown-default-seed';
   private recordedCount = 0;
-  mode: RuntimeMode = { kind: "idle", sealed: false };
+  mode: RuntimeMode = { kind: 'idle', sealed: false };
 
   constructor(project: ResolvedProject) {
     this.project = project;
@@ -57,10 +57,18 @@ export class ProjectRuntime {
     this.scrubber = new Scrubber(rulesFromConfig(project.file?.scrub), project.file?.scrub?.entropyBackstop ?? true);
   }
 
-  get name(): string { return this.project.name; }
-  get resolved(): ResolvedProject { return this.project; }
-  get session(): string | null { return this.sessionId; }
-  get currentScrubber(): Scrubber { return this.scrubber; }
+  get name(): string {
+    return this.project.name;
+  }
+  get resolved(): ResolvedProject {
+    return this.project;
+  }
+  get session(): string | null {
+    return this.sessionId;
+  }
+  get currentScrubber(): Scrubber {
+    return this.scrubber;
+  }
 
   /** Re-read `mocktown.json` — an agent editing the registry should not need a restart. */
   reload(): void {
@@ -75,7 +83,8 @@ export class ProjectRuntime {
    */
   private syncRegistryFromConfig(): void {
     for (const [host, config] of Object.entries(this.project.file?.services ?? {})) {
-      this.db.insert(schema.services)
+      this.db
+        .insert(schema.services)
         .values({ id: host, provider: config.provider, seed: config.seed ?? null, discovered: false })
         .onConflictDoUpdate({
           target: schema.services.id,
@@ -84,9 +93,10 @@ export class ProjectRuntime {
         .run();
     }
     for (const host of this.project.local.passthrough) {
-      this.db.insert(schema.services)
-        .values({ id: host, provider: "passthrough", discovered: false })
-        .onConflictDoUpdate({ target: schema.services.id, set: { provider: "passthrough" } })
+      this.db
+        .insert(schema.services)
+        .values({ id: host, provider: 'passthrough', discovered: false })
+        .onConflictDoUpdate({ target: schema.services.id, set: { provider: 'passthrough' } })
         .run();
     }
   }
@@ -115,7 +125,7 @@ export class ProjectRuntime {
   private onExchange(exchange: CapturedExchange): void {
     // Only `record` persists. `passthrough` is explicitly not recorded (03-capture.md's
     // mode table), and `mock` traffic is the mock's own output, not evidence about reality.
-    if (exchange.mode !== "record" || !this.recorder) return;
+    if (exchange.mode !== 'record' || !this.recorder) return;
     this.recorder.record(exchange);
     this.recordedCount++;
   }
@@ -125,13 +135,18 @@ export class ProjectRuntime {
     // Scrub before the request is stored on an issue: issues embed requests and flow
     // through the same scrubber (10-security.md).
     const scrubbed = this.scrubber.scrub({
-      id: id("hit"), method: hit.method, url: hit.url, statusCode: 502,
-      requestHeaders: hit.headers, requestBody: hit.body,
-      responseHeaders: {}, responseBody: "",
+      id: id('hit'),
+      method: hit.method,
+      url: hit.url,
+      statusCode: 502,
+      requestHeaders: hit.headers,
+      requestBody: hit.body,
+      responseHeaders: {},
+      responseBody: '',
     });
 
     this.issues.file({
-      type: hit.reason === "unknown-host" ? "unknown-service" : "unmatched-request",
+      type: hit.reason === 'unknown-host' ? 'unknown-service' : 'unmatched-request',
       service: url.hostname,
       method: hit.method,
       path: url.pathname,
@@ -144,9 +159,9 @@ export class ProjectRuntime {
   }
 
   private onPinnedClient(event: { hostname: string | undefined; reason: string }): void {
-    const host = event.hostname ?? "(unknown host)";
+    const host = event.hostname ?? '(unknown host)';
     this.issues.file({
-      type: "pinned-client",
+      type: 'pinned-client',
       service: host,
       sessionId: this.sessionId,
       diagnosis: { reason: event.reason },
@@ -164,14 +179,13 @@ export class ProjectRuntime {
     // Full base URLs, not host:port — the route needs the provider's scheme as well, or
     // an https client reaches a cleartext emulator and gets a 502.
     const baseUrls = this.allBaseUrls();
-    const routes: Route[] = this.services().map((service) =>
-      routeForProvider(service.id, service.provider, baseUrls));
+    const routes: Route[] = this.services().map((service) => routeForProvider(service.id, service.provider, baseUrls));
 
     return {
       routes,
       // In record mode an unknown host is new evidence, so it is recorded. In serve mode
       // it is a wall-hit, so it is denied and filed. Never passthrough, either way.
-      fallthrough: this.mode.kind === "record" ? "record" : "deny",
+      fallthrough: this.mode.kind === 'record' ? 'record' : 'deny',
     };
   }
 
@@ -182,17 +196,19 @@ export class ProjectRuntime {
 
   // ── Record mode ─────────────────────────────────────────────────────────────
 
-  async startRecord(opts: { label?: string; seed?: string } = {}): Promise<{ session: string; proxyUrl: string; caCertPath: string; env: Record<string, string> }> {
-    if (this.mode.kind === "serve") await this.stopServe();
+  async startRecord(
+    opts: { label?: string; seed?: string } = {},
+  ): Promise<{ session: string; proxyUrl: string; caCertPath: string; env: Record<string, string> }> {
+    if (this.mode.kind === 'serve') await this.stopServe();
 
     this.sessionSeed = opts.seed ?? this.sessionSeed;
-    this.sessionId = startSession(this.db, "record", { seed: this.sessionSeed, label: opts.label });
+    this.sessionId = startSession(this.db, 'record', { seed: this.sessionSeed, label: opts.label });
     this.recordedCount = 0;
     // A fresh scrubber per session: placeholders are session-scoped by design, which is
     // what makes `{{secret:stripe-secret-key#1}}` mean "the same key as earlier".
     this.scrubber = new Scrubber(rulesFromConfig(this.project.file?.scrub), this.project.file?.scrub?.entropyBackstop ?? true);
     this.recorder = new Recorder(this.db, this.project.name, this.scrubber, this.sessionId);
-    this.mode = { kind: "record", sealed: false };
+    this.mode = { kind: 'record', sealed: false };
     this.issues.startBatch();
 
     const frontDoor = await this.ensureFrontDoor();
@@ -212,13 +228,22 @@ export class ProjectRuntime {
     const session = this.sessionId;
     const recorded = this.recordedCount;
     const services = session
-      ? [...new Set(this.db.select().from(schema.recordings).where(eq(schema.recordings.sessionId, session)).all().map((r) => r.service))]
+      ? [
+          ...new Set(
+            this.db
+              .select()
+              .from(schema.recordings)
+              .where(eq(schema.recordings.sessionId, session))
+              .all()
+              .map((r) => r.service),
+          ),
+        ]
       : [];
 
     if (session) endSession(this.db, session);
     this.recorder = undefined;
     this.sessionId = null;
-    this.mode = { kind: "idle", sealed: false };
+    this.mode = { kind: 'idle', sealed: false };
     await this.frontDoor?.stop();
     this.frontDoor = undefined;
     return { session, recorded, services };
@@ -226,12 +251,14 @@ export class ProjectRuntime {
 
   // ── Serve mode ──────────────────────────────────────────────────────────────
 
-  async startServe(opts: { seed?: string; sealed?: boolean } = {}): Promise<{ session: string; proxyUrl: string; caCertPath: string; env: Record<string, string>; warnings: string[] }> {
-    if (this.mode.kind === "record") await this.stopRecord();
+  async startServe(
+    opts: { seed?: string; sealed?: boolean } = {},
+  ): Promise<{ session: string; proxyUrl: string; caCertPath: string; env: Record<string, string>; warnings: string[] }> {
+    if (this.mode.kind === 'record') await this.stopRecord();
 
     this.sessionSeed = opts.seed ?? this.sessionSeed;
-    this.sessionId = startSession(this.db, "serve", { seed: this.sessionSeed });
-    this.mode = { kind: "serve", sealed: opts.sealed ?? true };
+    this.sessionId = startSession(this.db, 'serve', { seed: this.sessionSeed });
+    this.mode = { kind: 'serve', sealed: opts.sealed ?? true };
     this.issues.startBatch();
 
     await this.startProviders();
@@ -286,7 +313,7 @@ export class ProjectRuntime {
         // ignoring the others and leaving a service mysteriously unseeded.
         provider.warnings.push(
           `emulate accepts a single seed file per process, so only "${distinctSeeds[0]}" was applied. ` +
-          `Merge ${distinctSeeds.slice(1).join(", ")} into it, or the other services run on emulate's built-in defaults.`,
+            `Merge ${distinctSeeds.slice(1).join(', ')} into it, or the other services run on emulate's built-in defaults.`,
         );
       }
       await provider.start(ctx);
@@ -317,33 +344,42 @@ export class ProjectRuntime {
    */
   private persistEkb(): void {
     for (const provider of this.providers) {
-      const source = provider.kind === "emulator" ? "emulate-skill" : `generated:${provider.name}`;
+      const source = provider.kind === 'emulator' ? 'emulate-skill' : `generated:${provider.name}`;
       const services = new Set(provider.ekbEntries().map((e) => e.service));
       for (const service of services) {
-        this.db.delete(schema.ekb)
+        this.db
+          .delete(schema.ekb)
           .where(and(eq(schema.ekb.service, service), eq(schema.ekb.source, source)))
           .run();
       }
       for (const { service, recipe } of provider.ekbEntries()) {
-        this.db.insert(schema.ekb).values({
-          id: id("ekb"),
-          service,
-          rung: recipe.rung,
-          envVar: recipe.envVar ?? null,
-          language: recipe.language ?? null,
-          snippet: recipe.snippet ?? null,
-          note: recipe.note ?? null,
-          source,
-        }).run();
+        this.db
+          .insert(schema.ekb)
+          .values({
+            id: id('ekb'),
+            service,
+            rung: recipe.rung,
+            envVar: recipe.envVar ?? null,
+            language: recipe.language ?? null,
+            snippet: recipe.snippet ?? null,
+            note: recipe.note ?? null,
+            source,
+          })
+          .run();
       }
     }
   }
 
   private onMockUnmatched(event: {
-    service: string; method: string; path: string; request: unknown; diagnosis: unknown;
-    kind: "unmatched-request" | "near-miss" | "unknown-service"; suggestedResolution: string;
+    service: string;
+    method: string;
+    path: string;
+    request: unknown;
+    diagnosis: unknown;
+    kind: 'unmatched-request' | 'near-miss' | 'unknown-service';
+    suggestedResolution: string;
   }): void {
-    const generated = this.providers.find((p) => p.kind === "generated") as GeneratedProvider | undefined;
+    const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
     const moduleFile = generated?.moduleFile(event.service);
     const links = [
       ...(moduleFile ? [moduleFile] : []),
@@ -376,7 +412,7 @@ export class ProjectRuntime {
     const stopped = await this.stopProviders();
     if (this.sessionId) endSession(this.db, this.sessionId);
     this.sessionId = null;
-    this.mode = { kind: "idle", sealed: false };
+    this.mode = { kind: 'idle', sealed: false };
     await this.frontDoor?.stop();
     this.frontDoor = undefined;
     return { stopped };
@@ -415,13 +451,14 @@ export class ProjectRuntime {
       await provider.reset(scope);
       reset.push(...(scope.service ? [scope.service] : provider.services));
       // Emulator resets are a process restart, which costs seconds — worth saying so.
-      if (provider.kind === "emulator") restarted.push(provider.name);
+      if (provider.kind === 'emulator') restarted.push(provider.name);
     }
 
     if (this.sessionId) endSession(this.db, this.sessionId);
-    this.sessionId = startSession(this.db, this.mode.kind === "record" ? "record" : "serve", { seed: this.sessionSeed });
-    this.db.insert(schema.journal)
-      .values({ id: id("jrn"), sessionId: this.sessionId, kind: "state-reset", service: scope.service ?? null, payload: scope })
+    this.sessionId = startSession(this.db, this.mode.kind === 'record' ? 'record' : 'serve', { seed: this.sessionSeed });
+    this.db
+      .insert(schema.journal)
+      .values({ id: id('jrn'), sessionId: this.sessionId, kind: 'state-reset', service: scope.service ?? null, payload: scope })
       .run();
 
     // Provider base URLs change across an emulate restart, so routing has to follow.
@@ -447,7 +484,7 @@ export class ProjectRuntime {
     return {
       running: this.frontDoor?.isRunning ?? false,
       port: this.frontDoor?.isRunning ? this.frontDoor.port : null,
-      mode: (this.mode.kind === "record" ? "record" : "deny") as "record" | "deny",
+      mode: (this.mode.kind === 'record' ? 'record' : 'deny') as 'record' | 'deny',
     };
   }
 
@@ -496,18 +533,18 @@ export async function shutdownAllRuntimes(): Promise<void> {
  * agent that read nothing but the issue (07-issues-agent-loop.md), so a wrong reason here
  * is worse than a vague one — it sends the agent to edit the wrong thing.
  */
-const WALL_REASONS: Record<WallHit["reason"], (host: string, provider?: string) => string> = {
-  "unknown-host": (host) =>
+const WALL_REASONS: Record<WallHit['reason'], (host: string, provider?: string) => string> = {
+  'unknown-host': (host) =>
     `No entry in the service registry for "${host}", and the front door is sealed, so the request was denied rather than sent to the real host.`,
   deny: (host) => `"${host}" is registered as \`deny\`.`,
-  "provider-down": (host, provider) =>
+  'provider-down': (host, provider) =>
     `"${host}" is registered as \`${provider}\`, but that provider is not running, so there was nowhere to send the request. Denying is deliberate: falling back to the real host would leak traffic to production.`,
 };
 
-const WALL_RESOLUTIONS: Record<WallHit["reason"], (host: string, provider?: string) => string> = {
-  "unknown-host": (host) =>
+const WALL_RESOLUTIONS: Record<WallHit['reason'], (host: string, provider?: string) => string> = {
+  'unknown-host': (host) =>
     `Decide what this host should be: \`mocktown services set --id ${host} --provider record\` to capture it, \`generated:${host}\` to mock it, or \`passthrough\` to allow it out explicitly.`,
   deny: (host) => `Change the registry entry for ${host} if this request should be served.`,
-  "provider-down": (host) =>
+  'provider-down': (_host) =>
     `Find out why the provider did not start — \`mocktown providers list\` reports the load error — then \`mocktown serve start\` again. For a generated mock, a module that fails to import is the usual cause.`,
 };

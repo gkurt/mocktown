@@ -41,7 +41,7 @@ export class Prng {
   }
 
   pick<T>(items: readonly T[]): T {
-    if (items.length === 0) throw new Error("pick() needs a non-empty list");
+    if (items.length === 0) throw new Error('pick() needs a non-empty list');
     return items[this.int(0, items.length - 1)]!;
   }
 
@@ -50,9 +50,9 @@ export class Prng {
   }
 
   /** A stable id of the requested shape — mock data that survives a re-run unchanged. */
-  id(prefix = "mck"): string {
-    let out = "";
-    for (let i = 0; i < 16; i++) out += "0123456789abcdefghijklmnopqrstuvwxyz"[this.int(0, 35)];
+  id(prefix = 'mck'): string {
+    let out = '';
+    for (let i = 0; i < 16; i++) out += '0123456789abcdefghijklmnopqrstuvwxyz'[this.int(0, 35)];
     return `${prefix}_${out}`;
   }
 }
@@ -69,5 +69,5 @@ export function streamKey(parts: {
   profile: string;
   requestIdentity: string;
 }): string {
-  return [parts.sessionSeed, parts.service, parts.endpoint, parts.profile, parts.requestIdentity].join(" ");
+  return [parts.sessionSeed, parts.service, parts.endpoint, parts.profile, parts.requestIdentity].join(' ');
 }

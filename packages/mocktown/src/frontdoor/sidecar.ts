@@ -12,16 +12,16 @@
  *
  *   node src/frontdoor/sidecar.ts <adminPort>
  */
-import * as mockttp from "mockttp";
+import * as mockttp from 'mockttp';
 
 const adminPort = Number(process.argv[2]);
 if (!Number.isInteger(adminPort) || adminPort <= 0) {
-  console.error("usage: node sidecar.ts <adminPort>");
+  console.error('usage: node sidecar.ts <adminPort>');
   process.exit(2);
 }
 
 const admin = mockttp.getAdminServer({});
-await admin.start({ port: adminPort, host: "127.0.0.1" });
+await admin.start({ port: adminPort, host: '127.0.0.1' });
 
 // The daemon waits for this line rather than for the process to look alive: a child's
 // stdout is evidence of intent, not of readiness (spike 03), so we print it only once
@@ -32,12 +32,16 @@ let stopping = false;
 async function shutdown(signal: string) {
   if (stopping) return;
   stopping = true;
-  try { await admin.stop(); } catch { /* the daemon is going away regardless */ }
-  process.exit(signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1);
+  try {
+    await admin.stop();
+  } catch {
+    /* the daemon is going away regardless */
+  }
+  process.exit(signal === 'SIGTERM' || signal === 'SIGINT' ? 0 : 1);
 }
-process.on("SIGTERM", () => void shutdown("SIGTERM"));
-process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
 // If the daemon dies without stopping us, its stdin pipe closes and we follow it down —
 // an orphaned MITM proxy holding a developer's traffic is the failure to avoid.
-process.stdin.on("close", () => void shutdown("parent-gone"));
+process.stdin.on('close', () => void shutdown('parent-gone'));
 process.stdin.resume();
