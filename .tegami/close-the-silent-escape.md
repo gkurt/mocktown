@@ -24,7 +24,3 @@ packages:
   that is always empty. Flags document themselves again, and a flag whose value is a union
   now lists the forms it accepts — `--provider` says `generated:<name>` instead of failing
   with a bare validation error.
-- **A `.localhost` upstream recorded nothing, silently.** `NO_PROXY` must keep carrying
-  `localhost` so an app can still reach its own local services, and proxy clients match it
-  by domain suffix — which excludes every `*.localhost` name too. `mocktown record stop` now
-  explains a zero-exchange run and names the affected services.

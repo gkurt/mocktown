@@ -25,6 +25,16 @@ export const ServiceConfig = z.object({
 export const ProjectFile = z.object({
   project: z.string().min(1).describe('Project name'),
   services: z.record(z.string(), ServiceConfig).default({}),
+  /**
+   * Hosts the app reaches without the front door — its own local services, typically. It
+   * is the counterweight to dropping the blanket `localhost` bypass: with a `.localhost`
+   * service registered, `localhost:3000` is proxied like anything else unless it is named
+   * here. Every entry is a hole, and a host listed here can never be recorded.
+   */
+  noProxy: z
+    .array(z.string())
+    .default([])
+    .describe('Hosts the app reaches directly, bypassing the front door. Every entry is a hole — a host listed here cannot be recorded'),
   sandbox: z
     .object({
       image: z.string().default('auto').describe('Base image the sandbox layer is built on; `auto` picks a sane default'),

@@ -24,6 +24,7 @@ const { exportCorpus } = await import('#src/mocks/corpus.ts');
 const { scaffoldMock } = await import('#src/mocks/scaffold.ts');
 const { verifyRecordings } = await import('#src/mocks/verify.ts');
 const { recordingsForService } = await import('#src/mocks/corpus.ts');
+const { bypassedByNoProxy } = await import('#src/capture/launch.ts');
 
 const workspace = join(root, 'app');
 const UPSTREAM_PORT = 5599;
@@ -106,6 +107,14 @@ describe("phase 1 — record a real app's traffic, browse the scrubbed corpus", 
     // The launch wrapper's env has to carry the knob fetch-based SDKs need (spike 05).
     expect(started.env.NODE_USE_ENV_PROXY).toBe('1');
     expect(started.env.HTTPS_PROXY).toBe(proxyUrl);
+
+    // The service under test is a `.localhost` name, so the bypass list must not carry the
+    // blanket `localhost` entry — with it, every request below would go straight to the
+    // upstream and this whole file would pass while recording nothing.
+    expect(started.env.NO_PROXY!.split(',')).not.toContain('localhost');
+    expect(bypassedByNoProxy(SERVICE, started.env.NO_PROXY!.split(','))).toBe(false);
+    // Dropping it is a trade, so it is said out loud rather than assumed harmless.
+    expect(started.warnings.join(' ')).toContain('noProxy');
 
     const base = `http://${SERVICE}:${UPSTREAM_PORT}`;
     const created = await fetch(`${base}/v1/invoices`, {
@@ -257,6 +266,27 @@ describe('phase 2 — the loop closes on a real project', () => {
     // `empty-org` is seeded with nothing and has created nothing, so it sees nothing —
     // the empty state that is otherwise so hard to test.
     expect(empty.data).toEqual([]);
+  }, 30_000);
+
+  test("the app's own loopback service is denied as itself, not as a missing dependency", async () => {
+    // The cost of dropping the blanket `localhost` entry: a service the app reaches by
+    // name now arrives here. Denying it is right — the seal has no other answer — but
+    // calling it an undeclared third-party dependency would send an agent off to write a
+    // mock for the app's own API.
+    const response = await fetch('http://app.localhost:9/healthz', { proxy: proxyUrl });
+    expect(response.status).toBe(502);
+
+    // The wall hit crosses the admin-server boundary after the response reaches the client.
+    let issue = runtime.issues.list({ status: 'open' }).find((i) => i.service === 'app.localhost');
+    for (let attempt = 0; attempt < 20 && !issue; attempt++) {
+      await Bun.sleep(50);
+      issue = runtime.issues.list({ status: 'open' }).find((i) => i.service === 'app.localhost');
+    }
+    expect(issue).toBeDefined();
+    expect(issue!.type).toBe('unknown-service');
+    expect(JSON.stringify(issue!.diagnosis)).toContain('loopback');
+    // The fix is a config line, and the issue has to be the thing that says so.
+    expect(issue!.suggestedResolution).toContain('noProxy');
   }, 30_000);
 
   test('state reset drops runtime state and re-applies the seed', async () => {

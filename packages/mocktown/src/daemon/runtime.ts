@@ -9,7 +9,7 @@
  */
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
-import { bypassedByNoProxy, captureEnv } from '#src/capture/launch.ts';
+import { captureEnv, type NoProxyPlan, planNoProxy } from '#src/capture/launch.ts';
 import { templatePath } from '#src/capture/normalize.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
@@ -294,7 +294,7 @@ export class ProjectRuntime {
     });
 
     this.issues.file({
-      type: hit.reason === 'unknown-host' ? 'unknown-service' : 'unmatched-request',
+      type: hit.reason === 'unknown-host' || hit.reason === 'own-service' ? 'unknown-service' : 'unmatched-request',
       service: url.hostname,
       method: hit.method,
       path: url.pathname,
@@ -369,6 +369,49 @@ export class ProjectRuntime {
     };
   }
 
+  /**
+   * The bypass list for this project, computed rather than fixed: a registered
+   * `.localhost` service drops the blanket `localhost` entry, and the project names its
+   * own local hosts in `noProxy`. One computation feeds the launch wrapper,
+   * `.env.mocktown` and the diagnostics, so they cannot disagree about what bypasses the
+   * front door.
+   */
+  private noProxyPlan(): NoProxyPlan {
+    const stable = this.portless?.available ? this.portless : null;
+    return planNoProxy({
+      declared: this.project.file?.noProxy,
+      services: this.services().map((service) => service.id),
+      // A stable name must bypass: the app has to reach its own mock directly, or the
+      // request for it would enter the front door and be denied as an unknown host.
+      required: stable ? [`.${this.portlessSettings().tld}`] : undefined,
+    });
+  }
+
+  /**
+   * What the bypass list costs, in both directions — each one is otherwise a silent
+   * failure. A dropped `localhost` sends the app's own services into the front door; an
+   * entry that still shadows a registered service means that service can never be
+   * recorded, however the run is configured.
+   */
+  private noProxyWarnings(plan: NoProxyPlan): string[] {
+    const warnings: string[] = [];
+    if (plan.droppedLocalhost) {
+      warnings.push(
+        'NO_PROXY no longer carries the blanket `localhost` entry, because a registered service sits under that suffix. ' +
+          'Loopback by IP still bypasses the front door, but a service the app reaches as `localhost:<port>` by name now goes ' +
+          'through it and will be denied. List those hosts in `noProxy` in mocktown.json.',
+      );
+    }
+    if (plan.bypassed.length > 0) {
+      warnings.push(
+        `NO_PROXY excludes ${plan.bypassed.join(', ')}, so traffic to ${plan.bypassed.length === 1 ? 'it' : 'them'} cannot be ` +
+          'captured. Proxy clients match NO_PROXY by domain suffix, so an entry takes every name underneath it — including the ' +
+          'portless TLD, which has to bypass for the app to reach its own mocks. Give the service a name outside those suffixes.',
+      );
+    }
+    return warnings;
+  }
+
   private async applyRouting(): Promise<void> {
     const frontDoor = await this.ensureFrontDoor();
     await frontDoor.applyRouting(this.routingTable());
@@ -378,7 +421,7 @@ export class ProjectRuntime {
 
   async startRecord(
     opts: { label?: string; seed?: string; recordOverride?: string[] } = {},
-  ): Promise<{ session: string; proxyUrl: string; caCertPath: string; env: Record<string, string> }> {
+  ): Promise<{ session: string; proxyUrl: string; caCertPath: string; env: Record<string, string>; warnings: string[] }> {
     if (this.mode.kind === 'serve') await this.stopServe();
     this.recordOverride = new Set(opts.recordOverride ?? []);
 
@@ -399,11 +442,14 @@ export class ProjectRuntime {
     await this.syncPortless();
     const proxyUrl = `http://127.0.0.1:${frontDoor.port}`;
     this.note('session', `record mode started on :${frontDoor.port} — session ${this.sessionId}`, { ref: this.sessionId });
+    // Computed after `syncPortless`, because a live stable name adds its TLD to the list.
+    const noProxy = this.noProxyPlan();
     return {
       session: this.sessionId,
       proxyUrl,
       caCertPath: ca.certPath,
-      env: captureEnv({ proxyUrl, caCertPath: ca.certPath }),
+      env: captureEnv({ proxyUrl, caCertPath: ca.certPath, noProxy: noProxy.entries }),
+      warnings: this.noProxyWarnings(noProxy),
     };
   }
 
@@ -441,19 +487,19 @@ export class ProjectRuntime {
    * moment the count comes back zero is the only place to say it.
    */
   private emptyRecordingHints(): string[] {
-    const bypassed = this.services()
-      .map((service) => service.id)
-      .filter((host) => bypassedByNoProxy(host));
+    const plan = this.noProxyPlan();
     return [
       'No exchange reached the front door. The usual cause is a client that ignores the proxy env vars — ' +
         'anything on fetch/undici needs NODE_USE_ENV_PROXY=1, and Java needs the keystore flags (`mocktown env`).',
       // Named when the registry already knows the service, described either way: a host
       // that never got through is a host discovery never saw, so it cannot be listed.
-      (bypassed.length > 0
-        ? `NO_PROXY excludes ${bypassed.join(', ')}. `
-        : 'If the service is a `.localhost` name, NO_PROXY excludes it: ') +
-        'proxy clients match NO_PROXY by domain suffix, so the `localhost` entry that keeps loopback unproxied ' +
-        'also excludes every `*.localhost` name. Give the service a hostname outside `.localhost` to record it.',
+      ...this.noProxyWarnings(plan),
+      ...(plan.bypassed.length === 0
+        ? [
+            `NO_PROXY is \`${plan.entries.join(',')}\`, and proxy clients match it by domain suffix — an entry takes every name ` +
+              'underneath it. A service under one of those suffixes, or named in `noProxy` in mocktown.json, never reaches the front door.',
+          ]
+        : []),
     ];
   }
 
@@ -481,12 +527,13 @@ export class ProjectRuntime {
       `serve mode started on :${frontDoor.port} (unknown hosts: ${this.mode.sealed ? 'deny' : 'record'}) — session ${this.sessionId}`,
       { ref: this.sessionId },
     );
+    const noProxy = this.noProxyPlan();
     return {
       session: this.sessionId,
       proxyUrl,
       caCertPath: ca.certPath,
-      env: captureEnv({ proxyUrl, caCertPath: ca.certPath }),
-      warnings: [...this.providers.flatMap((p) => p.warnings), ...this.escapeWarnings()],
+      env: captureEnv({ proxyUrl, caCertPath: ca.certPath, noProxy: noProxy.entries }),
+      warnings: [...this.providers.flatMap((p) => p.warnings), ...this.escapeWarnings(), ...this.noProxyWarnings(noProxy)],
     };
   }
 
@@ -850,17 +897,16 @@ export class ProjectRuntime {
     const frontDoor = this.frontDoorStatus();
     const portless = this.portless;
     const stable = portless?.available ? portless : null;
-    // A stable name is only written once it has been proven end to end, and it brings two
-    // things with it: a CA bundle covering the portless issuer as well as the project's,
-    // and its TLD in NO_PROXY — otherwise the app would send a request for its own mock
-    // into the front door, which would deny it as an unknown host.
+    // A stable name is only written once it has been proven end to end, and it brings a CA
+    // bundle covering the portless issuer as well as the project's. Its TLD reaches
+    // NO_PROXY through `noProxyPlan`, which owns that decision for every surface.
     const baseUrls = this.allBaseUrls();
     for (const entry of stable?.names ?? []) baseUrls.set(entry.service, entry.url);
     return generateEnv({
       project: this.name,
       proxyUrl: `http://127.0.0.1:${frontDoor.port ?? this.project.local.frontDoorPort ?? 4400}`,
       caCertPath: stable?.caBundle ?? projectPaths(this.name).caCert,
-      noProxy: stable ? [`.${this.portlessSettings().tld}`] : undefined,
+      noProxy: this.noProxyPlan().entries,
       baseUrls,
       ekb: this.db
         .select()
@@ -1016,6 +1062,10 @@ const WALL_REASONS: Record<WallHit['reason'], (host: string, provider?: string) 
   deny: (host) => `"${host}" is registered as \`deny\`.`,
   'provider-down': (host, provider) =>
     `"${host}" is registered as \`${provider}\`, but that provider is not running, so there was nowhere to send the request. Denying is deliberate: falling back to the real host would leak traffic to production.`,
+  // Loopback, so almost certainly not a dependency at all. Reporting it as an undeclared
+  // third-party service would send an agent off to write a mock for the app's own API.
+  'own-service': (host) =>
+    `"${host}" is a loopback name, so this looks like the app calling one of its own local services rather than a third-party dependency. It reached the front door because NO_PROXY does not exclude it, and the front door is sealed, so it was denied.`,
 };
 
 const WALL_RESOLUTIONS: Record<WallHit['reason'], (host: string, provider?: string) => string> = {
@@ -1024,4 +1074,6 @@ const WALL_RESOLUTIONS: Record<WallHit['reason'], (host: string, provider?: stri
   deny: (host) => `Change the registry entry for ${host} if this request should be served.`,
   'provider-down': (_host) =>
     `Find out why the provider did not start — \`mocktown providers list\` reports the load error — then \`mocktown serve start\` again. For a generated mock, a module that fails to import is the usual cause.`,
+  'own-service': (host) =>
+    `If this is the app's own service, add "${host}" to \`noProxy\` in mocktown.json and start the run again — it will then bypass the front door entirely. If it really is a dependency that happens to live on loopback, register it: \`mocktown services set --id ${host} --provider generated:${host}\`.`,
 };

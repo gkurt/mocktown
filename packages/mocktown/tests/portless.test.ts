@@ -186,10 +186,13 @@ test('a certificate hunt takes certificates and nothing else', () => {
 });
 
 test('loopback is never proxied', () => {
+  // The default is the plan for a project that has declared nothing, so the launch wrapper
+  // and `.env.mocktown` agree even when no caller passes a list.
   const env = captureEnv({ proxyUrl: 'http://127.0.0.1:4400', caCertPath: '/tmp/ca.pem' });
-  expect(env.NO_PROXY!.split(',')).toEqual(['127.0.0.1', 'localhost', '::1']);
+  expect(env.NO_PROXY!.split(',')).toEqual(['127.0.0.1', '::1', 'localhost']);
   expect(env.no_proxy).toBe(env.NO_PROXY);
 
-  const withTld = captureEnv({ proxyUrl: 'http://127.0.0.1:4400', caCertPath: '/tmp/ca.pem', noProxy: ['.localhost'] });
+  // A caller that has a plan passes the whole list, not an addition to a hidden constant.
+  const withTld = captureEnv({ proxyUrl: 'http://127.0.0.1:4400', caCertPath: '/tmp/ca.pem', noProxy: ['127.0.0.1', '::1', '.localhost'] });
   expect(withTld.NO_PROXY!.endsWith(',.localhost')).toBe(true);
 });

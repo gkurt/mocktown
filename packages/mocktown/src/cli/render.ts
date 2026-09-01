@@ -82,6 +82,7 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     '',
     'point a process at it with:',
     ...Object.entries(r.env).map(([key, value]) => `  export ${key}=${value}`),
+    ...(r.warnings.length ? ['', 'warnings', ...r.warnings.map((w: string) => `  ! ${w}`)] : []),
   ],
 
   'record.stop': (r) => [

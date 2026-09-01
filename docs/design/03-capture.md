@@ -66,12 +66,27 @@ The escalation ladder — each rung covers the previous rung's failure case:
    GitHub API and came back with a genuine request id. Without this knob a large and
    growing class of modern SDKs escapes the front door in host mode while appearing
    correctly configured.
-   **`NO_PROXY` takes `*.localhost` with it.** The list always carries `localhost`, because
-   an app calling its own `localhost:3000` must not be routed into the front door — and
-   proxy clients match `NO_PROXY` by domain suffix, so `billing.localhost` is excluded too.
-   A `.localhost` upstream therefore records nothing while looking perfectly wired up. The
-   entry cannot be dropped, so `record stop` reports the collision by name when a run
-   captures zero exchanges. Give a test upstream a hostname outside `.localhost`.
+   **`NO_PROXY` is computed, not fixed.** Proxy clients match it by domain suffix, so a
+   blanket `localhost` entry silently takes every `*.localhost` name with it and a
+   `.localhost` upstream records nothing while looking perfectly wired up. There is no
+   syntax that avoids this: a leading dot means the same thing, and port-scoped entries are
+   not portable — undici and urllib honour `localhost:3000`, curl ignores the port and
+   proxies the host anyway. So `planNoProxy` derives the list from what the project
+   declared:
+   - `127.0.0.1` and `::1` are unconditional. Loopback literals can never shadow a service,
+     because a recorded service is always a hostname.
+   - The bare `localhost` entry is dropped as soon as a registered service sits under that
+     suffix. A `.localhost` upstream the app is meant to record outranks a convenience that
+     only matters for hosts the project can name itself.
+   - `noProxy` in `mocktown.json` is where the app names its own local services. Every entry
+     is a hole: a host listed there can never be recorded.
+   Dropping the blanket entry has a cost, so it is stated rather than assumed harmless.
+   `record start` and `serve start` warn that a service reached as `localhost:<port>` by
+   name now enters the front door, and a collision that cannot be resolved — under portless
+   the TLD *must* bypass, which makes a `.localhost` upstream unrecordable in that mode — is
+   reported by name instead of hidden. The front door recognises the other side of the trade:
+   a denied request for a loopback name is filed as the app's own service, with `noProxy` as
+   the fix, not as an undeclared third-party dependency.
 2. **Launched browser** — for web-app client traffic: `mocktown browser` starts a
    Chromium-family browser on a fresh profile with `--proxy-server` set. *Trust is
    narrower than "in that profile"* (phase 3): the CA is passed as an

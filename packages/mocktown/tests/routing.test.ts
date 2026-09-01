@@ -7,7 +7,7 @@
  * the caller believes is being captured.
  */
 import { describe, expect, test } from 'bun:test';
-import { bypassedByNoProxy } from '#src/capture/launch.ts';
+import { bypassedByNoProxy, isLoopbackName, planNoProxy } from '#src/capture/launch.ts';
 import { escapingHosts, routeForProvider } from '#src/frontdoor/routing.ts';
 
 const served = new Map([['billing.example.com', 'http://127.0.0.1:5000']]);
@@ -89,28 +89,92 @@ describe('whatever still reaches a real upstream is named', () => {
 });
 
 describe('NO_PROXY suffix matching', () => {
-  test('the `localhost` entry excludes every `*.localhost` name', () => {
-    // Why a `.localhost` upstream records nothing: proxy clients match NO_PROXY by domain
-    // suffix, so the entry that keeps loopback unproxied takes the subdomains with it.
-    expect(bypassedByNoProxy('billing.localhost')).toBe(true);
-    expect(bypassedByNoProxy('api.stripe.localhost')).toBe(true);
-    expect(bypassedByNoProxy('localhost')).toBe(true);
+  test('suffix matching is the rule, and it is why a blanket entry is dangerous', () => {
+    // Proxy clients match NO_PROXY by domain suffix, so `localhost` takes every
+    // `*.localhost` name with it. That is the behaviour `planNoProxy` exists to work around.
+    expect(bypassedByNoProxy('billing.localhost', ['localhost'])).toBe(true);
+    expect(bypassedByNoProxy('api.stripe.localhost', ['localhost'])).toBe(true);
+    expect(bypassedByNoProxy('localhost', ['localhost'])).toBe(true);
+  });
+
+  test('loopback literals are excluded unconditionally, and never shadow a hostname', () => {
+    // Nobody records a service by bare IP, so these entries cost nothing and can stay.
     expect(bypassedByNoProxy('127.0.0.1')).toBe(true);
+    expect(bypassedByNoProxy('billing.localhost')).toBe(false);
   });
 
   test('a real hostname is not excluded, and a partial suffix is not a match', () => {
-    expect(bypassedByNoProxy('api.stripe.com')).toBe(false);
+    expect(bypassedByNoProxy('api.stripe.com', ['localhost'])).toBe(false);
     // `notlocalhost` ends with the entry's letters but is not a subdomain of it.
-    expect(bypassedByNoProxy('notlocalhost')).toBe(false);
+    expect(bypassedByNoProxy('notlocalhost', ['localhost'])).toBe(false);
   });
 
   test('the port is not part of the comparison', () => {
-    expect(bypassedByNoProxy('billing.localhost:5599')).toBe(true);
-    expect(bypassedByNoProxy('api.stripe.com:443')).toBe(false);
+    // Not a simplification: curl ignores a port in a NO_PROXY entry and proxies the host
+    // anyway, so a port-scoped bypass is not something the list can express portably.
+    expect(bypassedByNoProxy('billing.localhost:5599', ['localhost'])).toBe(true);
+    expect(bypassedByNoProxy('api.stripe.com:443', ['localhost'])).toBe(false);
   });
 
   test('a leading dot in an entry means the same thing', () => {
     expect(bypassedByNoProxy('billing.test', ['.test'])).toBe(true);
     expect(bypassedByNoProxy('billing.test', ['test'])).toBe(true);
+  });
+});
+
+describe('planning the bypass list', () => {
+  test('with no `.localhost` service, the blanket entry stays', () => {
+    const plan = planNoProxy({ services: ['api.stripe.com'] });
+    expect(plan.entries).toEqual(['127.0.0.1', '::1', 'localhost']);
+    expect(plan.droppedLocalhost).toBe(false);
+    expect(plan.bypassed).toEqual([]);
+  });
+
+  test('a registered `.localhost` service drops it, so the service can be recorded', () => {
+    const plan = planNoProxy({ services: ['billing.localhost'] });
+    expect(plan.entries).toEqual(['127.0.0.1', '::1']);
+    expect(plan.droppedLocalhost).toBe(true);
+    expect(plan.bypassed).toEqual([]);
+  });
+
+  test("the project's own hosts are holes it asked for", () => {
+    const plan = planNoProxy({ services: ['billing.localhost'], declared: ['localhost', 'db.internal'] });
+    expect(plan.entries).toEqual(['127.0.0.1', '::1', 'localhost', 'db.internal']);
+    // Declared bypass beats capture: the caller said this host is theirs, so say what it costs.
+    expect(plan.bypassed).toEqual(['billing.localhost']);
+    // Nothing was lost here — the project asked for the entry back, so warning that it is
+    // gone would be false.
+    expect(plan.droppedLocalhost).toBe(false);
+  });
+
+  test('a portless TLD that shadows a service is reported, not silently resolved', () => {
+    // Under portless the app must reach its own mocks directly, so `.localhost` has to
+    // bypass — which makes a `.localhost` upstream unrecordable in that mode. Inherent,
+    // so the plan names it rather than pretending the collision does not exist.
+    const plan = planNoProxy({ services: ['billing.localhost'], required: ['.localhost'] });
+    expect(plan.entries).toEqual(['127.0.0.1', '::1', '.localhost']);
+    expect(plan.bypassed).toEqual(['billing.localhost']);
+  });
+
+  test('entries are not repeated when the project declares one the plan already has', () => {
+    expect(planNoProxy({ declared: ['localhost', '127.0.0.1'] }).entries).toEqual(['127.0.0.1', '::1', 'localhost']);
+  });
+});
+
+describe('recognising the app talking to itself', () => {
+  test('RFC 6761 names and loopback literals need no DNS', () => {
+    expect(isLoopbackName('localhost')).toBe(true);
+    expect(isLoopbackName('billing.localhost:5599')).toBe(true);
+    expect(isLoopbackName('127.0.0.1')).toBe(true);
+    expect(isLoopbackName('127.5.0.1')).toBe(true);
+    expect(isLoopbackName('[::1]')).toBe(true);
+  });
+
+  test('a third-party host is not mistaken for one', () => {
+    expect(isLoopbackName('api.stripe.com')).toBe(false);
+    expect(isLoopbackName('notlocalhost')).toBe(false);
+    // The population this covers is exactly the one the dropped blanket entry stops
+    // bypassing, so a name that was never bypassed anyway is out of scope.
+    expect(isLoopbackName('db.internal')).toBe(false);
   });
 });

@@ -236,7 +236,17 @@ export const contract = {
     start: oc
       .route({ method: 'POST', path: '/record/start', summary: 'Start the front door in record mode and open a session' })
       .input(z.object({ ...ProjectInput, label: z.string().optional(), seed: z.string().optional() }))
-      .output(withProject({ session: z.string(), proxyUrl: z.string(), caCertPath: z.string(), env: z.record(z.string(), z.string()) })),
+      .output(
+        withProject({
+          session: z.string(),
+          proxyUrl: z.string(),
+          caCertPath: z.string(),
+          env: z.record(z.string(), z.string()),
+          warnings: z
+            .array(z.string())
+            .describe('What the computed NO_PROXY costs: hosts that now enter the front door, and services it still excludes'),
+        }),
+      ),
 
     stop: oc
       .route({ method: 'POST', path: '/record/stop', summary: 'Close the recording session' })

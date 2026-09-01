@@ -57,11 +57,22 @@ denied and says why in `mocktown providers list`; the rest keep serving. Any hos
 pointed at a real upstream is named in `mocktown serve start`'s warnings, so serving and
 escaping never look alike.
 
-> **Recording a `.localhost` upstream captures nothing.** `NO_PROXY` always carries
-> `localhost` so an app can still reach its own local services, and proxy clients match it
-> by domain suffix — which takes every `*.localhost` name with it. `mocktown record stop`
-> says so when a run records zero exchanges. Give a test upstream a name outside
-> `.localhost`.
+> **`NO_PROXY` is computed from the project, and every entry in it is a hole.** Proxy
+> clients match it by domain suffix, so a blanket `localhost` entry takes every
+> `*.localhost` name with it — a `.localhost` upstream would record nothing while looking
+> perfectly wired up. Mocktown drops that entry as soon as a service sits under the suffix,
+> keeps `127.0.0.1` and `::1` unconditionally, and lets the app name its own local services:
+>
+> ```jsonc
+> { "noProxy": ["localhost", "db.internal"] }
+> ```
+>
+> The trade is stated, never assumed: `record start` and `serve start` warn that a service
+> reached as `localhost:<port>` by name now goes through the front door, and a request for a
+> loopback name that hits the wall is filed as *your own service* — with `noProxy` as the
+> fix — rather than as a missing dependency. A collision that cannot be resolved is named
+> too: under portless the TLD has to bypass, so a `.localhost` upstream is unrecordable in
+> that mode.
 
 ## The seal
 

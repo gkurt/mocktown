@@ -136,5 +136,7 @@ Two further consequences, both deliberate:
   One defect fell out of this work: `.env.mocktown` set `HTTP_PROXY` with no `NO_PROXY`, so a
   client pointed at its mock's loopback URL would have had that request proxied into the
   front door, which would deny it as an unknown host — the redirection breaking the
-  redirection. Loopback is now never proxied, and the portless TLD is added when stable names
-  are live.
+  redirection. Loopback literals are now never proxied, and the portless TLD is added when
+  stable names are live — both through the one bypass plan described in
+  [03-capture.md](03-capture.md), so the launch wrapper, `.env.mocktown` and the
+  empty-recording diagnostic cannot disagree about what reaches the front door.

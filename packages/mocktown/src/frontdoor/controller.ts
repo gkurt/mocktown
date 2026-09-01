@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import type { Mockttp, RequestRuleData, WebSocketRuleData } from 'mockttp';
 import * as mockttp from 'mockttp';
 import { completionCheckers, matchers, requestSteps, webSocketSteps } from 'mockttp';
+import { isLoopbackName } from '#src/capture/launch.ts';
 import { type Route, type RoutingTable, tableSignature } from '#src/frontdoor/routing.ts';
 import { findFreePort } from '#src/util/ports.ts';
 
@@ -107,7 +108,7 @@ export interface WallHit {
   url: string;
   headers: Record<string, string | string[]>;
   body: string;
-  reason: 'deny' | 'unknown-host' | 'provider-down';
+  reason: 'deny' | 'unknown-host' | 'provider-down' | 'own-service';
   /** For `provider-down`: the provider the registry expected to be serving this host. */
   provider?: string;
 }
@@ -337,8 +338,11 @@ export class FrontDoor {
         // A route carrying a provider is one whose provider never came up — the registry
         // said `generated:x`, routing had nowhere to send it, and denying was the safe
         // answer. A route with no provider is a registry `deny`; no route at all is a
-        // host nobody has decided about yet.
-        reason: !route ? 'unknown-host' : route.provider ? 'provider-down' : 'deny',
+        // host nobody has decided about yet — unless it is this machine talking to
+        // itself, which is the app's own service arriving here because the blanket
+        // `localhost` bypass was dropped. Same denial, different mistake, so it must not
+        // be reported as an undeclared third-party dependency.
+        reason: !route ? (isLoopbackName(hostOf(request.url)) ? 'own-service' : 'unknown-host') : route.provider ? 'provider-down' : 'deny',
         provider: route?.provider,
       });
       return;
