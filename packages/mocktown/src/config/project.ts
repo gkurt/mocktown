@@ -78,11 +78,26 @@ export function resolveProject(opts: { project?: string; cwd?: string } = {}): R
 
   // A workspace only counts when it is the project we actually resolved to; a
   // `--project other` run inside an unrelated repo must not inherit that repo's config.
-  const workspace = filePath && file?.project === name ? dirname(filePath) : null;
-  const paths = workspace ? workspacePaths(workspace) : null;
+  const here = filePath && file?.project === name ? { workspace: dirname(filePath), file } : null;
+  // Otherwise the registry answers. The daemon serves every project from wherever it was
+  // started, so for all but one of them there is no `mocktown.json` above its cwd — and
+  // without this every workspace-dependent capability (issues, mocks, panels, `env write`)
+  // would be silently missing for those projects rather than reported.
+  const resolved = here ?? fromRegistry(name);
+  const paths = resolved ? workspacePaths(resolved.workspace) : null;
   const local = paths ? readJson(paths.localConfig, LocalConfig, LocalConfig.parse({})) : LocalConfig.parse({});
 
-  return { name, source, workspace, file: workspace ? file : null, local, paths };
+  return { name, source, workspace: resolved?.workspace ?? null, file: resolved?.file ?? null, local, paths };
+}
+
+/** The workspace recorded for this project when it was first used, if it still holds its file. */
+function fromRegistry(name: string): { workspace: string; file: ProjectFile } | null {
+  const workspace = loadGlobalConfig().projects[name]?.workspace;
+  if (!workspace) return null;
+  const candidate = join(workspace, 'mocktown.json');
+  if (!existsSync(candidate)) return null;
+  const file = readJson(candidate, ProjectFile, ProjectFile.parse({ project: name }));
+  return file.project === name ? { workspace, file } : null;
 }
 
 /**

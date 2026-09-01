@@ -1,7 +1,8 @@
 # 03 — Traffic Capture & the Front Door
 
-**Status:** Implemented — phase 1, launched browser in phase 3; WebSocket/gRPC mocking and
-OS-level capture remain deferred
+**Status:** Implemented — phase 1, launched browser in phase 3, WebSocket capture *and*
+mocking in phase 4; gRPC records but cannot be served, and OS-level capture remains
+deferred
 
 All traffic — recording real APIs and serving mocked ones — flows through one proxy,
 the **front door**. Its behavior per service is a mode, not a separate binary:
@@ -105,9 +106,54 @@ Normalization (path templating, volatile-header stripping) happens at write time
 the corpus is immediately agent-legible — the raw exchange is *not* kept after
 scrubbing ([10-security.md](10-security.md)).
 
+## WebSockets
+
+*Added 2026-09-01 by the phase-4 implementation.* A socket is one corpus row plus its frames
+in order, and a generated mock declares channels in a `sockets` array next to its `routes`.
+Four decisions came out of building it:
+
+- **Direction is written from the client's point of view.** Mockttp reports it from the
+  proxy's, so a `websocket-message-received` event becomes a `sent` frame in the corpus.
+  Getting this backwards would produce mocks that reply where the upstream replied and stay
+  silent where the client spoke — a bug that only shows up as a hang.
+- **A row lands at close, not at upgrade**, because the transcript is the artifact. The live
+  feed gets `open`/`close` lifecycle events so a long-lived socket is still visible while it
+  is running.
+- **Frames are capped at 500 per socket** and the corpus marks a capped transcript. An
+  agent building a mock from a truncated conversation must know the conversation went on
+  rather than assume it ended there.
+- **An undeclared channel is refused at the handshake** with a 501 and a filed issue naming
+  the channels the mock does declare. A socket that connects and then says nothing is the
+  hardest kind of mock bug to diagnose, so the failure is made loud where it is cheap.
+
+Bodies that are not valid UTF-8 — binary frames, and binary HTTP bodies — are stored base64
+and the row is marked `unscrubbable-binary`. That is an honest hole in
+[10-security.md](10-security.md)'s promise, not a silent one: pattern rules cannot see inside
+protobuf, so the corpus says so instead of implying the body was checked. Text-vs-binary is
+decided by a UTF-8 round trip, never by `content-type` — a body labelled
+`application/json` that is really gzip is exactly the case a header check gets wrong.
+
+## gRPC: recorded, and not servable
+
+*Added 2026-09-01 by the phase-4 implementation.* gRPC needs HTTP/2 with trailers, and
+`Bun.serve` answers a prior-knowledge h2 connection with a protocol error — verified
+directly against a `node:http2` client, not inferred. The generated-mock host therefore
+cannot serve gRPC at all, and pretending otherwise would send agents to edit a mock that
+can never work.
+
+So gRPC calls are recorded opaquely (`kind: 'grpc'`, bodies base64) and **denied at the mock
+boundary with the reason in the response body and in the filed issue**, along with the two
+things that do work: point the service at `record` so its calls reach the real service and
+land in the corpus, or run a real gRPC test double and register that host as `passthrough`.
+The corpus export lists the gRPC methods it has seen under their own heading, and the
+generation skill's house rules tell agents not to write routes for them.
+
+**Revisit when** either the mock host stops being a `Bun.serve` — a Node sidecar already
+exists for the front door, and a second one for gRPC is the obvious path — or Bun ships h2
+server support. The blocker is the runtime, not the design.
+
 ## Explicitly deferred
 
 - HTTP/3 / QUIC (deny at the front door so clients fall back to h2)
-- WebSocket *mocking* (recording yes; generated mocks treat WS as passthrough or deny —
-  scheduled for [11-roadmap.md](11-roadmap.md) phase 4, alongside gRPC)
-- gRPC (record as opaque h2 first; typed support later)
+- Typed gRPC support: reflection or a `.proto`, message decoding, and mockable service
+  methods. Blocked on the runtime above; opaque recording ships in the meantime.

@@ -102,6 +102,55 @@ function renderBrief(corpus: CorpusExport): string {
     }
   }
 
+  if (corpus.sockets.length) {
+    lines.push(
+      '## WebSocket channels to cover',
+      '',
+      "Each channel below is one whole recorded conversation, in order, from the *client's*",
+      'point of view: `-->` is a frame the client sent, `<--` is one it received. A `sockets`',
+      'entry in the module answers a channel; a socket the mock does not declare is rejected',
+      'at the handshake and filed, rather than connecting and then going quiet.',
+      '',
+    );
+    for (const socket of corpus.sockets) {
+      lines.push(
+        `### \`WS ${socket.pathTemplate}\``,
+        '',
+        `Observed ${socket.observations} time${socket.observations === 1 ? '' : 's'}; the longest transcript had ` +
+          `${socket.frames.length} frame${socket.frames.length === 1 ? '' : 's'}` +
+          `${socket.truncatedFrames ? ' and hit the per-socket cap, so the conversation went on past this point' : ''}.` +
+          (socket.close ? ` Closed with ${socket.close.code} by the ${socket.close.by}.` : ' No close frame — the connection was lost.'),
+        '',
+        '```',
+        ...socket.frames
+          .slice(0, 40)
+          .map(
+            (frame) =>
+              `+${frame.atMs}ms ${frame.direction === 'sent' ? '-->' : '<--'} ${
+                frame.encoding === 'base64' ? `(binary, ${frame.body.length} base64 chars)` : truncate(frame.body, 300)
+              }`,
+          ),
+        ...(socket.frames.length > 40 ? [`… ${socket.frames.length - 40} more frames — see \`mocktown recordings get\``] : []),
+        '```',
+        '',
+      );
+    }
+  }
+
+  if (corpus.grpcMethods.length) {
+    lines.push(
+      '## gRPC methods — recorded, and not yours to mock',
+      '',
+      'These calls were captured as opaque HTTP/2. A generated mock **cannot** serve them:',
+      'gRPC needs HTTP/2 with trailers and the mock host runs on `Bun.serve`, which does not',
+      'accept HTTP/2 connections. Do not add routes for them — point the service at `record`,',
+      'or run a real gRPC test double and register its host as `passthrough`.',
+      '',
+      ...corpus.grpcMethods.map((method) => `- \`${method.path}\` (x${method.observations})`),
+      '',
+    );
+  }
+
   if (corpus.secretKinds.length) {
     lines.push(
       '## Credentials this service expects',
@@ -128,6 +177,30 @@ function renderBrief(corpus: CorpusExport): string {
 }
 
 function renderModule(corpus: CorpusExport): string {
+  const sockets = corpus.sockets.length
+    ? `
+  // Recorded transcripts for each channel are in BRIEF.md, client's point of view.
+  sockets: [
+${corpus.sockets
+  .map(
+    (socket) => `    {
+      path: ${JSON.stringify(socket.pathTemplate)},
+      describe: "TODO: what this channel carries",
+      onOpen: (req, ctx) => {
+        // TODO: the recorded conversation opened with ${socket.frames.filter((f) => f.direction === 'received').length} frame(s) from the service.
+        ctx.close(1011, "not implemented: WS ${socket.pathTemplate}");
+      },
+      onMessage: (message, req, ctx) => {
+        // TODO: answer what the client sends. Use ctx.state for anything that must persist
+        // past this connection, and ctx.connection for anything that must not.
+      },
+    },`,
+  )
+  .join('\n')}
+  ],
+`
+    : '';
+
   const routes = corpus.routes
     .map(
       (route) => `    {
@@ -170,6 +243,7 @@ export default defineMock({
   routes: [
 ${routes}
   ],
+${sockets}
 
   // Required: how a client gets pointed at this mock (05-redirection.md).
   ekb: [

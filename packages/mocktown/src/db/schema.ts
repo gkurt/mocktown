@@ -62,6 +62,28 @@ export const recordings = sqliteTable(
     requestBlob: text('request_blob'),
     responseBlob: text('response_blob'),
     durationMs: integer('duration_ms'),
+    /**
+     * What protocol this row is. `http` is the overwhelming majority; `websocket` rows own
+     * a set of `socket_frames`, and `grpc` rows are opaque h2 with base64 bodies
+     * (03-capture.md's deferred list, picked up in phase 4).
+     */
+    kind: text('kind', { enum: ['http', 'websocket', 'grpc'] })
+      .notNull()
+      .default('http'),
+    /**
+     * `base64` when that side's body is not valid UTF-8. A gRPC frame is length-prefixed
+     * protobuf: storing it as a string corrupts it silently, and a corrupted corpus is
+     * worse than none. Per side, because a JSON request with a PNG response is ordinary and
+     * base64-ing the readable half would cost the corpus its legibility for nothing.
+     */
+    requestEncoding: text('request_encoding', { enum: ['text', 'base64'] })
+      .notNull()
+      .default('text'),
+    responseEncoding: text('response_encoding', { enum: ['text', 'base64'] })
+      .notNull()
+      .default('text'),
+    /** WebSocket only: how the connection ended, and which side ended it. */
+    socketClose: text('socket_close', { mode: 'json' }).$type<{ code: number; reason: string; by: 'client' | 'upstream' } | null>(),
     /** What the scrubber found: kinds and counts only, never values. */
     scrubSummary: text('scrub_summary', { mode: 'json' }).$type<{ kind: string; count: number }[]>().notNull().default([]),
     source: text('source', { enum: ['front-door', 'har'] })
@@ -75,6 +97,58 @@ export const recordings = sqliteTable(
     index('recordings_session_idx').on(t.sessionId),
   ],
 );
+
+/**
+ * One WebSocket message. Frames live in their own table rather than as a JSON blob on the
+ * recording because a long-lived socket can carry thousands of them, and the corpus is
+ * meant to be queryable — "what does this service push on this channel" is the question a
+ * generating agent asks (03-capture.md).
+ */
+export const socketFrames = sqliteTable(
+  'socket_frames',
+  {
+    id: text('id').primaryKey(),
+    recordingId: text('recording_id')
+      .notNull()
+      .references(() => recordings.id),
+    /** Order within the connection. The wire has no other stable identity for a frame. */
+    ordinal: integer('ordinal').notNull(),
+    /** Direction as the *client* sees it: `sent` is client -> service. */
+    direction: text('direction', { enum: ['sent', 'received'] }).notNull(),
+    encoding: text('encoding', { enum: ['text', 'base64'] })
+      .notNull()
+      .default('text'),
+    /** Scrubbed before it lands here, like every other body (10-security.md). */
+    body: text('body').notNull(),
+    /** Milliseconds since the socket opened, so a mock can reproduce the cadence. */
+    atMs: integer('at_ms').notNull(),
+  },
+  (t) => [index('socket_frames_recording_idx').on(t.recordingId, t.ordinal)],
+);
+
+/**
+ * A drift-watch run (07-issues-agent-loop.md's "the mock rotted" problem). Each run is a
+ * re-record against the *real* services followed by a replay against the providers, so the
+ * row records what it cost as well as what it found.
+ */
+export const driftRuns = sqliteTable('drift_runs', {
+  id: text('id').primaryKey(),
+  /** The recording session the re-record produced — the fresh evidence this run judged. */
+  sessionId: text('session_id'),
+  trigger: text('trigger', { enum: ['manual', 'scheduled'] })
+    .notNull()
+    .default('manual'),
+  services: text('services', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  flows: text('flows', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  /** Routes compared, and how many diverged. */
+  checked: integer('checked').notNull().default(0),
+  drifted: integer('drifted').notNull().default(0),
+  issues: text('issues', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  /** Why a run proved nothing — no flows, no corpus, a flow that failed to run. */
+  reasons: text('reasons', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  startedAt: text('started_at').notNull().default(now),
+  finishedAt: text('finished_at'),
+});
 
 /** The issue taxonomy from 07-issues-agent-loop.md. */
 export const issues = sqliteTable(

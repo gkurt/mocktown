@@ -1,6 +1,6 @@
 # 02 — Architecture & Tech Stack
 
-**Status:** Implemented in phases 1–2 (GUI stack unbuilt — phase 4)
+**Status:** Implemented in phases 1–4
 
 One long-running **daemon** owns all logic and exposes a local HTTP/JSON API. The CLI
 and GUI are thin clients of that API — no client has privileged access to anything.
@@ -139,9 +139,29 @@ own guidance is Router-alone for authenticated dashboards. Deferred, not banned:
 revisit only if a hosted/cloud GUI ever leaves "deliberately unscheduled"
 ([11-roadmap.md](11-roadmap.md)).
 
+*Amended 2026-09-01 by the phase-4 implementation:* the shell ships with React 19 +
+TanStack Router + TanStack Query and **without** TanStack Form and TanStack Store. Server
+state is Query's, as decided; the client-only remainder turned out to be two `useState`s
+(a feed filter, an expanded issue) and the router's own search params, and the only write in
+the shell is a single-field mutation. Adding a form library and a store for that would have
+been machinery around a `<select>`. Both stay the chosen answer for when a real form or a
+persisted layout appears — the decision above is unchanged, only unbuilt.
+
+`@orpc/tanstack-query` is likewise unused: the shell builds the same `OpenAPILink` client the
+CLI uses and calls it from plain `useQuery`, which is one dependency instead of two for the
+same typing. The contract reaches the browser through a new `mocktown/contract` export that
+pulls in nothing but Zod.
+
 **Decision: styling and components are Tailwind v4 + shadcn/ui on Base UI.**
 Base UI is shadcn's default for new projects as of 2026-07 (Radix remains
 supported; a migration command exists both ways).
+
+*Amended 2026-09-01 by the phase-4 implementation:* Tailwind v4 ships; the shadcn components
+do not, yet. The shell needs five primitives — card, table, badge, button, select — and each
+is a handful of Tailwind classes marked `TODO(registry)` at the point where the house
+`@gkurt` registry should replace it. Vendoring a component set to wrap a `<table>` would add
+a dependency surface and a registry lock-in ahead of the first component that actually earns
+it (a dialog, a combobox, a data table with sorting).
 
 **Decision: utility hooks come from the owner's shadcn registry —
 `@gkurt` (https://gkurt.com/shadcn/).** Registered in `components.json` as

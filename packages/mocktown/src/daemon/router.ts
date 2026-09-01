@@ -8,7 +8,6 @@
  * exist for any of them.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { ORPCError } from '@orpc/client';
 import { implement } from '@orpc/server';
 import { and, desc, eq } from 'drizzle-orm';
@@ -17,12 +16,14 @@ import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import { contract } from '#src/contract/index.ts';
-import type { ProviderRef, Recording, Service } from '#src/contract/schemas.ts';
+import type { ProviderRef, Service } from '#src/contract/schemas.ts';
 import { runtimeFor } from '#src/daemon/runtime.ts';
 import { schema } from '#src/db/client.ts';
+import { checkDrift } from '#src/drift/watch.ts';
 import { renderAgentsSection, renderEnvFile, writeAgentsSection } from '#src/env/generate.ts';
 import { ensureProjectCa } from '#src/frontdoor/ca.ts';
-import { exportCorpus, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
+import { listPanels, workspacePanelDir } from '#src/gui/panels.ts';
+import { exportCorpus, inflateRecording, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
 import { scaffoldMock } from '#src/mocks/scaffold.ts';
 import { verifyRecordings } from '#src/mocks/verify.ts';
 import { writeDevcontainer } from '#src/sandbox/devcontainer.ts';
@@ -47,21 +48,6 @@ function toService(row: typeof schema.services.$inferSelect): Service {
     seed: row.seed,
     discovered: row.discovered,
     lastSeenAt: row.lastSeenAt,
-  };
-}
-
-/** A stored recording, with any spilled body read back from `blobs/`. */
-function toRecording(project: string, row: typeof schema.recordings.$inferSelect): Recording {
-  const blobDir = projectPaths(project).blobs;
-  const readBlob = (hash: string | null) => {
-    if (!hash) return null;
-    const path = join(blobDir, hash);
-    return existsSync(path) ? readFileSync(path, 'utf8') : null;
-  };
-  return {
-    ...row,
-    requestBody: row.requestBody ?? readBlob(row.requestBlob),
-    responseBody: row.responseBody ?? readBlob(row.responseBlob),
   };
 }
 
@@ -104,6 +90,32 @@ export const router = os.router({
         openIssues,
         session: runtime.session,
         warnings,
+      };
+    }),
+  },
+
+  /**
+   * A long poll rather than a stream, so the feed is a normal procedure on all three
+   * surfaces (see `daemon/events.ts` for the decision). A caller passes back the `cursor`
+   * it last saw; a quiet project returns an empty list after `waitMs` and the caller asks
+   * again with the same cursor.
+   */
+  feed: {
+    tail: os.feed.tail.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      if (input.waitMs > 0) await runtime.feed.wait(input.since, input.waitMs);
+      const window = runtime.feed.since(input.since, input.limit);
+
+      return {
+        project: runtime.name,
+        // The cursor advances over the *unfiltered* window: a client watching one kind
+        // must not be handed the same events again, nor park forever because the kind it
+        // asked about happens to be quiet.
+        cursor: window.reduce((max, event) => Math.max(max, event.seq), input.since),
+        events: window.filter((event) => (!input.kind || event.kind === input.kind) && (!input.service || event.service === input.service)),
+        // Honest about the window's edge: a client that fell behind is told, rather than
+        // silently shown a feed with a hole in it.
+        gap: input.since > 0 && input.since < runtime.feed.oldestSeq - 1,
       };
     }),
   },
@@ -153,14 +165,14 @@ export const router = os.router({
           : runtime.db.select().from(schema.recordings)
       ).all().length;
 
-      return { project: runtime.name, total, recordings: rows.map((row) => toRecording(runtime.name, row)) };
+      return { project: runtime.name, total, recordings: rows.map((row) => inflateRecording(runtime.name, row)) };
     }),
 
     get: os.recordings.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
       const row = runtime.db.select().from(schema.recordings).where(eq(schema.recordings.id, input.id)).get();
       if (!row) throw new ORPCError('NOT_FOUND', { message: `no recording "${input.id}"` });
-      return { project: runtime.name, recording: toRecording(runtime.name, row) };
+      return { project: runtime.name, recording: inflateRecording(runtime.name, row), frames: socketFrames(runtime.db, row) };
     }),
 
     routes: os.recordings.routes.handler(({ input }) => {
@@ -234,7 +246,7 @@ export const router = os.router({
 
       const findings = runtime.currentScrubber.audit(
         rows.map((row) => {
-          const recording = toRecording(runtime.name, row);
+          const recording = inflateRecording(runtime.name, row);
           return {
             id: row.id,
             method: row.method,
@@ -303,7 +315,7 @@ export const router = os.router({
       runtime.issues.setStatus(input.id, 'verifying');
       const recordings = recordingsForService(runtime.db, issue.service, undefined, 100)
         .filter((row) => !issue.pathTemplate || row.pathTemplate === issue.pathTemplate)
-        .map((row) => toRecording(runtime.name, row));
+        .map((row) => inflateRecording(runtime.name, row));
 
       const result = await verifyRecordings(recordings, { baseUrl, service: issue.service }, runtime.currentScrubber);
       const passed = result.failed === 0;
@@ -343,7 +355,7 @@ export const router = os.router({
         });
       }
       const recordings = recordingsForService(runtime.db, input.service, input.session, input.limit).map((row) =>
-        toRecording(runtime.name, row),
+        inflateRecording(runtime.name, row),
       );
       const result = await verifyRecordings(recordings, { baseUrl, service: input.service }, runtime.currentScrubber);
 
@@ -413,6 +425,18 @@ export const router = os.router({
       ];
       return { project: runtime.name, ...artifacts, written };
     }),
+
+    portless: {
+      get: os.env.portless.get.handler(({ input }) => {
+        const runtime = runtimeFor(input.project);
+        return { project: runtime.name, ...runtime.portlessStatus() };
+      }),
+
+      sync: os.env.portless.sync.handler(async ({ input }) => {
+        const runtime = runtimeFor(input.project);
+        return { project: runtime.name, ...(await runtime.syncPortless()) };
+      }),
+    },
   },
 
   sandbox: {
@@ -527,6 +551,49 @@ export const router = os.router({
     verify: os.seal.verify.handler(async ({ input }) => {
       const runtime = runtimeFor(input.project);
       return { project: runtime.name, ...(await certifySeal(runtime, { flows: input.flows, rebuild: input.rebuild })) };
+    }),
+  },
+
+  drift: {
+    get: os.drift.get.handler(({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const config = runtime.resolved.file?.drift ?? { enabled: false, intervalHours: 24, services: [], flows: [] };
+      const last = runtime.db.select().from(schema.driftRuns).orderBy(desc(schema.driftRuns.startedAt)).limit(1).get() ?? null;
+
+      return {
+        project: runtime.name,
+        enabled: config.enabled,
+        intervalHours: config.intervalHours,
+        services: driftTargets(runtime, config.services),
+        flows: config.flows.length ? config.flows : (runtime.resolved.file?.seal.flows ?? []),
+        // Computed from the last run rather than from a timer, so it survives a daemon
+        // restart and says something true even when the scheduler is not running.
+        nextRunAt: config.enabled ? nextRunAt(last?.startedAt ?? null, config.intervalHours) : null,
+        lastRun: last ? { ...last } : null,
+        openDriftIssues: runtime.issues.list({ status: 'open', type: 'provider-drift' }).length,
+      };
+    }),
+
+    /**
+     * The one procedure in the contract that deliberately talks to the real internet, so
+     * the summary says so and the CLI renderer repeats it. `ok: false` covers both "the
+     * mock rotted" and "this run could not judge what it set out to" — a drift check that
+     * recorded nothing is not a pass.
+     */
+    check: os.drift.check.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const result = await checkDrift(runtime, { services: input.services, flows: input.flows, trigger: 'manual' });
+      return {
+        project: runtime.name,
+        ok: result.ok,
+        runId: result.runId,
+        session: result.session,
+        services: result.services,
+        flows: result.flows,
+        checked: result.checked,
+        findings: result.findings,
+        reasons: result.reasons,
+      };
     }),
   },
 
@@ -675,19 +742,27 @@ export const router = os.router({
     }),
   },
 
-  state: {
-    get: os.state.get.handler(({ input }) => {
+  panels: {
+    list: os.panels.list.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const provider = runtime.providerFor(input.service);
-      if (!provider) {
+      return { project: runtime.name, dir: workspacePanelDir(runtime.resolved.workspace), ...listPanels(runtime.resolved.workspace) };
+    }),
+  },
+
+  state: {
+    list: os.state.list.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      return { project: runtime.name, services: await runtime.stateOverview(input.profile) };
+    }),
+
+    get: os.state.get.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      if (!runtime.providerFor(input.service)) {
         throw new ORPCError('NOT_FOUND', {
           message: `no running provider serves "${input.service}". Run \`mocktown serve start\` first.`,
         });
       }
-      const snapshot = provider.state?.(input.service, { profile: input.profile, collection: input.collection }) ?? {
-        collections: [],
-        note: `The ${provider.kind} provider does not implement state introspection.`,
-      };
+      const snapshot = await runtime.stateFor(input.service, { profile: input.profile, collection: input.collection });
       return { project: runtime.name, service: input.service, ...snapshot };
     }),
 
@@ -699,3 +774,38 @@ export const router = os.router({
 });
 
 export type Router = typeof router;
+
+/**
+ * A WebSocket recording's frames, in order. Empty for every other kind, which is why this
+ * is a lookup rather than a column on the row (03-capture.md).
+ */
+function socketFrames(db: ReturnType<typeof runtimeFor>['db'], row: typeof schema.recordings.$inferSelect) {
+  if (row.kind !== 'websocket') return [];
+  return db
+    .select()
+    .from(schema.socketFrames)
+    .where(eq(schema.socketFrames.recordingId, row.id))
+    .orderBy(schema.socketFrames.ordinal)
+    .all()
+    .map((frame) => ({
+      ordinal: frame.ordinal,
+      direction: frame.direction,
+      encoding: frame.encoding,
+      body: frame.body,
+      atMs: frame.atMs,
+    }));
+}
+
+/** What a drift run would judge right now: the configured list, or every mocked service. */
+function driftTargets(runtime: ReturnType<typeof runtimeFor>, configured: string[]): string[] {
+  if (configured.length) return configured;
+  return runtime
+    .services()
+    .filter((service) => service.provider.startsWith('emulator:') || service.provider.startsWith('generated:'))
+    .map((service) => service.id);
+}
+
+function nextRunAt(lastStartedAt: string | null, intervalHours: number): string {
+  const base = lastStartedAt ? new Date(lastStartedAt).getTime() : Date.now();
+  return new Date(base + intervalHours * 3600_000).toISOString();
+}

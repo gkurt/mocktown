@@ -43,16 +43,29 @@ export interface FileIssueInput {
   sessionId?: string | null;
 }
 
+/** What a client needs to show that an issue moved, without re-reading the queue. */
+export interface IssueChange {
+  id: string;
+  type: IssueType;
+  status: string;
+  service: string;
+  method: string | null;
+  pathTemplate: string | null;
+  occurrences: number;
+}
+
 export class IssueEngine {
   /** One batch per run, so an agent fixes a coherent set and one pass verifies it. */
   private batchId: string | null = null;
 
   private readonly db: Db;
   private readonly issuesDir: string | null;
+  private readonly onChange: ((change: IssueChange) => void) | undefined;
 
-  constructor(db: Db, issuesDir: string | null) {
+  constructor(db: Db, issuesDir: string | null, onChange?: (change: IssueChange) => void) {
     this.db = db;
     this.issuesDir = issuesDir;
+    this.onChange = onChange;
   }
 
   startBatch(): string {
@@ -112,6 +125,7 @@ export class IssueEngine {
         .where(eq(schema.issues.id, existing.id))
         .run();
       this.materialize(existing.id);
+      this.announce(existing.id);
       return existing.id;
     }
 
@@ -135,7 +149,24 @@ export class IssueEngine {
       })
       .run();
     this.materialize(issueId);
+    this.announce(issueId);
     return issueId;
+  }
+
+  /** The live feed is told about every move an issue makes (09-gui-plugins.md). */
+  private announce(issueId: string): void {
+    if (!this.onChange) return;
+    const issue = this.get(issueId);
+    if (!issue) return;
+    this.onChange({
+      id: issue.id,
+      type: issue.type,
+      status: issue.status,
+      service: issue.service,
+      method: issue.method,
+      pathTemplate: issue.pathTemplate,
+      occurrences: issue.occurrences,
+    });
   }
 
   get(issueId: string) {
@@ -164,6 +195,7 @@ export class IssueEngine {
       .where(eq(schema.issues.id, issueId))
       .run();
     this.materialize(issueId);
+    this.announce(issueId);
   }
 
   /**

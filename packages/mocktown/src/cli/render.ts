@@ -49,6 +49,12 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     ...(r.warnings.length ? ['', 'warnings', ...r.warnings.map((w: string) => `  ! ${w}`)] : []),
   ],
 
+  'feed.tail': (r) => [
+    ...(r.gap ? ['! the feed is a bounded window and events were dropped before this point'] : []),
+    ...(r.events.length ? r.events.map(feedLine) : ['  (nothing yet)']),
+    `cursor: ${r.cursor}`,
+  ],
+
   'services.list': (r) =>
     r.services.length
       ? r.services.map((s: any) => `  ${pad(s.id, 30)} ${pad(s.provider, 22)} ${s.lastSeenAt ?? 'never seen'}`)
@@ -65,7 +71,7 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     r.routes.length
       ? r.routes.map(
           (route: any) =>
-            `  ${pad(route.method, 7)} ${pad(route.service, 26)} ${pad(route.pathTemplate, 40)} x${pad(route.count, 5)} [${route.statuses.join(' ')}]`,
+            `  ${pad(route.kind === 'http' ? route.method : route.kind === 'websocket' ? 'WS' : 'gRPC', 7)} ${pad(route.service, 26)} ${pad(route.pathTemplate, 40)} x${pad(route.count, 5)} [${route.statuses.join(' ')}]`,
         )
       : ['  (no recordings yet)'],
 
@@ -142,16 +148,29 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
   ],
 
   'recordings.get': (r) => [
-    `${r.recording.method} ${r.recording.url}`,
+    `${r.recording.kind === 'http' ? r.recording.method : r.recording.kind.toUpperCase()} ${r.recording.service}${r.recording.path}`,
     `status ${r.recording.statusCode}  ${r.recording.service}  ${r.recording.pathTemplate}`,
+    ...(r.recording.requestEncoding === 'base64' || r.recording.responseEncoding === 'base64'
+      ? ['! a body here is base64: it is not valid UTF-8, so the scrubber could not read inside it']
+      : []),
     '',
     'request headers',
     ...headerLines(r.recording.requestHeaders),
-    ...(r.recording.requestBody ? ['', 'request body', indent(r.recording.requestBody)] : []),
+    ...(r.recording.requestBody ? ['', `request body (${r.recording.requestEncoding})`, indent(r.recording.requestBody)] : []),
     '',
     'response headers',
     ...headerLines(r.recording.responseHeaders),
-    ...(r.recording.responseBody ? ['', 'response body', indent(r.recording.responseBody)] : []),
+    ...(r.recording.responseBody ? ['', `response body (${r.recording.responseEncoding})`, indent(r.recording.responseBody)] : []),
+    ...(r.frames.length
+      ? [
+          '',
+          `${r.frames.length} frame${r.frames.length === 1 ? '' : 's'}${r.recording.socketClose ? `, closed ${r.recording.socketClose.code} by ${r.recording.socketClose.by}` : ' (no close frame — the connection was lost)'}`,
+          ...r.frames.map(
+            (f: any) =>
+              `  ${pad(`+${f.atMs}ms`, 10)} ${f.direction === 'sent' ? '-->' : '<--'} ${f.encoding === 'base64' ? `(${f.body.length} base64 chars)` : oneLine(f.body)}`,
+          ),
+        ]
+      : []),
   ],
 
   'corpus.export': (r) => [
@@ -160,6 +179,22 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
       `  ${pad(route.method, 7)} ${pad(route.pathTemplate, 44)} x${route.observations}`,
       ...route.statefulHints.map((hint: string) => `      hint: ${hint}`),
     ]),
+    ...(r.sockets.length
+      ? [
+          '',
+          'websocket channels',
+          ...r.sockets.flatMap((socket: any) => [
+            `  WS      ${pad(socket.pathTemplate, 44)} x${socket.observations}  ${socket.frames.length} frame(s)${socket.truncatedFrames ? ' (transcript capped)' : ''}`,
+          ]),
+        ]
+      : []),
+    ...(r.grpcMethods.length
+      ? [
+          '',
+          'gRPC methods (recorded, not servable by a generated mock)',
+          ...r.grpcMethods.map((m: any) => `  ${pad(m.path, 52)} x${m.observations}`),
+        ]
+      : []),
     ...(r.secretKinds.length ? ['', `credential shapes the mock must accept: ${r.secretKinds.join(', ')}`] : []),
   ],
 
@@ -178,6 +213,9 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
   'env.get': (r) => renderEnv(r),
   'env.write': (r) => renderEnv(r),
 
+  'env.portless.get': (r) => renderPortless(r),
+  'env.portless.sync': (r) => renderPortless(r),
+
   'skills.list': (r) => r.skills.map((s: any) => `  ${pad(s.name, 20)} v${pad(s.version, 8)} ${s.summary}`),
 
   // The pack is the payload: printing it whole is what makes `mocktown skills get`
@@ -195,7 +233,24 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
 
   'profiles.session': (r) => [`  ${r.profile}: ${r.header}`],
 
+  'panels.list': (r) => [
+    ...(r.panels.length ? r.panels.map((p: any) => `  ${pad(p.name, 24)} ${pad(p.source, 10)} ${p.url}`) : ['  (no panels found)']),
+    ...(r.dir ? ['', `  panel directory  ${r.dir}`] : []),
+    ...(r.problems.length ? ['', 'problems', ...r.problems.map((p: string) => `  ! ${p}`)] : []),
+  ],
+
+  'state.list': (r) =>
+    r.services.length
+      ? r.services.flatMap((s: any) => [
+          `  ${pad(s.service, 30)} ${pad(s.provider ?? '(not served)', 12)} ${
+            s.collections.map((c: any) => `${c.name}=${c.count}`).join(' ') || '(no collections)'
+          }`,
+          ...(s.introspectable ? [] : [`      ${s.note ?? ''}`]),
+        ])
+      : ['  (no services registered)'],
+
   'state.get': (r) => [
+    `  provider: ${r.provider}`,
     ...(r.note ? [`  note: ${r.note}`] : []),
     ...r.collections.flatMap((c: any) => [
       `  ${c.name} (${c.count})`,
@@ -259,6 +314,41 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
       ? ['', 'redirect gaps', ...r.gaps.map((g: any) => `  ${pad(g.service, 26)} rung ${g.rung ?? '-'}  ${g.instruction}`)]
       : []),
     ...(r.reasons.length ? ['', 'why it is not sealed', ...r.reasons.map((reason: string) => `  ! ${reason}`)] : []),
+  ],
+
+  'drift.get': (r) => [
+    `schedule:  ${r.enabled ? `every ${r.intervalHours}h — next ${r.nextRunAt}` : 'off (a drift run calls the real services)'}`,
+    `services:  ${r.services.length ? r.services.join(', ') : '(none backed by a provider)'}`,
+    `flows:     ${r.flows.length ? r.flows.join(' ; ') : '(none configured — a run would prove nothing)'}`,
+    `open provider-drift issues: ${r.openDriftIssues}`,
+    ...(r.lastRun
+      ? [
+          '',
+          `last run ${r.lastRun.startedAt} (${r.lastRun.trigger}): ${r.lastRun.checked} checked, ${r.lastRun.drifted} drifted`,
+          ...r.lastRun.reasons.map((reason: string) => `  ! ${reason}`),
+        ]
+      : ['', 'no drift run recorded']),
+  ],
+
+  'drift.check': (r) => [
+    // Worth repeating on every run: this is the one command that leaves the mocks behind.
+    `re-recorded ${r.services.length} service(s) against the REAL services in session ${r.session ?? '(none)'}`,
+    ...(r.flows.length
+      ? ['', 'flows', ...r.flows.map((f: any) => `  ${f.exitCode === 0 ? 'ok  ' : 'FAIL'} ${pad(`${f.durationMs}ms`, 9)} ${f.command}`)]
+      : []),
+    '',
+    r.findings.length
+      ? `${r.findings.length} drift finding(s) across ${r.checked} replayed exchange(s)`
+      : `no drift across ${r.checked} replayed exchange(s)`,
+    ...r.findings.map((f: any) =>
+      [
+        `  ${pad(f.kind, 12)} ${pad(f.method, 7)} ${f.service}${f.pathTemplate}`,
+        `    ${f.detail}`,
+        ...f.diff.slice(0, 5).map((d: string) => `    ${d}`),
+        ...(f.issueId ? [`    filed as ${f.issueId}`] : []),
+      ].join('\n'),
+    ),
+    ...(r.reasons.length ? ['', 'this run judged less than it set out to', ...r.reasons.map((reason: string) => `  ! ${reason}`)] : []),
   ],
 
   'browser.launch': (r) => [
@@ -329,10 +419,28 @@ function renderEnv(r: any): string[] {
   ];
 }
 
+function renderPortless(r: any): string[] {
+  return [
+    `  stable names ${r.available ? 'available' : r.enabled ? 'unavailable' : 'off'}${r.binary ? `  (${r.binary})` : ''}`,
+    `  ${r.reason}`,
+    ...(r.names.length ? ['', ...r.names.map((n: any) => `  ${pad(n.service, 30)} ${n.url}`)] : []),
+    ...(r.caBundle ? ['', `  CA bundle  ${r.caBundle}`] : []),
+  ];
+}
+
 /** Headers are the evidence in a recording, so they print in full, one per line. */
 function headerLines(headers: Record<string, string | string[]>): string[] {
   return Object.entries(headers).map(([name, value]) => `  ${pad(name, 24)} ${Array.isArray(value) ? value.join(', ') : value}`);
 }
+
+/** One feed event, one line. Shared with `mocktown feed --follow`, which prints these live. */
+export const feedLine = (event: any) => `  ${pad(event.seq, 6)} ${event.at.slice(11, 23)} ${pad(event.kind, 10)} ${event.summary}`;
+
+/** A frame on one line: a feed of 200 frames is unreadable if any of them wraps. */
+const oneLine = (body: string) => {
+  const flat = body.replace(/\s+/g, ' ').trim();
+  return flat.length > 120 ? `${flat.slice(0, 117)}...` : flat;
+};
 
 const indent = (body: string) =>
   body

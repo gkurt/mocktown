@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mocktown</title>
+    <!--
+      No token here. The daemon injects a `mocktown-boot` meta element as it serves this
+      file (gui/serve.ts), so a build sitting on disk carries no capability.
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

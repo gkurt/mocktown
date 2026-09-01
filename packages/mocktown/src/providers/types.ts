@@ -45,7 +45,12 @@ export interface Provider {
 
   baseUrls(): Map<string, string>;
   knobs?(service: string): KnobManifest | undefined;
-  state?(service: string, opts: { profile?: string; collection?: string }): StateSnapshot;
+  /**
+   * May be async: a generated mock reads our own SQLite synchronously, but an emulator has
+   * to be *asked over HTTP* (06-emulation.md's "whatever its processes expose"), so the
+   * seam has to allow a round trip. Callers await either way.
+   */
+  state?(service: string, opts: { profile?: string; collection?: string }): StateSnapshot | Promise<StateSnapshot>;
   /** How clients get pointed at each service (05-redirection.md). */
   ekbEntries(): { service: string; recipe: EndpointRecipe }[];
 }

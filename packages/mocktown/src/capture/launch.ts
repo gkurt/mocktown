@@ -14,9 +14,16 @@ import { spawn } from 'node:child_process';
 export interface LaunchEnvOptions {
   proxyUrl: string;
   caCertPath: string;
-  /** Hosts the child should reach directly. Kept minimal: every entry is a hole. */
+  /** Hosts the child should reach directly, on top of loopback. Kept minimal: every entry is a hole. */
   noProxy?: string[];
 }
+
+/**
+ * Loopback is never proxied. The front door itself and every provider listener are on
+ * loopback, so proxying them would send a request meant for a mock into the front door,
+ * which would deny it as an unknown host — the redirection breaking the redirection.
+ */
+const NEVER_PROXIED = ['127.0.0.1', 'localhost', '::1'];
 
 /**
  * The env a recorded child process gets. Returned rather than applied so `mocktown env`
@@ -25,14 +32,15 @@ export interface LaunchEnvOptions {
  */
 export function captureEnv(options: LaunchEnvOptions): Record<string, string> {
   const { proxyUrl, caCertPath } = options;
-  const noProxy = (options.noProxy ?? []).join(',');
+  const noProxy = [...NEVER_PROXIED, ...(options.noProxy ?? [])].join(',');
 
   return {
     HTTP_PROXY: proxyUrl,
     HTTPS_PROXY: proxyUrl,
     http_proxy: proxyUrl,
     https_proxy: proxyUrl,
-    ...(noProxy ? { NO_PROXY: noProxy, no_proxy: noProxy } : {}),
+    NO_PROXY: noProxy,
+    no_proxy: noProxy,
 
     // Node's global `fetch` honours proxy env vars only with this set (spike 05).
     NODE_USE_ENV_PROXY: '1',
@@ -64,6 +72,50 @@ export const JAVA_GUIDANCE =
 export interface LaunchResult {
   exitCode: number;
   signal: NodeJS.Signals | null;
+}
+
+/**
+ * Same child, output captured instead of inherited — for the runs nobody is watching: a
+ * drift check on a timer, a flow driven by an agent through the API. The tail is kept
+ * rather than the whole stream, because a failing flow needs its error, not a log dump.
+ */
+export async function launchCaptured(
+  command: string,
+  env: Record<string, string>,
+  options: { cwd?: string; tail?: number; timeoutMs?: number } = {},
+): Promise<LaunchResult & { output: string }> {
+  const child = spawn(command, {
+    shell: true,
+    cwd: options.cwd,
+    env: { ...process.env, ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let output = '';
+  const tail = options.tail ?? 2000;
+  const collect = (buf: Buffer) => {
+    output = `${output}${buf.toString()}`.slice(-tail);
+  };
+  child.stdout?.on('data', collect);
+  child.stderr?.on('data', collect);
+
+  const result = await new Promise<LaunchResult>((resolve, reject) => {
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          child.kill('SIGKILL');
+        }, options.timeoutMs)
+      : undefined;
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      resolve({ exitCode: code ?? (signal ? 129 : 1), signal });
+    });
+  });
+
+  return { ...result, output };
 }
 
 /** Run a command with the capture env, streaming its output through untouched. */

@@ -1,6 +1,6 @@
 # 11 — Roadmap
 
-**Status:** Living — phases 0–3 done, phase 4 next
+**Status:** Living — phases 0–4 done
 
 Sequencing principle: ship the thin composed version fast (the market window —
 [01-product.md](01-product.md)), let the long-tail generator and EKB accrete as the
@@ -121,10 +121,59 @@ ships, and the development host has no IPv6 egress to prove it against.
 
 ## Phase 4 — Surface polish
 
-GUI shell (dashboard, live feed, issues) · panels model
-([09-gui-plugins.md](09-gui-plugins.md)) · state introspection across providers ·
-drift watch (scheduled re-record + `provider-drift` issues) · WebSocket/gRPC mocking
-per [03-capture.md](03-capture.md) deferred list · portless integration for host mode.
+- [x] **GUI shell** — `packages/gui`, a Vite/React SPA served by the daemon on the daemon's
+  own port: dashboard, live feed, issues, services, corpus, state, seal/sandbox/drift, panels.
+  It imports the same contract the CLI does, so it is thin by construction, and the bearer
+  token is injected by the daemon as it serves the page rather than built into it.
+- [x] **Live feed** — a cursor'd long poll (`feed.tail`), on every surface: the dashboard, a
+  panel, and `mocktown feed --follow`. Body-free, bounded, and honest about its window.
+- [x] **Panels model** ([09-gui-plugins.md](09-gui-plugins.md)) — `.mocktown/panels/*.json`
+  manifests, iframed under a CSP with no external origin, plus one built-in panel as the
+  worked example. Unusable manifests are reported, not dropped.
+- [x] **State introspection across providers** — `mocktown state` lists every registered
+  service, with a written reason where a provider cannot introspect. emulate probes are only
+  the ones actually exercised ([06-emulation.md](06-emulation.md)).
+- [x] **Drift watch** — `mocktown drift check` and a daemon-side schedule, both off until a
+  project opts in, filing `provider-drift` issues from a re-record against the real services
+  ([07-issues-agent-loop.md](07-issues-agent-loop.md)).
+- [x] **WebSocket capture *and* mocking** — client-relative frame directions, transcripts in
+  the corpus export, a `sockets` array in generated mocks, and a loud refusal at the
+  handshake for an undeclared channel.
+- [x] **gRPC recorded, and refused at the mock boundary with the reason** — `Bun.serve` does
+  not accept HTTP/2, so serving it is impossible rather than unimplemented
+  ([03-capture.md](03-capture.md)).
+- [x] **portless integration** — stable `<service>.<project>.localhost` names for host mode,
+  wrapped like emulate, off by default, and proven end to end before a name is claimed
+  ([05-redirection.md](05-redirection.md)).
+
+**Exit criterion met:** every phase-4 capability is reachable headlessly first —
+`tests/feed.test.ts`, `tests/sockets.test.ts`, `tests/gui.test.ts` and
+`tests/portless.test.ts` cover the feed's cursor and window, a real WebSocket conversation
+against a real mock host, a real socket captured through the real front door with its frame
+directions intact, the gRPC refusal, the daemon's static half (token injection, panel CSP,
+path containment) and the portless seam against a stub binary and a real reverse proxy. The
+GUI was additionally driven in a browser against a live daemon.
+
+*Amendments produced:* WebSocket direction is client-relative and gRPC is a runtime blocker,
+not a design gap ([03-capture.md](03-capture.md)); the boot token is injected as a meta
+element and the feed is a long poll rather than a stream, with the panel CSP — not the iframe
+sandbox — as the boundary ([09-gui-plugins.md](09-gui-plugins.md), [10-security.md](10-security.md));
+TanStack Form/Store and the shadcn component set are chosen but unbuilt, and
+`@orpc/tanstack-query` was not needed ([02-architecture.md](02-architecture.md)); state
+introspection may have gaps but not silence ([06-emulation.md](06-emulation.md)); a drift run
+is a re-record and overrides the registry for its own services
+([07-issues-agent-loop.md](07-issues-agent-loop.md)); portless is proven empirically and
+brings a combined CA bundle with it ([05-redirection.md](05-redirection.md)); the project
+registry's recorded workspace is now part of resolution, which was a real gap for every
+project but the one above the daemon's cwd ([08-projects-config.md](08-projects-config.md));
+`unscrubbable-binary` is a marked hole in the scrubbing promise ([10-security.md](10-security.md)).
+
+## Phase 5 — Long tail (unscheduled, evidence-led)
+
+The generator and the EKB are the moat, and both accrete with use rather than with a
+milestone. Named here so the next phase is chosen from evidence: typed gRPC once the mock
+host can speak HTTP/2, registry components and a real form in the shell, panel sharing
+between projects, and whichever redirect recipes real projects turn out to need.
 
 ## Deliberately unscheduled
 

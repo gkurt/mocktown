@@ -118,3 +118,18 @@ Providers *should* implement `state` (list entities, dump tables) — it powers
 `GET /state/<service>` and GUI panels ([09-gui-plugins.md](09-gui-plugins.md)).
 For generated mocks this is free (their state is our SQLite). For emulate it's
 best-effort: whatever its processes expose; gaps here are acceptable.
+
+*Amended 2026-09-01 by the phase-4 implementation:* gaps are acceptable, **silence is not**.
+Three rules came out of building introspection across providers:
+
+- **A service whose provider cannot report state is listed with the reason**, never omitted.
+  An omitted row reads as "this service has no state", which is a different and wrong claim.
+  `state.list` therefore returns every registered service with `introspectable` and a `note`.
+- **Only probes that have actually been exercised ship.** The emulate probe table follows the
+  same honesty rule as the EKB: an invented endpoint would report an empty collection where
+  data exists and send someone to debug a fine seed file. Stripe has probes; GitHub's needs a
+  token minted through the OAuth consent flow and S3 answers in XML, so both carry a written
+  reason instead of a guess.
+- **`seeded` is always false for emulate.** Its `--seed` is additive to its own defaults, so
+  nothing in a response distinguishes a fixture from a built-in. Claiming otherwise would be
+  a fabrication in a field a person would trust.

@@ -14,16 +14,18 @@ import { templatePath } from '#src/capture/normalize.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, type ResolvedProject, resolveProject } from '#src/config/project.ts';
+import { FeedBus, summarize } from '#src/daemon/events.ts';
 import type { Db } from '#src/db/client.ts';
 import { openProjectDb, schema } from '#src/db/client.ts';
 import { type EnvArtifacts, generateEnv } from '#src/env/generate.ts';
 import { ensureProjectCa } from '#src/frontdoor/ca.ts';
-import { type CapturedExchange, FrontDoor, type WallHit } from '#src/frontdoor/controller.ts';
+import { type CapturedExchange, type CapturedSocket, FrontDoor, type WallHit } from '#src/frontdoor/controller.ts';
 import { type Route, type RoutingTable, routeForProvider } from '#src/frontdoor/routing.ts';
 import { IssueEngine } from '#src/issues/engine.ts';
 import { EmulateProvider, emulateServiceId } from '#src/providers/emulate.ts';
 import { GeneratedProvider } from '#src/providers/generated.ts';
-import type { Provider } from '#src/providers/types.ts';
+import type { Provider, StateSnapshot } from '#src/providers/types.ts';
+import { type PortlessSettings, type PortlessStatus, releasePortless, syncPortless, unavailable } from '#src/redirect/portless.ts';
 import { Sandbox, type SandboxMode, type SandboxStatus } from '#src/sandbox/sandbox.ts';
 import { type SandboxVerifyResult, verifySandbox } from '#src/sandbox/verify.ts';
 import { describeKnobs, effectiveKnobs } from '#src/scenario/knobs.ts';
@@ -53,6 +55,8 @@ const MAX_OBSERVED_WALL_HITS = 200;
 export class ProjectRuntime {
   readonly db: Db;
   readonly issues: IssueEngine;
+  /** The live feed every surface reads (09-gui-plugins.md). Ephemeral, bounded, body-free. */
+  readonly feed = new FeedBus();
   private project: ResolvedProject;
   private scrubber: Scrubber;
   private frontDoor?: FrontDoor;
@@ -63,6 +67,18 @@ export class ProjectRuntime {
   private recordedCount = 0;
   private observation: Observation | null = null;
   private configStamp = '-';
+  /**
+   * Services forced to `record` for the duration of a run, whatever the registry says. A
+   * drift check needs exactly this: the registry points a service at its mock, and judging
+   * the mock means going back to the real service *once*, deliberately, with the app's own
+   * credentials (07-issues-agent-loop.md's re-record run). Without an override the front
+   * door would deny — correctly, since a mocked service that quietly reached production
+   * would be the worst failure this product has — so the override is explicit, scoped to
+   * one run, and named in the run's own report.
+   */
+  private recordOverride = new Set<string>();
+  /** Last proven portless status. Cached because proving it costs a request (redirect/portless.ts). */
+  private portless: PortlessStatus | null = null;
   mode: RuntimeMode = { kind: 'idle', sealed: false };
 
   constructor(project: ResolvedProject) {
@@ -71,7 +87,19 @@ export class ProjectRuntime {
     this.db = openProjectDb(project.name);
     ensureDefaultProfiles(this.db);
     this.syncRegistryFromConfig();
-    this.issues = new IssueEngine(this.db, project.paths?.issuesDir ?? null);
+    this.issues = new IssueEngine(this.db, project.paths?.issuesDir ?? null, (issue) =>
+      this.feed.publish({
+        kind: 'issue',
+        service: issue.service,
+        method: issue.method,
+        path: issue.pathTemplate,
+        statusCode: null,
+        mode: null,
+        durationMs: null,
+        summary: summarize.issue(issue.type, issue.service, issue.status, issue.occurrences),
+        ref: issue.id,
+      }),
+    );
     this.scrubber = new Scrubber(rulesFromConfig(project.file?.scrub), project.file?.scrub?.entropyBackstop ?? true);
     this.configStamp = this.stampConfig();
   }
@@ -151,6 +179,8 @@ export class ProjectRuntime {
       { ca, port: this.project.local.frontDoorPort },
       {
         onExchange: (exchange) => this.onExchange(exchange),
+        onSocket: (socket) => this.onSocket(socket),
+        onSocketLifecycle: (event) => this.onSocketLifecycle(event),
         onWallHit: (hit) => this.onWallHit(hit),
         onPinnedClient: (event) => this.onPinnedClient(event),
       },
@@ -167,9 +197,69 @@ export class ProjectRuntime {
 
     // Only `record` persists. `passthrough` is explicitly not recorded (03-capture.md's
     // mode table), and `mock` traffic is the mock's own output, not evidence about reality.
-    if (exchange.mode !== 'record' || !this.recorder) return;
-    this.recorder.record(exchange);
-    this.recordedCount++;
+    const row = exchange.mode === 'record' && this.recorder ? this.recorder.record(exchange) : null;
+    if (row) this.recordedCount++;
+
+    // The feed shows everything the front door did, in every mode — watching mock traffic
+    // go by is most of what the GUI is for. It carries no bodies, and the path is
+    // templated and scrubbed before it leaves here (09-gui-plugins.md).
+    const { service, pathTemplate } = this.describeForFeed(exchange.url);
+    this.feed.publish({
+      kind: 'exchange',
+      service,
+      method: exchange.method.toUpperCase(),
+      path: pathTemplate,
+      statusCode: exchange.statusCode,
+      mode: exchange.mode,
+      durationMs: exchange.durationMs,
+      summary: summarize.exchange(exchange.mode, exchange.method.toUpperCase(), service, pathTemplate, exchange.statusCode),
+      ref: row?.id ?? null,
+    });
+  }
+
+  /**
+   * A WebSocket conversation, delivered when it closes. It lands in the corpus by the same
+   * rule as an HTTP exchange: only `record` mode persists, because a mock's own frames are
+   * not evidence about the real service (03-capture.md's mode table).
+   */
+  private onSocket(socket: CapturedSocket): void {
+    if (this.observation) this.observation.services.add(hostOf(socket.url.replace(/^ws/, 'http')));
+    if (socket.mode !== 'record' || !this.recorder) return;
+    const row = this.recorder.recordSocket(socket);
+    if (row) this.recordedCount++;
+  }
+
+  /** A socket opening or closing. The corpus row only lands at close, so the feed says both. */
+  private onSocketLifecycle(event: { url: string; phase: 'open' | 'close'; frames: number; mode: string }): void {
+    const { service, pathTemplate } = this.describeForFeed(event.url.replace(/^ws/, 'http'));
+    this.feed.publish({
+      kind: 'socket',
+      service,
+      method: 'WS',
+      path: pathTemplate,
+      statusCode: null,
+      mode: event.mode,
+      durationMs: null,
+      summary:
+        event.phase === 'open'
+          ? `${event.mode} WS open ${service}${pathTemplate}`
+          : `${event.mode} WS closed ${service}${pathTemplate} after ${event.frames} frame${event.frames === 1 ? '' : 's'}`,
+      ref: null,
+    });
+  }
+
+  /**
+   * A URL reduced to what the feed may carry. The query string is dropped entirely and the
+   * path is templated then scrubbed, because a credential in a path segment is a real
+   * pattern and the feed is the one surface that shows traffic it does not persist.
+   */
+  private describeForFeed(url: string): { service: string; pathTemplate: string } {
+    try {
+      const parsed = new URL(url);
+      return { service: parsed.hostname, pathTemplate: this.scrubber.scrubText(templatePath(parsed.pathname)) };
+    } catch {
+      return { service: '(unparseable)', pathTemplate: '' };
+    }
   }
 
   private onWallHit(hit: WallHit): void {
@@ -177,6 +267,19 @@ export class ProjectRuntime {
     if (this.observation && this.observation.wallHits.length < MAX_OBSERVED_WALL_HITS) {
       this.observation.wallHits.push({ host: url.hostname, method: hit.method, path: url.pathname, reason: hit.reason });
     }
+
+    const feedPath = this.describeForFeed(hit.url).pathTemplate;
+    this.feed.publish({
+      kind: 'wall-hit',
+      service: url.hostname,
+      method: hit.method,
+      path: feedPath,
+      statusCode: 502,
+      mode: 'deny',
+      durationMs: null,
+      summary: summarize.wallHit(hit.method, url.hostname, feedPath, hit.reason),
+      ref: null,
+    });
     // Scrub before the request is stored on an issue: issues embed requests and flow
     // through the same scrubber (10-security.md).
     const scrubbed = this.scrubber.scrub({
@@ -219,12 +322,36 @@ export class ProjectRuntime {
     });
   }
 
+  /** A feed line with no request behind it: a mode change, a provider coming up, a reset. */
+  private note(kind: 'session' | 'provider' | 'drift', summary: string, extras: { service?: string; ref?: string } = {}): void {
+    this.feed.publish({
+      kind,
+      service: extras.service ?? null,
+      method: null,
+      path: null,
+      statusCode: null,
+      mode: null,
+      durationMs: null,
+      summary,
+      ref: extras.ref ?? null,
+    });
+  }
+
+  /** A drift run's verdict, for the live feed. The run itself lives in `drift/watch.ts`. */
+  announceDrift(summary: string): void {
+    this.note('drift', summary);
+  }
+
   /** The routing table the front door applies, derived from the registry and providers. */
   private routingTable(): RoutingTable {
     // Full base URLs, not host:port — the route needs the provider's scheme as well, or
     // an https client reaches a cleartext emulator and gets a 502.
     const baseUrls = this.allBaseUrls();
-    const routes: Route[] = this.services().map((service) => routeForProvider(service.id, service.provider, baseUrls));
+    const routes: Route[] = this.services().map((service) =>
+      this.recordOverride.has(service.id)
+        ? { host: service.id, mode: 'record' as const }
+        : routeForProvider(service.id, service.provider, baseUrls),
+    );
 
     return {
       routes,
@@ -242,9 +369,10 @@ export class ProjectRuntime {
   // ── Record mode ─────────────────────────────────────────────────────────────
 
   async startRecord(
-    opts: { label?: string; seed?: string } = {},
+    opts: { label?: string; seed?: string; recordOverride?: string[] } = {},
   ): Promise<{ session: string; proxyUrl: string; caCertPath: string; env: Record<string, string> }> {
     if (this.mode.kind === 'serve') await this.stopServe();
+    this.recordOverride = new Set(opts.recordOverride ?? []);
 
     this.sessionSeed = opts.seed ?? this.sessionSeed;
     this.sessionId = startSession(this.db, 'record', { seed: this.sessionSeed, label: opts.label });
@@ -260,7 +388,9 @@ export class ProjectRuntime {
     await this.applyRouting();
 
     const ca = await ensureProjectCa(this.project.name);
+    await this.syncPortless();
     const proxyUrl = `http://127.0.0.1:${frontDoor.port}`;
+    this.note('session', `record mode started on :${frontDoor.port} — session ${this.sessionId}`, { ref: this.sessionId });
     return {
       session: this.sessionId,
       proxyUrl,
@@ -286,6 +416,8 @@ export class ProjectRuntime {
       : [];
 
     if (session) endSession(this.db, session);
+    this.recordOverride.clear();
+    this.note('session', `record mode stopped — ${recorded} exchange${recorded === 1 ? '' : 's'} recorded`, { ref: session ?? undefined });
     this.recorder = undefined;
     this.sessionId = null;
     this.mode = { kind: 'idle', sealed: false };
@@ -311,7 +443,13 @@ export class ProjectRuntime {
     await this.applyRouting();
 
     const ca = await ensureProjectCa(this.project.name);
+    await this.syncPortless();
     const proxyUrl = `http://127.0.0.1:${frontDoor.port}`;
+    this.note(
+      'session',
+      `serve mode started on :${frontDoor.port} (unknown hosts: ${this.mode.sealed ? 'deny' : 'record'}) — session ${this.sessionId}`,
+      { ref: this.sessionId },
+    );
     return {
       session: this.sessionId,
       proxyUrl,
@@ -377,6 +515,11 @@ export class ProjectRuntime {
     }
 
     this.providers = started;
+    for (const provider of started) {
+      this.note('provider', `${provider.name} (${provider.kind}) up for ${provider.services.join(', ') || 'no services'}`, {
+        ref: provider.name,
+      });
+    }
     this.persistEkb();
   }
 
@@ -455,6 +598,8 @@ export class ProjectRuntime {
 
   async stopServe(): Promise<{ stopped: string[] }> {
     const stopped = await this.stopProviders();
+    await this.releaseStableNames();
+    this.note('session', stopped.length ? `serve mode stopped — ${stopped.join(', ')} down` : 'serve mode stopped');
     if (this.sessionId) endSession(this.db, this.sessionId);
     this.sessionId = null;
     this.mode = { kind: 'idle', sealed: false };
@@ -483,6 +628,62 @@ export class ProjectRuntime {
   }
 
   /**
+   * One service's state, whichever provider serves it. Awaited because emulate-backed
+   * introspection is an HTTP round trip to the emulator's own API, while a generated mock
+   * reads our SQLite (06-emulation.md).
+   */
+  async stateFor(service: string, opts: { profile?: string; collection?: string } = {}): Promise<StateSnapshot & { provider: string }> {
+    const provider = this.providerFor(service);
+    if (!provider) {
+      throw new Error(`no running provider serves "${service}". Run \`mocktown serve start\` first.`);
+    }
+    const snapshot = provider.state
+      ? await provider.state(service, opts)
+      : { collections: [], note: `The ${provider.kind} provider does not implement state introspection.` };
+    return { ...snapshot, provider: provider.name };
+  }
+
+  /**
+   * State across every provider at once — the shape a GUI dashboard and a panel index
+   * need. Counts only: a full dump per service could be enormous, and `state get` is one
+   * call away. A service whose provider cannot introspect is *listed*, with the reason,
+   * rather than omitted; a missing row would read as "this service has no state".
+   */
+  async stateOverview(profile?: string): Promise<
+    {
+      service: string;
+      provider: string | null;
+      introspectable: boolean;
+      collections: { name: string; count: number }[];
+      note: string | null;
+    }[]
+  > {
+    const rows = [];
+    for (const service of this.services()) {
+      const provider = this.providerFor(service.id);
+      if (!provider) {
+        rows.push({
+          service: service.id,
+          provider: null,
+          introspectable: false,
+          collections: [],
+          note: `Not served by a running provider (registry says \`${service.provider}\`), so it has no state to read.`,
+        });
+        continue;
+      }
+      const snapshot = await this.stateFor(service.id, { profile });
+      rows.push({
+        service: service.id,
+        provider: provider.name,
+        introspectable: snapshot.collections.length > 0,
+        collections: snapshot.collections.map((c) => ({ name: c.name, count: c.count })),
+        note: snapshot.note,
+      });
+    }
+    return rows;
+  }
+
+  /**
    * A reset closes the session and starts a new one, and recordings and issues are tagged
    * by session id (12-scenario-controls.md) — so "what happened after the reset" stays a
    * question the corpus can answer.
@@ -505,6 +706,14 @@ export class ProjectRuntime {
       .insert(schema.journal)
       .values({ id: id('jrn'), sessionId: this.sessionId, kind: 'state-reset', service: scope.service ?? null, payload: scope })
       .run();
+
+    this.note(
+      'session',
+      `state reset for ${reset.length ? [...new Set(reset)].join(', ') : 'nothing running'} — session ${this.sessionId}`,
+      {
+        ref: this.sessionId,
+      },
+    );
 
     // Provider base URLs change across an emulate restart, so routing has to follow.
     if (this.frontDoor?.isRunning) await this.applyRouting();
@@ -596,11 +805,20 @@ export class ProjectRuntime {
    */
   envArtifacts(): EnvArtifacts {
     const frontDoor = this.frontDoorStatus();
+    const portless = this.portless;
+    const stable = portless?.available ? portless : null;
+    // A stable name is only written once it has been proven end to end, and it brings two
+    // things with it: a CA bundle covering the portless issuer as well as the project's,
+    // and its TLD in NO_PROXY — otherwise the app would send a request for its own mock
+    // into the front door, which would deny it as an unknown host.
+    const baseUrls = this.allBaseUrls();
+    for (const entry of stable?.names ?? []) baseUrls.set(entry.service, entry.url);
     return generateEnv({
       project: this.name,
       proxyUrl: `http://127.0.0.1:${frontDoor.port ?? this.project.local.frontDoorPort ?? 4400}`,
-      caCertPath: projectPaths(this.name).caCert,
-      baseUrls: this.allBaseUrls(),
+      caCertPath: stable?.caBundle ?? projectPaths(this.name).caCert,
+      noProxy: stable ? [`.${this.portlessSettings().tld}`] : undefined,
+      baseUrls,
       ekb: this.db
         .select()
         .from(schema.ekb)
@@ -608,6 +826,60 @@ export class ProjectRuntime {
         .map((row) => ({ ...row })),
       services: this.services().map((s) => s.id),
     });
+  }
+
+  // ── Stable names ────────────────────────────────────────────────────────────
+
+  private portlessSettings(): PortlessSettings {
+    const config = this.project.file?.portless;
+    return { tld: config?.tld ?? 'localhost', port: config?.port ?? 443, tls: config?.tls ?? true };
+  }
+
+  /** The last proven status, never a guess: an unsynced project says so rather than reading as broken. */
+  portlessStatus(): PortlessStatus {
+    const enabled = this.project.file?.portless?.enabled ?? false;
+    return (
+      this.portless ??
+      unavailable(
+        enabled,
+        enabled ? 'no serve session has synced stable names yet — `mocktown env portless sync`' : 'portless is off for this project',
+      )
+    );
+  }
+
+  /**
+   * Prove portless works and claim a name per service. Best-effort by construction: this
+   * is called from `startServe`, and a portless failure must never be the reason a mock
+   * session did not start (05-redirection.md — wrapped, not load-bearing).
+   */
+  async syncPortless(): Promise<PortlessStatus> {
+    const enabled = this.project.file?.portless?.enabled ?? false;
+    try {
+      this.portless = await syncPortless({
+        project: this.project.name,
+        workspace: this.project.workspace,
+        enabled,
+        settings: this.portlessSettings(),
+        baseUrls: this.allBaseUrls(),
+        projectCaPath: projectPaths(this.project.name).caCert,
+      });
+    } catch (error) {
+      this.portless = unavailable(enabled, `portless sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (enabled)
+      this.note(
+        'provider',
+        this.portless.available
+          ? `stable names: ${this.portless.names.map((n) => n.url).join(', ')}`
+          : `stable names unavailable — ${this.portless.reason}`,
+      );
+    return this.portless;
+  }
+
+  private async releaseStableNames(): Promise<void> {
+    if (!this.portless) return;
+    await releasePortless(this.portless, this.portlessSettings(), this.project.workspace).catch(() => {});
+    this.portless = null;
   }
 
   // ── Status ──────────────────────────────────────────────────────────────────

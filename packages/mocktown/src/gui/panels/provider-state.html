@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Provider state</title>
+    <!--
+      The worked example from 09-gui-plugins.md: one self-contained file, no build step, no
+      SDK, no external network. It reads the same public API every other client reads. Copy
+      it into `.mocktown/panels/`, edit it, and that is the whole plugin model.
+
+      Two conventions a panel relies on:
+        1. `<meta name="mocktown-boot">` is injected by the daemon: API base and token.
+        2. The shell passes the project in the query string.
+    -->
+    <style>
+      :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+      body { margin: 0; padding: 1rem; font-size: 13px; line-height: 1.5; }
+      h2 { font-size: 13px; margin: 1.25rem 0 0.5rem; }
+      summary { cursor: pointer; padding: 0.15rem 0; }
+      pre { margin: 0.25rem 0 0.75rem 1rem; padding: 0.5rem; overflow-x: auto; background: color-mix(in srgb, currentColor 7%, transparent); }
+      code { font-family: ui-monospace, monospace; }
+      .muted { opacity: 0.6; }
+      .count { font-variant-numeric: tabular-nums; }
+    </style>
+  </head>
+  <body>
+    <div id="root" class="muted">loading…</div>
+    <script>
+      const boot = JSON.parse(document.querySelector('meta[name="mocktown-boot"]').content);
+      const project = new URLSearchParams(location.search).get('project') ?? boot.project;
+      const root = document.getElementById('root');
+
+      const api = async (path) => {
+        const url = `${boot.apiBase}${path}${path.includes('?') ? '&' : '?'}project=${encodeURIComponent(project)}`;
+        const response = await fetch(url, { headers: { authorization: `Bearer ${boot.token}` } });
+        if (!response.ok) throw new Error(`${path} -> ${response.status}`);
+        return response.json();
+      };
+
+      const text = (value) => document.createTextNode(value);
+      const el = (tag, className, ...children) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        for (const child of children) node.append(child);
+        return node;
+      };
+
+      /** Entries are fetched on open: a service can hold thousands, and nobody asked for them yet. */
+      function collection(service, name, count) {
+        const details = el('details');
+        const label = el('summary', null, text(`${name} `), el('span', 'count muted', text(`${count}`)));
+        details.append(label);
+        details.addEventListener(
+          'toggle',
+          async () => {
+            if (!details.open || details.dataset.loaded) return;
+            details.dataset.loaded = '1';
+            const body = el('pre', null, text('loading…'));
+            details.append(body);
+            try {
+              const detail = await api(`/state/${encodeURIComponent(service)}?collection=${encodeURIComponent(name)}`);
+              const entries = detail.collections.find((c) => c.name === name)?.entries ?? [];
+              body.textContent = entries.length ? JSON.stringify(entries, null, 2) : '(empty)';
+            } catch (error) {
+              body.textContent = String(error);
+            }
+          },
+          { once: false },
+        );
+        return details;
+      }
+
+      async function render() {
+        const overview = await api('/state');
+        root.replaceChildren();
+        root.className = '';
+        if (!overview.services.length) return root.append(el('p', 'muted', text('No provider is running.')));
+
+        for (const service of overview.services) {
+          root.append(el('h2', null, text(service.service), text(' '), el('span', 'muted', text(service.provider ?? 'not served'))));
+          if (!service.introspectable) {
+            root.append(el('p', 'muted', text(service.note ?? 'This provider cannot report its state.')));
+            continue;
+          }
+          if (!service.collections.length) root.append(el('p', 'muted', text('No collections yet.')));
+          for (const entry of service.collections) root.append(collection(service.service, entry.name, entry.count));
+        }
+      }
+
+      render().catch((error) => {
+        root.className = 'muted';
+        root.textContent = String(error);
+      });
+    </script>
+  </body>
+</html>

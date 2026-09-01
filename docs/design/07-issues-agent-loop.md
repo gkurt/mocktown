@@ -50,9 +50,35 @@ by an agent that has read nothing but the issue and the files it links.**
   (generated mocks, `.env.mocktown`, code patches in the user's app) go through
   normal VCS review. Mocktown never auto-commits. Runtime-only changes (widened
   matcher in a draft state) may apply immediately but are flagged until committed.
-- **Drift watch** (later phase): scheduled re-record runs against real APIs diff
+- **Drift watch**: scheduled re-record runs against real APIs diff
   reality vs providers and file `provider-drift` issues — the "mock rotted" problem
   every record/replay tool ignores.
+
+  *Implemented 2026-09-01 in phase 4.* **A drift run is a re-record, not a replay.** The
+  tempting implementation is to fire the stored requests at the real service, but the corpus
+  holds no credentials — the scrubber removed them before disk
+  ([10-security.md](10-security.md)) — so every request would come back 401 and the run would
+  report the whole integration as drifted. The only thing that can authenticate against a
+  real API is the app, so a run does what the wording above says: run the project's own flows
+  with the front door recording, against the real services, in the app's own environment,
+  then replay that fresh evidence against the providers and diff. Findings are
+  `mock-behind` (reality returns something the mock does not) or `mock-ahead` (the mock still
+  returns a field reality dropped).
+
+  Consequences, all of them about not surprising anyone:
+
+  - **Off by default**, and never enabled by a config default: a run spends real money and
+    real quota. The daemon's scheduler can also be disabled wholesale, and it is off in tests.
+  - **It deliberately overrides the registry** for the services it judges, forcing them to
+    `record` for the run. Without that the front door would deny a mocked service —
+    correctly — and a drift check could never see reality. The override is scoped to the run
+    and named in the run's report.
+  - **The scheduler defers to a human.** A tick that finds the project mid-record or
+    mid-serve skips rather than yanking the mode out from under whoever is working; a drift
+    check is a daily question, not an urgent one.
+  - **`ok: false` covers "could not judge", not just "drifted".** A run with no flows
+    configured, or no service backed by a provider, reports why and is persisted as a run —
+    "found nothing wrong" and "could not look" must not look the same from the outside.
 
 ## Anti-goals
 

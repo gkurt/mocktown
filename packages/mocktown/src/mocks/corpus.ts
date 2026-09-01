@@ -7,8 +7,12 @@
  * states the couplings an agent would otherwise have to infer by reading hundreds of
  * exchanges.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { routeKey } from '#src/capture/normalize.ts';
+import { projectPaths } from '#src/config/paths.ts';
+import type { Recording } from '#src/contract/schemas.ts';
 import type { Db } from '#src/db/client.ts';
 import { schema } from '#src/db/client.ts';
 
@@ -31,10 +35,27 @@ export interface RouteSummary {
   statefulHints: string[];
 }
 
+/**
+ * A WebSocket channel as a generating agent reads it: the path, and one whole conversation
+ * with its frames in order. One example rather than every socket ever seen — what a mock
+ * needs is the channel's protocol, and a second transcript of the same handshake teaches
+ * nothing.
+ */
+export interface SocketSummary {
+  pathTemplate: string;
+  observations: number;
+  frames: { direction: 'sent' | 'received'; encoding: 'text' | 'base64'; body: string; atMs: number }[];
+  truncatedFrames: boolean;
+  close: { code: number; reason: string; by: 'client' | 'upstream' } | null;
+}
+
 export interface CorpusExport {
   service: string;
   generatedAt: string;
   routes: RouteSummary[];
+  sockets: SocketSummary[];
+  /** gRPC methods seen. Recorded, but a generated mock cannot serve them — see host.ts. */
+  grpcMethods: { path: string; observations: number }[];
   secretKinds: string[];
 }
 
@@ -87,7 +108,8 @@ function statefulHints(routes: Map<string, { method: string; pathTemplate: strin
 }
 
 export function exportCorpus(db: Db, service: string, limitPerRoute = 5): CorpusExport {
-  const rows = db.select().from(schema.recordings).where(eq(schema.recordings.service, service)).all();
+  const allRows = db.select().from(schema.recordings).where(eq(schema.recordings.service, service)).all();
+  const rows = allRows.filter((row) => row.kind === 'http');
 
   const routes = new Map<string, { method: string; pathTemplate: string; rows: typeof rows }>();
   for (const row of rows) {
@@ -99,11 +121,13 @@ export function exportCorpus(db: Db, service: string, limitPerRoute = 5): Corpus
 
   const hints = statefulHints(new Map([...routes].map(([k, v]) => [k, { method: v.method, pathTemplate: v.pathTemplate }])));
   const secretKinds = new Set<string>();
-  for (const row of rows) for (const entry of row.scrubSummary) secretKinds.add(entry.kind);
+  for (const row of allRows) for (const entry of row.scrubSummary) secretKinds.add(entry.kind);
 
   return {
     service,
     generatedAt: new Date().toISOString(),
+    sockets: socketChannels(db, allRows),
+    grpcMethods: grpcMethods(allRows),
     routes: [...routes]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, entry]) => ({
@@ -126,6 +150,51 @@ export function exportCorpus(db: Db, service: string, limitPerRoute = 5): Corpus
       })),
     secretKinds: [...secretKinds].sort(),
   };
+}
+
+/**
+ * One transcript per channel — the longest one, because a socket that carried two frames
+ * before the client hung up says less about the protocol than one that ran to completion.
+ */
+function socketChannels(db: Db, rows: (typeof schema.recordings.$inferSelect)[]): SocketSummary[] {
+  const byPath = new Map<string, (typeof rows)[number][]>();
+  for (const row of rows) {
+    if (row.kind !== 'websocket') continue;
+    byPath.set(row.pathTemplate, [...(byPath.get(row.pathTemplate) ?? []), row]);
+  }
+
+  return [...byPath]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([pathTemplate, sockets]) => {
+      const counts = new Map(
+        sockets.map((row) => [row.id, db.select().from(schema.socketFrames).where(eq(schema.socketFrames.recordingId, row.id)).all()]),
+      );
+      const longest = sockets.reduce(
+        (best, row) => ((counts.get(row.id)?.length ?? 0) > (counts.get(best.id)?.length ?? 0) ? row : best),
+        sockets[0]!,
+      );
+      const frames = (counts.get(longest.id) ?? []).sort((a, b) => a.ordinal - b.ordinal);
+      return {
+        pathTemplate,
+        observations: sockets.length,
+        frames: frames.map((frame) => ({
+          direction: frame.direction,
+          encoding: frame.encoding,
+          body: frame.body,
+          atMs: frame.atMs,
+        })),
+        // The controller caps frames per socket; a mock built from a capped transcript
+        // should know the conversation went on rather than assume it ended there.
+        truncatedFrames: frames.length >= 500,
+        close: longest.socketClose ?? null,
+      };
+    });
+}
+
+function grpcMethods(rows: (typeof schema.recordings.$inferSelect)[]): { path: string; observations: number }[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) if (row.kind === 'grpc') counts.set(row.path, (counts.get(row.path) ?? 0) + 1);
+  return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([path, observations]) => ({ path, observations }));
 }
 
 function pickExamples<T extends { statusCode: number }>(rows: T[], limit: number): T[] {
@@ -152,14 +221,25 @@ export function routeTable(db: Db, service?: string) {
 
   const table = new Map<
     string,
-    { service: string; method: string; pathTemplate: string; count: number; statuses: Set<number>; lastSeenAt: string | null }
+    {
+      service: string;
+      method: string;
+      pathTemplate: string;
+      kind: 'http' | 'websocket' | 'grpc';
+      count: number;
+      statuses: Set<number>;
+      lastSeenAt: string | null;
+    }
   >();
   for (const row of rows) {
-    const key = routeKey(row.method, row.service, row.pathTemplate);
+    // A WebSocket upgrade and a GET on the same path are different endpoints, so the kind
+    // is part of the key — collapsing them would hide a channel behind a route.
+    const key = `${row.kind}:${routeKey(row.method, row.service, row.pathTemplate)}`;
     const entry = table.get(key) ?? {
       service: row.service,
       method: row.method,
       pathTemplate: row.pathTemplate,
+      kind: row.kind,
       count: 0,
       statuses: new Set<number>(),
       lastSeenAt: null,
@@ -184,4 +264,23 @@ export function recordingsForService(db: Db, service: string, session?: string, 
     .where(and(...conditions))
     .limit(limit)
     .all();
+}
+
+/**
+ * A stored row with any spilled body read back from `blobs/`. Large bodies are
+ * content-addressed rather than inlined (03-capture.md), so anything that wants the whole
+ * exchange — the API, the verify harness, a drift diff — has to come through here.
+ */
+export function inflateRecording(project: string, row: typeof schema.recordings.$inferSelect): Recording {
+  const blobDir = projectPaths(project).blobs;
+  const readBlob = (hash: string | null) => {
+    if (!hash) return null;
+    const path = join(blobDir, hash);
+    return existsSync(path) ? readFileSync(path, 'utf8') : null;
+  };
+  return {
+    ...row,
+    requestBody: row.requestBody ?? readBlob(row.requestBlob),
+    responseBody: row.responseBody ?? readBlob(row.responseBlob),
+  };
 }

@@ -33,11 +33,30 @@ export const Recording = z.object({
   requestBlob: z.string().nullable().describe('Hash of a large body stored under blobs/'),
   responseBlob: z.string().nullable(),
   durationMs: z.number().int().nullable(),
-  scrubSummary: z.array(z.object({ kind: z.string(), count: z.number().int() })),
+  kind: z.enum(['http', 'websocket', 'grpc']).describe('`websocket` rows own a set of frames; `grpc` rows are opaque HTTP/2'),
+  requestEncoding: z.enum(['text', 'base64']).describe('`base64` when that body is not valid UTF-8 and could not be scrubbed by pattern'),
+  responseEncoding: z.enum(['text', 'base64']),
+  socketClose: z
+    .object({ code: z.number().int(), reason: z.string(), by: z.enum(['client', 'upstream']) })
+    .nullable()
+    .describe('WebSocket only: how the connection ended'),
+  scrubSummary: z
+    .array(z.object({ kind: z.string(), count: z.number().int() }))
+    .describe('Kinds and counts only, never values. `unscrubbable-binary` marks a body the pattern rules could not see into'),
   source: z.enum(['front-door', 'har']),
   recordedAt: z.string(),
 });
 export type Recording = z.infer<typeof Recording>;
+
+/** One WebSocket message, from the client's point of view (03-capture.md). */
+export const SocketFrame = z.object({
+  ordinal: z.number().int().describe('Order within the connection — the wire gives a frame no other identity'),
+  direction: z.enum(['sent', 'received']).describe('As the client sees it: `sent` is client -> service'),
+  encoding: z.enum(['text', 'base64']),
+  body: z.string(),
+  atMs: z.number().int().describe('Milliseconds since the socket opened, so a mock can reproduce the cadence'),
+});
+export type SocketFrame = z.infer<typeof SocketFrame>;
 
 export const IssueType = z
   .enum(['unknown-service', 'unmatched-request', 'near-miss', 'state-violation', 'redirect-gap', 'pinned-client', 'provider-drift'])
@@ -161,6 +180,86 @@ export const SealStamp = z.object({
   wallHits: z.number().int(),
   createdAt: z.string(),
 });
+
+/**
+ * One line of the live feed (09-gui-plugins.md). Deliberately body-free: the feed says
+ * *that* something happened, the corpus and the issue queue say what was in it.
+ */
+export const FeedEvent = z.object({
+  seq: z.number().int().describe('Monotonic cursor — pass the highest one back as `since`'),
+  at: z.string(),
+  kind: z.enum(['exchange', 'wall-hit', 'issue', 'provider', 'session', 'socket', 'drift']),
+  service: z.string().nullable(),
+  method: z.string().nullable(),
+  path: z.string().nullable().describe('Templated and scrubbed, never a raw query string'),
+  statusCode: z.number().int().nullable(),
+  mode: z.string().nullable().describe('Front-door mode that served it: record, mock, passthrough, deny'),
+  durationMs: z.number().int().nullable(),
+  summary: z.string().describe('One line. Untrusted in origin — render it as text, never as markup'),
+  ref: z.string().nullable().describe('Recording or issue id, or a provider name, to go read the detail'),
+});
+export type FeedEvent = z.infer<typeof FeedEvent>;
+
+/** A provider's introspectable state, service by service (06-emulation.md). */
+export const StateCollection = z.object({
+  name: z.string(),
+  count: z.number().int(),
+  entries: z.array(z.object({ key: z.string(), profile: z.string(), seeded: z.boolean(), value: z.unknown() })),
+});
+
+/** portless stable-name status (05-redirection.md). `reason` is populated either way. */
+export const PortlessStatus = z.object({
+  enabled: z.boolean(),
+  available: z.boolean().describe('Proven end to end — a name was registered and fetched back through the proxy'),
+  reason: z.string().describe('How availability was proven, or exactly what stopped it'),
+  binary: z.string().nullable(),
+  caBundle: z.string().nullable().describe("PEM holding the project CA and portless's, for NODE_EXTRA_CA_CERTS"),
+  names: z.array(z.object({ service: z.string(), name: z.string(), url: z.string() })),
+});
+export type PortlessStatus = z.infer<typeof PortlessStatus>;
+
+/**
+ * One divergence between a mock and the real service it stands for
+ * (07-issues-agent-loop.md's `provider-drift`).
+ */
+export const DriftFinding = z.object({
+  service: z.string(),
+  method: z.string(),
+  pathTemplate: z.string(),
+  kind: z
+    .enum(['mock-behind', 'mock-ahead'])
+    .describe('`mock-behind`: the real service returns something the mock does not. `mock-ahead`: the mock still returns a dropped field'),
+  detail: z.string(),
+  diff: z.array(z.string()),
+  issueId: z.string().nullable(),
+});
+export type DriftFinding = z.infer<typeof DriftFinding>;
+
+export const DriftRun = z.object({
+  id: z.string(),
+  sessionId: z.string().nullable(),
+  trigger: z.enum(['manual', 'scheduled']),
+  services: z.array(z.string()),
+  flows: z.array(z.string()),
+  checked: z.number().int(),
+  drifted: z.number().int(),
+  issues: z.array(z.string()),
+  reasons: z.array(z.string()),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+});
+export type DriftRun = z.infer<typeof DriftRun>;
+
+/** A single-file HTML panel the GUI shell iframes (09-gui-plugins.md). */
+export const Panel = z.object({
+  name: z.string(),
+  service: z.string().nullable().describe('The service this panel is about, when it is about one'),
+  entry: z.string().describe('HTML file, relative to the panel directory'),
+  url: z.string().describe('Where the daemon serves it, for the shell to iframe'),
+  source: z.enum(['workspace', 'builtin']),
+  file: z.string().describe('Absolute path on disk, so a human can edit it'),
+});
+export type Panel = z.infer<typeof Panel>;
 
 /** Every response carries the resolved project: misdirection must be visible. */
 export const withProject = <T extends z.ZodRawShape>(shape: T) => z.object({ project: z.string(), ...shape });

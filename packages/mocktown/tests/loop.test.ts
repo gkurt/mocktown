@@ -260,12 +260,12 @@ describe('phase 2 — the loop closes on a real project', () => {
   }, 30_000);
 
   test('state reset drops runtime state and re-applies the seed', async () => {
-    const before = runtime.providerFor(SERVICE)!.state!(SERVICE, { profile: 'default' });
+    const before = await runtime.stateFor(SERVICE, { profile: 'default' });
     expect(before.collections.find((c) => c.name === 'invoices')!.count).toBeGreaterThan(0);
 
     await runtime.resetState({ service: SERVICE, profile: 'default' });
 
-    const after = runtime.providerFor(SERVICE)!.state!(SERVICE, { profile: 'default' });
+    const after = await runtime.stateFor(SERVICE, { profile: 'default' });
     const invoices = after.collections.find((c) => c.name === 'invoices');
     // Seeded rows come back; the ones the test created during the run do not.
     expect(invoices?.entries.every((e) => e.seeded) ?? true).toBe(true);

@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "typecheck": "bun --filter='*' typecheck",
+    "gui:build": "bun --filter='@mocktown/gui' run build",
+    "gui:dev": "bun --filter='@mocktown/gui' run dev",
     "lint": "biome lint",
     "format": "biome format",
     "check": "biome check",

@@ -11,6 +11,8 @@ bun run lint       # Lint
 bun run format     # Format
 bun run fix        # Lint + format + autofix
 bun run checks     # Everything: check + typecheck + test
+bun run gui:build  # Build the GUI shell the daemon serves
+bun run gui:dev    # Vite dev server for the shell (needs MOCKTOWN_GUI_DIST or a built shell)
 ```
 
 Prefer these scripts over ad-hoc commands. Do not prefix them with `bun run` when
@@ -28,6 +30,7 @@ bun run db:generate    # Regenerate Drizzle migrations after editing src/db/sche
 
 ```
 packages/mocktown/     The product: daemon, front door, corpus, providers, surfaces
+packages/gui/          The GUI shell: a Vite/React SPA served by the daemon
 spikes/                Throwaway investigations, kept for their FINDINGS.md
 docs/design/           Per-subsystem design docs — the source of truth for intent
 ```
@@ -47,6 +50,9 @@ docs/design/           Per-subsystem design docs — the source of truth for int
 | `sandbox/` | The sealed boundary: `engine.ts` is the container-runtime seam, `images.ts` generates the Dockerfiles, `sandbox.ts` owns the topology, `verify.ts` runs the escape attempts against a negative control, `devcontainer.ts` emits the feature. |
 | `seal/` | Certification: `certify.ts` runs the flows inside the sandbox, `stamp.ts` records and ages the stamp. |
 | `scenario/` | Runtime knobs and auth profiles. |
+| `drift/` | Drift watch: `watch.ts` re-records the flows against the real services and diffs, `scheduler.ts` is the daemon-side timer. |
+| `redirect/` | The portless seam — stable `<service>.<project>.localhost` names, wrapped and optional. |
+| `gui/` | Serving the shell and the panels: `serve.ts` (token injection, CSP), `panels.ts` (discovery), `panels/` (the built-in ones). |
 | `cli/`, `mcp/`, `skills/` | The three agent/human surfaces, all clients of the daemon API. |
 | `db/` | Drizzle schema and client; migrations live in `packages/mocktown/drizzle/`. |
 | `config/` | Project resolution, config schema, on-disk paths. |
@@ -73,6 +79,19 @@ subsystem you are touching, not all of them.
   and the CA private key never enters a container.
 - **A response with `ok: false` exits the CLI non-zero.** That is what makes
   `mocktown seal verify` usable as a CI step; do not add per-command exit-code flags.
+- **The GUI is a client of the contract, not a second implementation.** It imports
+  `mocktown/contract` and builds the same `OpenAPILink` client the CLI uses; every hook in
+  `packages/gui/src/hooks.ts` is one procedure and nothing else. Capability lands in the
+  contract first, always.
+- **The GUI's bearer token is injected by the daemon** as a `<meta name="mocktown-boot">`
+  element when it serves the HTML. Never bundle it, never put it in a URL.
+- **A panel document may not reach the network.** Panels are served under
+  `default-src 'none'; connect-src 'self'` with no external origin; the iframe sandbox is not
+  the boundary, the CSP is.
+- **Drift and portless are both off by default and must stay that way.** A drift run calls
+  real third-party APIs; portless binds 443 with sudo and touches the system trust store.
+- **gRPC cannot be served by a generated mock** — `Bun.serve` does not accept HTTP/2. Record
+  it, deny it with the reason, and do not add a route-matching path for it.
 
 ## Key Conventions
 

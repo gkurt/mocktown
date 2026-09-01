@@ -30,6 +30,8 @@ export interface EnvInputs {
   ekb: EkbEntry[];
   /** Services in the registry, so a service with no EKB entry is still reported. */
   services: string[];
+  /** Hosts the app should reach without the proxy — the portless TLD, when stable names are live. */
+  noProxy?: string[];
 }
 
 export interface CoverageRow {
@@ -53,7 +55,11 @@ export interface EnvArtifacts {
 }
 
 export function generateEnv(inputs: EnvInputs): EnvArtifacts {
-  const variables: Record<string, string> = captureEnv({ proxyUrl: inputs.proxyUrl, caCertPath: inputs.caCertPath });
+  const variables: Record<string, string> = captureEnv({
+    proxyUrl: inputs.proxyUrl,
+    caCertPath: inputs.caCertPath,
+    noProxy: inputs.noProxy,
+  });
   const report: CoverageRow[] = [];
   const agentTasks: AgentTask[] = [];
 

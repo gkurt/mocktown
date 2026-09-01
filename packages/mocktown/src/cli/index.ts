@@ -20,13 +20,14 @@ import { Command, Option } from 'commander';
 import type * as z from 'zod/v4';
 import { launch } from '#src/capture/launch.ts';
 import { clientFor, ensureDaemon } from '#src/cli/daemon-client.ts';
-import { renderResult } from '#src/cli/render.ts';
+import { feedLine, renderResult } from '#src/cli/render.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
 import { ProjectFile } from '#src/config/schema.ts';
 import { contract } from '#src/contract/index.ts';
 import { inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
 import { readDaemonState } from '#src/daemon/server.ts';
+import { guiDist } from '#src/gui/serve.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const program = new Command('mocktown')
@@ -140,6 +141,7 @@ const GROUP_DESCRIPTIONS: Record<string, string> = {
   sandbox: 'The sealed sandbox: bring it up, run things inside it, prove it holds',
   seal: 'Seal certification — the CI-facing proof that nothing escapes',
   browser: 'Launch a browser through the front door (03-capture.md rung 2)',
+  portless: 'Stable `<service>.<project>.localhost` names, when portless is installed',
 };
 
 /**
@@ -378,6 +380,78 @@ program
       env: { ...process.env, MOCKTOWN_PROJECT: project.name, MOCKTOWN_DB: db },
     });
     await new Promise((r) => child.once('exit', r));
+  });
+
+/**
+ * `mocktown feed --follow` — the one thing a generated command cannot do, because following
+ * is a loop and a procedure call is not. It is the same `feed.tail` procedure underneath,
+ * long-polled: no second transport, and the `--json` mode stays line-delimited so `jq` and
+ * an agent's log tail both work.
+ */
+const feedCommand = program.commands.find((c) => c.name() === 'feed')!;
+feedCommand
+  .description('Live feed: what the front door, the issue engine and the providers just did')
+  .option('--follow', 'Keep polling and print events as they arrive')
+  .option('--kind <kind>', 'Only one kind: exchange, wall-hit, issue, provider, session, socket, drift')
+  .option('--service <service>', 'Only one service')
+  .option('--limit <n>', 'Events per poll', '100')
+  .action(async (options: { follow?: boolean; kind?: string; service?: string; limit: string; json?: boolean }) => {
+    const globals = program.opts();
+    const wantsJson = Boolean(options.json ?? globals.json);
+    const project = resolveProject({ project: globals.project as string | undefined });
+    ensureRegistered(project);
+    const client = clientFor(await ensureDaemon());
+
+    const input = { project: project.name, kind: options.kind as any, service: options.service, limit: Number(options.limit) };
+    if (!wantsJson) console.log(`project: ${project.name}`);
+
+    let since = 0;
+    let gapped = false;
+    do {
+      const page = await client.feed.tail({ ...input, since, waitMs: options.follow ? 25_000 : 0 });
+      since = page.cursor;
+      if (page.gap && !gapped) {
+        gapped = true;
+        if (!wantsJson) console.log('! the feed is a bounded window and events were dropped before this point');
+      }
+      for (const event of page.events) console.log(wantsJson ? JSON.stringify(event) : feedLine(event));
+      if (!options.follow && !page.events.length && !wantsJson) console.log('  (nothing yet)');
+    } while (options.follow);
+  });
+
+/**
+ * `mocktown gui` — the shell from 09-gui-plugins.md. The daemon serves it, so this command
+ * only finds it, prints the URL and opens a browser. There is no dev server to babysit and
+ * no second port: the GUI is a client of the same API on the same origin, which is what
+ * makes the token injection and the panel CSP possible at all.
+ */
+program
+  .command('gui')
+  .description('Open the local GUI shell in a browser')
+  .option('--no-open', 'Print the URL instead of opening a browser')
+  .action(async (options: { open: boolean }) => {
+    const globals = program.opts();
+    const project = resolveProject({ project: globals.project as string | undefined });
+    ensureRegistered(project);
+
+    if (!guiDist()) {
+      console.error('error: the GUI has not been built.');
+      console.error("  build it with: bun --filter='@mocktown/gui' run build");
+      console.error('  or point MOCKTOWN_GUI_DIST at a build directory.');
+      process.exitCode = 1;
+      return;
+    }
+
+    const connection = await ensureDaemon();
+    const url = `${connection.url.replace(/\/api\/v1$/, '')}/?project=${encodeURIComponent(project.name)}`;
+    console.log(`project: ${project.name}`);
+    console.log(`  ${url}`);
+    if (!options.open) return;
+
+    // The token is injected into the page by the daemon, not put in this URL: a URL ends up
+    // in shell history and in the browser's own history, and it is a capability.
+    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    spawn(opener, [url], { stdio: 'ignore', detached: true }).unref();
   });
 
 program

@@ -107,3 +107,34 @@ Two further consequences, both deliberate:
 - [portless](https://github.com/vercel-labs/portless) integration: stable
   `<service>.localhost` names + trusted local certs for the host/dev mode. Optional
   dependency, same treatment as emulate (wrapped, not load-bearing).
+
+  *Implemented 2026-09-01 in phase 4.* What it is for: a provider listener gets whatever port
+  was free, so `.env.mocktown` changes on every daemon restart, and anything that remembers
+  a URL — an OAuth redirect URI, a committed fixture, a teammate's shell history — is wrong
+  by the next morning. With portless a service is always
+  `https://<service>.<project>.localhost`. Five decisions:
+
+  - **`portless alias` is the only verb used.** Our listeners already exist and are ours to
+    supervise, which is the case portless documents as "a static route (e.g. for Docker)".
+    Mocktown never hands portless a child process to run — that is the app's business.
+  - **Availability is proven, not parsed.** No `portless list` scraping and no version
+    sniffing: a throwaway alias is pointed at a nonce server of ours and fetched back through
+    the proxy. That one request proves the proxy is up, the alias mechanism works, the name
+    resolves and the CA bundle we assembled validates the certificate the proxy serves. A
+    green report means an app will work; a red one carries the reason and the fix
+    (`portless proxy start`, `portless trust`, `portless hosts sync`).
+  - **The probe never points at a provider.** Aiming the verification request at a mock host
+    would file an `unmatched-request` issue, so checking the plumbing would pollute the queue
+    it exists to keep honest.
+  - **`NODE_EXTRA_CA_CERTS` takes one file, and an app behind stable names has to trust two
+    issuers** — the project CA for the front door and portless's for the names. So a combined
+    bundle is written per project and every CA variable points at it.
+  - **Off by default and never load-bearing.** portless binds 443 with sudo, edits
+    `/etc/hosts` and installs a CA in the system trust store; that is a person's decision,
+    not a config default's. Every failure degrades to loopback URLs with the reason attached.
+
+  One defect fell out of this work: `.env.mocktown` set `HTTP_PROXY` with no `NO_PROXY`, so a
+  client pointed at its mock's loopback URL would have had that request proxied into the
+  front door, which would deny it as an unknown host — the redirection breaking the
+  redirection. Loopback is now never proxied, and the portless TLD is added when stable names
+  are live.

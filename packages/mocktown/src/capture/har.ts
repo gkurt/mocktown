@@ -72,26 +72,32 @@ export function parseHar(text: string): HarParseResult {
 
     const content = entry.response.content;
     let responseBody = content.text ?? '';
+    let responseEncoding: 'text' | 'base64' = 'text';
     if (content.encoding === 'base64' && responseBody) {
       const decoded = Buffer.from(responseBody, 'base64');
-      // A binary body cannot be scrubbed by pattern, and storing it unscrubbed would
-      // break the promise that nothing unscrubbed reaches disk. Record the shape only.
-      if (decoded.includes(0)) {
-        skipped.push({ url, reason: 'binary response body' });
-        return;
-      }
-      responseBody = decoded.toString('utf8');
+      // A body that is not valid UTF-8 stays base64 rather than being dropped. It cannot
+      // be scrubbed by pattern — the recorder marks that on the row so the corpus is
+      // honest about it (10-security.md) — but discarding it lost real traffic, and the
+      // front door has been keeping the equivalent since phase 4.
+      const text = decoded.toString('utf8');
+      if (Buffer.from(text, 'utf8').equals(decoded)) responseBody = text;
+      else responseEncoding = 'base64';
     }
 
+    const requestHeaders = headers(entry.request.headers);
     exchanges.push({
       id: `har-${index}`,
       method: entry.request.method,
       url,
       statusCode: entry.response.status,
-      requestHeaders: headers(entry.request.headers),
+      requestHeaders,
       responseHeaders: headers(entry.response.headers),
       requestBody: entry.request.postData?.text ?? '',
       responseBody,
+      // A HAR's request body is always text — the format has nowhere to put anything else.
+      requestEncoding: 'text',
+      responseEncoding,
+      kind: String(requestHeaders['content-type'] ?? '').startsWith('application/grpc') ? 'grpc' : 'http',
       durationMs: entry.time !== undefined ? Math.round(entry.time) : null,
       mode: 'record',
     });

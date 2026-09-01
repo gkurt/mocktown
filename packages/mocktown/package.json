@@ -33,7 +33,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./mock": "./src/mocks/types.ts"
+    "./mock": "./src/mocks/types.ts",
+    "./contract": "./src/contract/index.ts"
   },
   "imports": {
     "#*": "./*"

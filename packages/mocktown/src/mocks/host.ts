@@ -14,10 +14,10 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '#src/db/client.ts';
 import { schema } from '#src/db/client.ts';
-import { diagnose, matchRoute } from '#src/mocks/match.ts';
+import { diagnose, matchRoute, matchSocket } from '#src/mocks/match.ts';
 import { Prng, streamKey } from '#src/mocks/prng.ts';
 import { SqliteStateStore } from '#src/mocks/state.ts';
-import type { MockCtx, MockModule, MockRequest, MockResponse } from '#src/mocks/types.ts';
+import type { MockCtx, MockModule, MockRequest, MockResponse, MockSocket, MockSocketCtx, MockSocketRequest } from '#src/mocks/types.ts';
 import { DEFAULT_RULES } from '#src/scrub/rules.ts';
 import { id } from '#src/util/id.ts';
 
@@ -39,8 +39,22 @@ export interface MockHostDeps {
   }) => void;
 }
 
+/**
+ * What a live socket carries between the upgrade and its handlers. `live` is the socket
+ * itself, which does not exist yet when `server.upgrade()` is called — Bun hands it to the
+ * `open` callback — so `ctx.send` reads it from here rather than from a closure.
+ */
+interface SocketBinding {
+  service: string;
+  socket: MockSocket;
+  request: MockSocketRequest;
+  ctx: MockSocketCtx;
+  connection: Record<string, unknown>;
+  live: Bun.ServerWebSocket<SocketBinding> | null;
+}
+
 export class MockHost {
-  private server?: ReturnType<typeof Bun.serve>;
+  private server?: Bun.Server<SocketBinding>;
   private modules = new Map<string, MockModule>();
   port = 0;
 
@@ -60,10 +74,25 @@ export class MockHost {
 
   async start(port = 0): Promise<number> {
     if (this.server) return this.port;
-    this.server = Bun.serve({
+    this.server = Bun.serve<SocketBinding>({
       port,
       hostname: '127.0.0.1', // 10-security.md: mocks never leave loopback
-      fetch: (request) => this.handle(request),
+      fetch: (request, server) => this.handle(request, server),
+      // WebSocket handlers are a property of the server, not of a response, so the whole
+      // socket API is threaded through `ws.data` set at upgrade time.
+      websocket: {
+        open: (ws) => void this.runSocketHandler(ws, (socket) => socket.onOpen?.(ws.data.request, ws.data.ctx)),
+        message: (ws, message) =>
+          void this.runSocketHandler(ws, (socket) =>
+            socket.onMessage?.(
+              typeof message === 'string' ? { data: message, isBinary: false } : { data: message, isBinary: true },
+              ws.data.request,
+              ws.data.ctx,
+            ),
+          ),
+        close: (ws, code, reason) =>
+          void this.runSocketHandler(ws, (socket) => socket.onClose?.({ code, reason }, ws.data.request, ws.data.ctx)),
+      },
     });
     this.port = this.server.port ?? port;
     return this.port;
@@ -74,7 +103,7 @@ export class MockHost {
     this.server = undefined;
   }
 
-  private async handle(request: Request): Promise<Response> {
+  private async handle(request: Request, server: Bun.Server<SocketBinding>): Promise<Response | undefined> {
     const url = new URL(request.url);
     // The Host header is the service identity; the URL's host is our loopback address.
     const service = (request.headers.get('host') ?? url.host).split(':')[0]!;
@@ -99,6 +128,9 @@ export class MockHost {
         hint: 'Run `mocktown issues list` — this request was filed with everything needed to build the mock.',
       });
     }
+
+    if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') return this.upgrade(request, server, service, module, url);
+    if (isGrpcRequest(request)) return this.denyGrpc(request, service, url, rawBody);
 
     const profile = this.profileFor(request);
     const match = matchRoute(module.routes, request.method, url.pathname);
@@ -164,6 +196,164 @@ export class MockHost {
   }
 
   /**
+   * A WebSocket upgrade. A channel the mock does not declare is rejected and filed, the
+   * same as an unmatched request: a socket that connects and then says nothing is the
+   * hardest kind of mock bug to diagnose, so the failure is made loud at the handshake.
+   */
+  private upgrade(
+    request: Request,
+    server: Bun.Server<SocketBinding>,
+    service: string,
+    module: MockModule,
+    url: URL,
+  ): Response | undefined {
+    const match = matchSocket(module.sockets ?? [], url.pathname);
+    if (!match) {
+      this.deps.onUnmatched({
+        service,
+        method: 'GET',
+        path: url.pathname,
+        request: describeRequest(request, url, ''),
+        diagnosis: {
+          reason: `the ${service} mock declares no WebSocket channel matching ${url.pathname}`,
+          declared: (module.sockets ?? []).map((socket) => socket.path),
+        },
+        kind: (module.sockets ?? []).length === 0 ? 'unmatched-request' : 'near-miss',
+        suggestedResolution:
+          `Add a \`sockets\` entry for \`${url.pathname}\` to the ${service} mock. The recorded frames for this channel are ` +
+          `in the corpus: \`mocktown recordings list --service ${service}\` shows the socket rows, and each one carries ` +
+          'its frames in order with the direction the client saw.',
+      });
+      return json(501, {
+        error: 'mocktown_no_socket',
+        message: `The ${service} mock declares no WebSocket channel for ${url.pathname}.`,
+        declared: (module.sockets ?? []).map((socket) => socket.path),
+      });
+    }
+
+    const profile = this.profileFor(request);
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+    const query: Record<string, string> = {};
+    for (const [key, value] of url.searchParams) query[key] = value;
+
+    const socketRequest: MockSocketRequest = {
+      path: url.pathname,
+      params: match.params,
+      query,
+      headers,
+      protocols: (headers['sec-websocket-protocol'] ?? '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+      auth: headers.authorization ?? null,
+    };
+
+    const connection: Record<string, unknown> = {};
+    // The socket's PRNG stream is keyed by the connection's own identity rather than by a
+    // request body, so two clients on the same channel get different streams and each one
+    // is reproducible from the session seed (12-scenario-controls.md).
+    const base = this.contextFor(service, profile, match.socket.path, {
+      method: 'GET',
+      path: url.pathname,
+      params: match.params,
+      query,
+      headers,
+      body: null,
+      rawBody: '',
+      auth: socketRequest.auth,
+    });
+
+    const binding: SocketBinding = {
+      service,
+      socket: match.socket,
+      request: socketRequest,
+      connection,
+      live: null,
+      ctx: {
+        ...base,
+        connection,
+        send: (data) => binding.live?.send(data),
+        close: (code, reason) => binding.live?.close(code, reason),
+      },
+    };
+
+    const upgraded = server.upgrade(request, {
+      data: binding,
+      ...(match.socket.protocol ? { headers: { 'sec-websocket-protocol': match.socket.protocol } } : {}),
+    });
+    if (!upgraded) return json(400, { error: 'mocktown_upgrade_failed', message: 'the WebSocket upgrade was refused by the server' });
+    // Bun takes over the connection when `upgrade` succeeds; returning a response here
+    // would be an error rather than an alternative.
+    return undefined;
+  }
+
+  /**
+   * Run one socket handler, filing anything it throws. A throwing socket handler is a
+   * defect in the generated mock, and it must not take the whole daemon down with it —
+   * `Bun.serve`'s websocket callbacks have no error boundary of their own.
+   */
+  private async runSocketHandler(ws: Bun.ServerWebSocket<SocketBinding>, run: (socket: MockSocket) => void | Promise<void>): Promise<void> {
+    ws.data.live = ws;
+    try {
+      await run(ws.data.socket);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.onUnmatched({
+        service: ws.data.service,
+        method: 'GET',
+        path: ws.data.request.path,
+        request: { path: ws.data.request.path, headers: ws.data.request.headers },
+        diagnosis: { closest: { method: 'WS', path: ws.data.socket.path }, reasons: [`socket handler threw: ${message}`] },
+        kind: 'near-miss',
+        suggestedResolution: `Fix the \`sockets\` handler for \`${ws.data.socket.path}\` in the ${ws.data.service} mock; it threw on a live connection.`,
+      });
+      ws.close(1011, "mocktown: the mock's socket handler threw");
+    }
+  }
+
+  /**
+   * gRPC is recorded but not served, and the reason is a hard one rather than a missing
+   * feature: gRPC requires HTTP/2 with trailers, and `Bun.serve` does not accept HTTP/2
+   * connections at all — a prior-knowledge h2 client gets a protocol error, verified in
+   * phase 4. Denying with the reason attached beats a 501 an agent would try to fix by
+   * editing the mock, which cannot work.
+   */
+  private denyGrpc(request: Request, service: string, url: URL, rawBody: string): Response {
+    this.deps.onUnmatched({
+      service,
+      method: request.method,
+      path: url.pathname,
+      request: describeRequest(request, url, rawBody),
+      diagnosis: {
+        reason:
+          'This is a gRPC call. Mocktown records gRPC as opaque HTTP/2 so the corpus sees it, but a generated mock ' +
+          'cannot serve it: gRPC needs HTTP/2 with trailers and the generated-mock host runs on Bun.serve, which does ' +
+          'not accept HTTP/2 connections. This is a known gap, not a mistake in this mock.',
+        method: url.pathname,
+      },
+      kind: 'unmatched-request',
+      suggestedResolution:
+        `gRPC mocking is not available. Either point ${service} at \`record\` so its calls reach the real service and are ` +
+        'captured, or run a real gRPC test double for it and register that host as `passthrough`. Editing the generated ' +
+        'mock cannot resolve this issue.',
+    });
+    // The reason travels in the response, not only in the issue: whoever reads this body —
+    // a developer in a log, an agent inspecting a failure — must not have to open the queue
+    // to learn that the obvious fix, editing the mock, cannot work.
+    return json(501, {
+      error: 'mocktown_grpc_unsupported',
+      message: `gRPC calls to ${service} cannot be served by a generated mock: gRPC needs HTTP/2 with trailers, and the mock host runs on Bun.serve, which does not accept HTTP/2 connections.`,
+      hint:
+        `Point ${service} at \`record\` so its calls reach the real service and land in the corpus, or run a real gRPC ` +
+        'test double and register that host as `passthrough`. Editing the generated mock cannot resolve this.',
+      method: url.pathname,
+    });
+  }
+
+  /**
    * The front door maps incoming auth to a profile; unauthenticated requests get the
    * `anonymous` profile (12-scenario-controls.md).
    */
@@ -213,6 +403,11 @@ export class MockHost {
       },
     };
   }
+}
+
+/** gRPC is an ordinary POST wearing a content type; nothing else about it is ordinary. */
+function isGrpcRequest(request: Request): boolean {
+  return (request.headers.get('content-type') ?? '').startsWith('application/grpc');
 }
 
 function describeRequest(request: Request, url: URL, body: string) {

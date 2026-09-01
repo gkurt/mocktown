@@ -6,7 +6,7 @@
  * route matched" tells an agent nothing; an issue saying "`GET /v1/orders/{orderId}`
  * matched the path but this request was a PATCH" tells it exactly what to widen.
  */
-import type { MockRoute } from '#src/mocks/types.ts';
+import type { MockRoute, MockSocket } from '#src/mocks/types.ts';
 
 export interface RouteMatch {
   route: MockRoute;
@@ -107,4 +107,25 @@ export function diagnose(routes: MockRoute[], method: string, path: string): Nea
     reasons: best.reasons.length ? best.reasons : ['the route matched structurally but the handler rejected the request'],
     suggestedResolution: `Widen the existing \`${best.route.method.toUpperCase()} ${best.route.path}\` route rather than adding a second one.`,
   };
+}
+
+export interface SocketMatch {
+  socket: MockSocket;
+  params: Record<string, string>;
+}
+
+/**
+ * A WebSocket channel by path template. Same segment matching as a route — a socket path
+ * in a generated mock is written in the corpus's own template form, so
+ * `/v1/streams/{streamId}` lines up with what normalization produced from real traffic.
+ */
+export function matchSocket(sockets: MockSocket[], path: string): SocketMatch | null {
+  const match = matchRoute(
+    sockets.map((socket) => ({ method: 'GET', path: socket.path, handler: () => ({ status: 101 }) })),
+    'GET',
+    path,
+  );
+  if (!match) return null;
+  const socket = sockets.find((entry) => entry.path === match.route.path);
+  return socket ? { socket, params: match.params } : null;
 }

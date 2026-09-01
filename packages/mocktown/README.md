@@ -3,9 +3,9 @@
 Record an app's outbound traffic, serve it back as stateful mocks, and keep those mocks
 alive as the real services change.
 
-This package is the whole product as of phases 1–3: the daemon, the front door, the
-corpus, the providers, the issue engine, the sealed sandbox, and the three surfaces (CLI,
-HTTP API, MCP).
+This package is the whole product as of phases 1–4: the daemon, the front door, the
+corpus, the providers, the issue engine, the sealed sandbox, drift watch, and the surfaces
+(CLI, HTTP API, MCP, and the GUI shell in `packages/gui`).
 Design rationale lives in [`docs/design`](../../docs/design/README.md) — read the file for
 the subsystem you are touching, not all of them.
 
@@ -69,6 +69,60 @@ also why `mocktown seal verify` refuses to run outside the sandbox: with no cont
 engine it reports `unverifiable`, never a pass. `mocktown sandbox devcontainer` writes the
 same boundary as a devcontainer feature for a repo that already has one.
 
+## Watching it work
+
+The live feed is one procedure, so it is on every surface:
+
+```bash
+mocktown feed --follow
+```
+
+```bash
+mocktown gui
+```
+
+`mocktown gui` opens the shell the daemon serves on its own port — dashboard, live feed,
+issues, services, corpus, provider state, seal and sandbox, and panels. The bearer token is
+injected by the daemon as it serves the page, so the build on disk carries no capability.
+Build it first (once) with `bun run gui:build` from the repo root.
+
+A **panel** is one self-contained HTML file plus a manifest in `.mocktown/panels/`:
+
+```jsonc
+// .mocktown/panels/stripe-state.json
+{ "name": "Stripe state", "service": "api.stripe.com", "entry": "stripe-state.html" }
+```
+
+The shell lists panels and iframes them. A panel reads the API base and token from the
+`<meta name="mocktown-boot">` element the daemon injects, and is served under a CSP with no
+external origin in it — it can talk to this daemon and nowhere else. `mocktown panels list`
+shows what was found, and why any manifest could not be used. The shipped
+`provider-state.html` panel is the worked example to copy.
+
+## Keeping mocks honest as the real services change
+
+```bash
+mocktown drift check
+```
+
+A drift run re-records your own flows against the **real** services, replays that fresh
+evidence against your mocks, and files `provider-drift` issues for the divergences. It is a
+re-record rather than a replay because the corpus holds no credentials — only your app can
+authenticate. It spends real quota, so the schedule is off until `mocktown.json` asks for it:
+
+```jsonc
+{ "drift": { "enabled": true, "intervalHours": 24, "flows": ["bun run test:integration"] } }
+```
+
+## Stable local names (optional)
+
+With [portless](https://github.com/vercel-labs/portless) installed and
+`portless.enabled` in `mocktown.json`, each service gets a stable
+`https://<service>.<project>.localhost` name instead of a fresh loopback port on every
+daemon restart, and `.env.mocktown` uses it. Mocktown proves the whole path works — it
+registers a throwaway name and fetches it back through the proxy — before it claims a name,
+and reports the reason if it cannot. `mocktown env portless get` shows the verdict.
+
 ## Layout
 
 | Path | What lives there |
@@ -85,6 +139,9 @@ same boundary as a devcontainer feature for a repo that already has one.
 | `src/sandbox/` | The container engine seam, the generated images, the topology, the escape-attempt harness |
 | `src/seal/` | Seal certification and its staleness-aware stamp |
 | `src/skills/` | The prompt packs shipped for the recurring agent jobs |
+| `src/drift/` | Drift watch: the re-record run and the daemon-side schedule |
+| `src/redirect/` | The portless seam — stable local names, wrapped and optional |
+| `src/gui/` | Serving the shell and the panels, plus the built-in panels themselves |
 
 ## House rules worth knowing before you edit
 
@@ -118,5 +175,10 @@ bun test
 `tests/loop.test.ts` runs a real front door against a real upstream and asserts both phase
 exit criteria. `tests/emulate.test.ts` spawns a real `emulate` process. `tests/sandbox.test.ts`
 builds real images and asserts the seal against a negative control, skipping itself when no
-container engine is installed. None of it is mocked, which is the point: the failures this
-product must not have are integration failures.
+container engine is installed. `tests/sockets.test.ts` holds a real WebSocket conversation
+with a real mock host and captures another through the real front door.
+`tests/gui.test.ts` fetches the shell and a panel from a real daemon to check the injected
+token, the CSP and path containment. `tests/portless.test.ts` runs the portless seam against
+a stub binary and a Host-routing reverse proxy, because portless itself binds 443 with sudo
+and installs a CA — not something a test suite gets to do to a machine. None of it is mocked,
+which is the point: the failures this product must not have are integration failures.

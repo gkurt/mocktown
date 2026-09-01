@@ -30,6 +30,8 @@
   },
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "css": {
+    // The GUI shell is Tailwind v4, so `@theme` and `@apply` are valid input here.
+    "parser": { "tailwindDirectives": true },
     "formatter": {
       "enabled": true
     }

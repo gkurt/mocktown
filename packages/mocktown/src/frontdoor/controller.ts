@@ -28,6 +28,9 @@ const sidecarPath = join(dirname(fileURLToPath(import.meta.url)), 'sidecar.ts');
 /** Mockttp's own fallback priority, so an unmatched-request rule loses to every route. */
 const FALLBACK_PRIORITY = 0;
 
+/** How a body reached us. `base64` means it was not valid UTF-8 and must not be stringified. */
+export type BodyEncoding = 'text' | 'base64';
+
 /** One captured exchange, raw. It goes straight to the recorder, which scrubs it. */
 export interface CapturedExchange {
   id: string;
@@ -38,13 +41,56 @@ export interface CapturedExchange {
   responseHeaders: Record<string, string | string[]>;
   requestBody: string;
   responseBody: string;
+  /**
+   * Per side: a JSON request with a PNG response is ordinary, and base64-ing the readable
+   * half would cost the corpus its legibility for nothing (03-capture.md).
+   */
+  requestEncoding: BodyEncoding;
+  responseEncoding: BodyEncoding;
+  /** `grpc` is an opaque h2 exchange: recorded, deliberately not interpreted. */
+  kind: 'http' | 'grpc';
   durationMs: number | null;
   /** Which front-door mode served it, so the recorder knows whether to persist. */
   mode: string;
 }
 
+/** One WebSocket message, from the *client's* point of view. */
+export interface CapturedFrame {
+  direction: 'sent' | 'received';
+  body: string;
+  encoding: BodyEncoding;
+  /** Milliseconds since the socket opened, so a mock can reproduce the cadence. */
+  atMs: number;
+}
+
+/**
+ * A whole WebSocket conversation, delivered when it closes.
+ *
+ * A socket is one exchange in the corpus, not one per frame: "what does this channel carry"
+ * is the question a generating agent asks, and a per-frame corpus answers a different one.
+ * The cost is that a socket that never closes is never recorded, which is why `truncated`
+ * exists and why the frame cap is generous rather than tight.
+ */
+export interface CapturedSocket {
+  id: string;
+  url: string;
+  requestHeaders: Record<string, string | string[]>;
+  responseHeaders: Record<string, string | string[]>;
+  /** 101 when the upgrade was accepted; whatever was returned when it was not. */
+  statusCode: number;
+  frames: CapturedFrame[];
+  truncated: boolean;
+  close: { code: number; reason: string; by: 'client' | 'upstream' } | null;
+  durationMs: number | null;
+  mode: string;
+}
+
 export interface FrontDoorEvents {
   onExchange?: (exchange: CapturedExchange) => void;
+  /** A closed WebSocket conversation (03-capture.md's deferred list, phase 4). */
+  onSocket?: (socket: CapturedSocket) => void;
+  /** A socket opening or closing, for the live feed — the corpus row only lands at close. */
+  onSocketLifecycle?: (event: { url: string; phase: 'open' | 'close'; frames: number; mode: string }) => void;
   /** A request that hit a `deny` route or the fallthrough — the issue engine's input. */
   onWallHit?: (hit: WallHit) => void;
   /** TLS interception refused by the client: a `pinned-client` issue (03-capture.md). */
@@ -78,6 +124,7 @@ interface HalfRequest {
   url: string;
   headers: Record<string, string | string[]>;
   body: string;
+  encoding: BodyEncoding;
   startedAt: number;
 }
 
@@ -85,6 +132,7 @@ interface HalfResponse {
   statusCode: number;
   headers: Record<string, string | string[]>;
   body: string;
+  encoding: BodyEncoding;
 }
 
 /** The two halves of one exchange, joined whichever order they arrive in. */
@@ -97,12 +145,32 @@ interface Exchange {
 /** How long a half-exchange waits for its other half before being swept. */
 const HALF_EXCHANGE_TTL_MS = 120_000;
 
+/**
+ * Frames kept per socket. A chat or telemetry channel can run for hours; past this the
+ * corpus has learned everything a mock needs about the channel's shape, and the row says
+ * it was truncated rather than pretending it saw the whole conversation.
+ */
+const MAX_SOCKET_FRAMES = 500;
+
+/** One WebSocket connection, accumulated until it closes. */
+interface OpenSocket {
+  url: string;
+  requestHeaders: Record<string, string | string[]>;
+  responseHeaders: Record<string, string | string[]>;
+  statusCode: number;
+  frames: CapturedFrame[];
+  truncated: boolean;
+  startedAt: number;
+  mode: string;
+}
+
 export class FrontDoor {
   private sidecar?: ChildProcess;
   private proxy?: Mockttp;
   private appliedSignature?: string;
   private routes = new Map<string, Route>();
   private exchanges = new Map<string, Exchange>();
+  private sockets = new Map<string, OpenSocket>();
   private lastSweep = 0;
   readonly log: string[] = [];
   port = 0;
@@ -168,30 +236,75 @@ export class FrontDoor {
     const proxy = this.proxy!;
 
     await proxy.on('request', async (request) => {
+      const { body, encoding } = await readBody(request.body);
       this.join(request.id, {
         request: {
           method: request.method,
           url: request.url,
           headers: request.headers as Record<string, string | string[]>,
-          body: (await request.body.getText().catch(() => '')) ?? '',
+          body,
+          encoding,
           startedAt: Date.now(),
         },
       });
     });
 
     await proxy.on('response', async (response) => {
+      const { body, encoding } = await readBody(response.body);
       this.join(response.id, {
         response: {
           statusCode: response.statusCode,
           headers: response.headers as Record<string, string | string[]>,
-          body: (await response.body.getText().catch(() => '')) ?? '',
+          body,
+          encoding,
         },
       });
     });
 
     // An aborted request never gets a response half; drop it rather than let it linger.
+    // A socket that dies without a close frame arrives here too, and is worth keeping —
+    // an unclean disconnect is exactly the behaviour a mock has to be able to reproduce.
     await proxy.on('abort', (request) => {
       this.exchanges.delete(request.id);
+      this.closeSocket(request.id, null);
+    });
+
+    // ── WebSockets ────────────────────────────────────────────────────────────
+    // Five events per connection, joined by `streamId` the same way request and response
+    // are joined by id: nothing here may assume an ordering the protocol does not promise.
+    await proxy.on('websocket-request', (request) => {
+      this.sockets.set(request.id, {
+        url: request.url,
+        requestHeaders: request.headers as Record<string, string | string[]>,
+        responseHeaders: {},
+        statusCode: 0,
+        frames: [],
+        truncated: false,
+        startedAt: Date.now(),
+        mode: this.modeFor(request.url),
+      });
+      this.events.onSocketLifecycle?.({ url: request.url, phase: 'open', frames: 0, mode: this.modeFor(request.url) });
+    });
+
+    await proxy.on('websocket-accepted', (response) => {
+      const socket = this.sockets.get(response.id);
+      if (!socket) return;
+      socket.statusCode = response.statusCode;
+      socket.responseHeaders = response.headers as Record<string, string | string[]>;
+    });
+
+    // Mockttp's `direction` is written from the proxy's point of view; the corpus is
+    // written from the client's, because that is whose behaviour a mock has to reproduce.
+    // `received` (Mockttp got it from the client) is therefore `sent` here.
+    await proxy.on('websocket-message-received', (message) => this.frame(message.streamId, 'sent', message));
+    await proxy.on('websocket-message-sent', (message) => this.frame(message.streamId, 'received', message));
+
+    await proxy.on('websocket-close', (event) => {
+      this.closeSocket(event.streamId, {
+        code: event.closeCode ?? 1005,
+        reason: event.closeReason,
+        by: 'upstream',
+      });
     });
 
     // A client that refuses our certificate is pinned; documented out of scope, but it
@@ -240,8 +353,42 @@ export class FrontDoor {
       responseHeaders: response.headers,
       requestBody: request.body,
       responseBody: response.body,
+      requestEncoding: request.encoding,
+      responseEncoding: response.encoding,
+      kind: isGrpc(request.headers) ? 'grpc' : 'http',
       durationMs: Date.now() - request.startedAt,
       mode,
+    });
+  }
+
+  private frame(streamId: string, direction: 'sent' | 'received', message: { content: Uint8Array; isBinary: boolean }): void {
+    const socket = this.sockets.get(streamId);
+    if (!socket) return;
+    if (socket.frames.length >= MAX_SOCKET_FRAMES) {
+      socket.truncated = true;
+      return;
+    }
+    const { body, encoding } = encodeBytes(Buffer.from(message.content), message.isBinary);
+    socket.frames.push({ direction, body, encoding, atMs: Date.now() - socket.startedAt });
+  }
+
+  private closeSocket(streamId: string, close: CapturedSocket['close']): void {
+    const socket = this.sockets.get(streamId);
+    if (!socket) return;
+    this.sockets.delete(streamId);
+    this.events.onSocketLifecycle?.({ url: socket.url, phase: 'close', frames: socket.frames.length, mode: socket.mode });
+    this.events.onSocket?.({
+      id: streamId,
+      url: socket.url,
+      requestHeaders: socket.requestHeaders,
+      responseHeaders: socket.responseHeaders,
+      // A socket that was rejected never got an upgrade; 101 would be a lie.
+      statusCode: socket.statusCode || 0,
+      frames: socket.frames,
+      truncated: socket.truncated,
+      close,
+      durationMs: Date.now() - socket.startedAt,
+      mode: socket.mode,
     });
   }
 
@@ -338,6 +485,7 @@ export class FrontDoor {
     this.proxy = undefined;
     this.appliedSignature = undefined;
     this.exchanges.clear();
+    this.sockets.clear();
 
     const child = this.sidecar;
     this.sidecar = undefined;
@@ -395,6 +543,35 @@ function jsonStep(status: number, body: unknown) {
   return new requestSteps.FixedResponseStep(status, undefined, JSON.stringify(body), {
     'content-type': 'application/json',
   });
+}
+
+/**
+ * A body as text when it *is* text, and base64 when it is not.
+ *
+ * `getText()` alone is not enough: it decodes bytes as UTF-8 unconditionally, so a
+ * protobuf frame or a PNG comes back as replacement characters and the corpus stores a
+ * corrupted body that looks like a real one. Deciding by round-trip rather than by
+ * content-type is deliberate — a mislabelled `application/json` that is actually gzip is
+ * exactly the case a header check would get wrong.
+ */
+async function readBody(body: { getDecodedBuffer(): Promise<Buffer | undefined> }): Promise<{ body: string; encoding: BodyEncoding }> {
+  const buffer = await body.getDecodedBuffer().catch(() => undefined);
+  if (!buffer || buffer.length === 0) return { body: '', encoding: 'text' };
+  return encodeBytes(buffer, false);
+}
+
+function encodeBytes(buffer: Buffer, forceBinary: boolean): { body: string; encoding: BodyEncoding } {
+  if (!forceBinary) {
+    const text = buffer.toString('utf8');
+    if (Buffer.from(text, 'utf8').equals(buffer)) return { body: text, encoding: 'text' };
+  }
+  return { body: buffer.toString('base64'), encoding: 'base64' };
+}
+
+/** gRPC is an ordinary h2 POST wearing a content type; nothing else about it is ordinary. */
+function isGrpc(headers: Record<string, string | string[]>): boolean {
+  const contentType = headers['content-type'];
+  return String(Array.isArray(contentType) ? contentType[0] : (contentType ?? '')).startsWith('application/grpc');
 }
 
 function hostOf(url: string): string {

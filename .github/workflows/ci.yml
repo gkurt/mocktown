@@ -17,5 +17,6 @@ jobs:
       - run: bun check
       - run: bun run test
       - run: bun typecheck
-      # Add a build step for publishable packages, e.g.:
-      # - run: bun --filter='PACKAGE_NAME' run build
+      # The GUI is served by the daemon rather than published, but a shell that does not
+      # build is still a broken surface — and nothing else would catch it.
+      - run: bun run gui:build

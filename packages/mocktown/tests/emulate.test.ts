@@ -123,9 +123,33 @@ describe('emulate behind the front door', () => {
     expect(github.some((e) => e.note?.includes('login=<user>'))).toBe(true);
   });
 
-  test('state introspection is honest about being unavailable for emulate', () => {
-    const snapshot = runtime.providerFor('api.stripe.com')!.state!('api.stripe.com', {});
+  test("emulate state introspection reads the emulator's own list endpoints", async () => {
+    // Best-effort by design (06-emulation.md). What must hold is that a probe we ship
+    // actually answers — an invented endpoint would report an empty collection where the
+    // emulator holds data, which reads as a broken seed file.
+    const snapshot = await runtime.stateFor('api.stripe.com', {});
+    expect(snapshot.provider).toBe('emulate');
+    expect(snapshot.collections.map((c) => c.name)).toContain('customers');
+    // `seeded` cannot be known: emulate's --seed is additive to its built-in defaults.
+    expect(snapshot.collections.every((c) => c.entries.every((e) => e.seeded === false))).toBe(true);
+    expect(snapshot.note).toContain('additive');
+  }, 60_000);
+
+  test('a service with no probe says why, rather than reporting nothing', async () => {
+    // "No collections" and "we never taught it how to look" are different facts, and only
+    // one of them is a bug in a seed file.
+    const snapshot = await runtime.stateFor('api.github.com', {});
     expect(snapshot.collections).toEqual([]);
-    expect(snapshot.note).toContain('not available');
-  });
+    expect(snapshot.note).toContain('consent flow');
+  }, 60_000);
+
+  test('the state overview lists every service, introspectable or not', async () => {
+    const overview = await runtime.stateOverview();
+    expect(overview.map((row) => row.service).sort()).toEqual(['api.github.com', 'api.stripe.com']);
+    // A service that cannot be introspected is listed with its reason; omitting it would
+    // read as "this service has no state".
+    const github = overview.find((row) => row.service === 'api.github.com')!;
+    expect(github.introspectable).toBe(false);
+    expect(github.note).toBeTruthy();
+  }, 60_000);
 });

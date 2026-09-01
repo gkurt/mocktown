@@ -78,6 +78,15 @@ The registry in global config maps project name → data dir, so `mocktown --pro
 foo` works from anywhere; a repo-local `mocktown.json` naming an unregistered project
 auto-registers it on first use.
 
+*Amended 2026-09-01 by the phase-4 implementation:* the registry also maps project name →
+**workspace**, and resolution now falls back to it. It has to: the daemon serves every
+project from wherever it happened to be started, so for all but one of them there is no
+`mocktown.json` above its cwd — and until this landed, everything workspace-dependent
+(issues on disk, generated mocks, panels, `env write`) was silently missing for those
+projects rather than reported. The registered workspace is only used when it still holds a
+`mocktown.json` naming that project, so a moved or deleted repo degrades to "no workspace"
+instead of resolving to a stale path.
+
 ## CLI shape (illustrative)
 
 ```

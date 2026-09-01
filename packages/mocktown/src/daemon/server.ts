@@ -9,13 +9,17 @@
  * read it would only make life harder for agents and `curl`.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { OpenAPIGenerator } from '@orpc/openapi';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 import { daemonStateFile, globalConfigDir } from '#src/config/paths.ts';
+import { loadGlobalConfig } from '#src/config/project.ts';
 import { contract } from '#src/contract/index.ts';
 import { router } from '#src/daemon/router.ts';
+import { runtimeFor } from '#src/daemon/runtime.ts';
+import { DriftScheduler } from '#src/drift/scheduler.ts';
+import { panelFile } from '#src/gui/panels.ts';
+import { assetPath, guiDist, htmlResponse, PANEL_CSP, SHELL_CSP } from '#src/gui/serve.ts';
 import { findFreePort } from '#src/util/ports.ts';
 
 const handler = new OpenAPIHandler(router);
@@ -41,8 +45,13 @@ export interface DaemonHandle {
 export interface DaemonOptions {
   port?: number;
   token?: string;
-  /** Directory of built GUI files, served from the same port when present. */
+  /** Built GUI files, served from the same port. Defaults to the shell in `@mocktown/gui`. */
   staticDir?: string;
+  /**
+   * Off in tests: the scheduler's only job is to call real third-party APIs on a timer
+   * (07-issues-agent-loop.md), and a test suite must never do that by accident.
+   */
+  driftWatch?: boolean;
 }
 
 /** Written where clients look for it, `0600`: it is a capability, not a config value. */
@@ -57,11 +66,20 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
   const port = options.port ?? (await findFreePort(4499));
   const token = options.token ?? crypto.randomUUID();
 
+  const staticDir = options.staticDir ?? guiDist();
+
   const server = Bun.serve({
     port,
     hostname: '127.0.0.1',
     async fetch(request) {
       const url = new URL(request.url);
+      // Only computed where HTML is served: it reads the global config, and the API path
+      // has no use for it.
+      const bootFor = (project?: string) => ({
+        apiBase: `http://127.0.0.1:${port}/api/v1`,
+        token,
+        project: project ?? loadGlobalConfig().defaultProject,
+      });
 
       if (url.pathname === '/api/v1/openapi.json') return Response.json(openapi);
 
@@ -77,10 +95,21 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
       const { matched, response } = await handler.handle(request, { prefix: '/api/v1' });
       if (matched) return response;
 
-      if (options.staticDir) {
-        const path = url.pathname === '/' ? '/index.html' : url.pathname;
-        const asset = Bun.file(join(options.staticDir, path));
-        if (await asset.exists()) return new Response(asset);
+      // `/panels/<source>/<entry>` — a path from an untrusted document, so resolution is
+      // `panelFile`'s job and nothing outside the two panel directories is reachable.
+      const panel = /^\/panels\/(workspace|builtin)\/(.+)$/.exec(url.pathname);
+      if (panel) {
+        const boot = bootFor(url.searchParams.get('project') ?? undefined);
+        const file = panelFile(runtimeFor(boot.project).resolved.workspace, panel[1]!, decodeURIComponent(panel[2]!));
+        if (!file) return Response.json({ error: 'not_found', path: url.pathname }, { status: 404 });
+        if (!file.endsWith('.html')) return new Response(Bun.file(file), { headers: { 'content-security-policy': PANEL_CSP } });
+        return htmlResponse(file, boot, PANEL_CSP);
+      }
+
+      if (staticDir) {
+        const file = assetPath(staticDir, url.pathname);
+        if (file?.endsWith('.html')) return htmlResponse(file, bootFor(), SHELL_CSP);
+        if (file) return new Response(Bun.file(file));
       }
 
       return Response.json({ error: 'not_found', path: url.pathname }, { status: 404 });
@@ -89,11 +118,17 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
 
   writeDaemonState(port, token);
 
+  // Reads the registry on every tick rather than at startup, so a project registered later
+  // is picked up without a restart. Every project still has to opt in for itself.
+  const drift = new DriftScheduler({ projects: () => Object.keys(loadGlobalConfig().projects) });
+  if (options.driftWatch ?? true) drift.start();
+
   return {
     port,
     token,
     url: `http://127.0.0.1:${port}/api/v1`,
     async stop() {
+      drift.stop();
       await server.stop(true);
     },
   };

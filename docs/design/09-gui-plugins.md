@@ -1,13 +1,14 @@
 # 09 — GUI, State Visibility & the Panels Plugin Model
 
-**Status:** Draft — only the Drizzle Studio hookup is built (phase 1); the GUI and panels are phase 4
+**Status:** Implemented — Drizzle Studio hookup in phase 1; the shell, the live feed and the
+panels model in phase 4
 
 The GUI is a **thin shell over the daemon API** ([02-architecture.md](02-architecture.md)).
 It never gains logic of its own — that is the one architectural line that must hold,
 because it's what makes the plugin model nearly free and what keeps headless (CLI/CI/
 agent) use at full parity.
 
-## Phase 1: ship visibility cheaply
+## What the shell shows
 
 - **Dashboard**: resolved project, services + provider status, seal state, live
   request feed (from the front door's event stream), issue list. All of it renders
@@ -30,7 +31,59 @@ daemon as a sidecar — pick it up only on real demand, since it adds
 signing/distribution work ([10-security.md](10-security.md)) before there's UI worth
 packaging.
 
-## The panels plugin model (later phase — but the constraints apply now)
+*Amended 2026-09-01 by the phase-4 implementation:*
+
+- **The shell is `packages/gui`** — Vite + React 19 + TanStack Router + TanStack Query +
+  Tailwind v4 — built to static files and served by the daemon on the daemon's own port.
+  One origin is what makes the token injection and the panel CSP below possible at all; a
+  second dev-server port would have needed CORS and a second place to hold a capability.
+- **It is a client of the same contract as everyone else.** The GUI imports
+  `mocktown/contract` and builds an `OpenAPILink` client, exactly as the CLI and the MCP
+  server do, so a procedure that changes shape breaks the GUI's typecheck instead of its
+  runtime. `mocktown` gained a `./contract` export for this; the contract module pulls in
+  only Zod, so nothing daemon-side reaches the browser bundle.
+- **No TanStack Form or Store.** The shell's only write is a single-field mutation
+  (a service's provider), so a form library and a second state store would have been
+  machinery around a `<select>` and an invalidate. Revisit when a real form appears.
+- **shadcn components are deliberately not vendored yet.** The five primitives the shell
+  needs are hand-written and marked `TODO(registry)` where the house `@gkurt`
+  shadcn-on-Base-UI registry should replace them — the swap wants a real dialog or combobox
+  to justify it, not a table wrapper.
+- **The project comes from the daemon and `?project=` overrides it.**
+  [08-projects-config.md](08-projects-config.md)'s rule is that the resolved project is
+  always visible, not that the GUI owns resolution.
+- **Nothing is startable from the GUI that costs containers or real money.** `seal verify`,
+  `sandbox up` and `drift check` are read-only in the shell and named as CLI commands; a
+  button that spends quota is a decision, and the CLI is where decisions are made.
+
+### The token is injected, never bundled
+
+The daemon inserts a `<meta name="mocktown-boot">` element carrying the API base, the
+resolved project and the bearer token as it serves any HTML — the shell and panels alike —
+with `Cache-Control: no-store`. A build sitting on disk therefore carries no capability, and
+the token never appears in a URL, where it would land in shell and browser history.
+
+A `<script type="application/json">` block would have read better and was tried first:
+Chrome applies `script-src` to inline `<script>` elements whatever their type, so the data
+was still readable but every page load logged a CSP refusal. A meta element has no argument
+with the policy.
+
+### The live feed is a long poll, not a stream
+
+The feed is `GET /feed` with a cursor: the daemon parks the request for up to 25s, returns
+whatever happened, and the client asks again with the cursor it was handed. An oRPC event
+iterator was the obvious alternative and was rejected — an async iterator cannot be rendered
+by the CLI or returned by MCP, so the feed would have become the one capability that exists
+on a single surface. As a procedure it is one `fetch` in a loop, which a build-step-free
+panel can do too, and `mocktown feed --follow` is the same call from a terminal.
+
+Two properties the clients depend on: the cursor advances over the *unfiltered* window, so a
+client watching one kind neither re-sees events nor parks forever on a quiet kind; and the
+window is bounded (500 events), so a client that fell behind is told `gap: true` rather than
+shown a feed with a hole in it. The feed carries no bodies, drops query strings and runs
+path templates through the scrubber — a credential in a path segment is a real pattern.
+
+## The panels plugin model
 
 **Decision: no plugin *system*; plugins are single-file HTML panels.**
 A panel is one self-contained HTML file in `<repo>/.mocktown/panels/` (or shipped
@@ -63,8 +116,28 @@ Revisit only if single-file panels demonstrably hit a wall.
    so no external network access from panel documents
    ([10-security.md](10-security.md)).
 
+*Amended 2026-09-01 by the phase-4 implementation:*
+
+- **The CSP is the boundary, not the sandbox attribute.** A panel needs the API, so its
+  frame runs with `allow-scripts allow-same-origin`, and that combination is escapable by
+  design. What actually holds is the response header: panel documents are served with
+  `default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src
+  'unsafe-inline'; img-src 'self' data:` and no external origin of any kind — an image URL
+  exfiltrates as well as a `fetch` does.
+- **Panel URLs are paths from an untrusted document**, so they resolve through one function
+  that refuses anything outside the two panel directories, and `..` cannot reach the repo.
+- **Built-in panels ship with the product** under `source: 'builtin'`, and a workspace panel
+  with the same name replaces one — the built-ins exist to be copied and edited. One ships
+  now: a provider-state panel, which is the worked example the docs point at.
+- **A manifest that cannot be used is reported, not dropped.** `panels.list` returns
+  `problems` alongside `panels`; a panel that silently fails to appear reads as a bug in the
+  shell rather than a typo in a file.
+
 ## Explicitly later
 
 - Custom recordings-diff/timeline views (Drizzle Studio covers browsing until then)
 - Panel distribution/sharing between projects
 - Desktop shell packaging
+- Registry components in the shell, and a real form once one is needed
+- A project picker that lists projects: the API has no `projects.list`, and until it does the
+  shell reads the daemon's resolved project and accepts `?project=`

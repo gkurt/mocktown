@@ -14,7 +14,7 @@ import { normalizeUrl, stripVolatile } from '#src/capture/normalize.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import type { Db } from '#src/db/client.ts';
 import { schema } from '#src/db/client.ts';
-import type { CapturedExchange } from '#src/frontdoor/controller.ts';
+import type { CapturedExchange, CapturedSocket } from '#src/frontdoor/controller.ts';
 import type { Scrubber } from '#src/scrub/scrubber.ts';
 import { hash, id } from '#src/util/id.ts';
 
@@ -42,9 +42,11 @@ export class Recorder {
     this.sessionId = sessionId;
   }
 
-  /** Persist one exchange. Returns null when the body was not text we can scrub. */
+  /** Persist one exchange. */
   record(exchange: CapturedExchange, source: 'front-door' | 'har' = 'front-door'): RecordedRow | null {
-    // Scrub first — this is the only ordering that makes "before disk" true.
+    // Scrub first — this is the only ordering that makes "before disk" true. A base64 body
+    // is handed to the scrubber as an empty string and restored afterwards: running the
+    // pattern rules over base64 would find nothing and could corrupt the encoding.
     const scrubbed = this.scrubber.scrub({
       id: exchange.id,
       method: exchange.method,
@@ -52,9 +54,11 @@ export class Recorder {
       statusCode: exchange.statusCode,
       requestHeaders: exchange.requestHeaders,
       responseHeaders: exchange.responseHeaders,
-      requestBody: exchange.requestBody,
-      responseBody: exchange.responseBody,
+      requestBody: exchange.requestEncoding === 'base64' ? '' : exchange.requestBody,
+      responseBody: exchange.responseEncoding === 'base64' ? '' : exchange.responseBody,
     });
+    if (exchange.requestEncoding === 'base64') scrubbed.requestBody = exchange.requestBody;
+    if (exchange.responseEncoding === 'base64') scrubbed.responseBody = exchange.responseBody;
 
     const { service, path, pathTemplate, query } = normalizeUrl(scrubbed.url);
     const rowId = id('rec');
@@ -80,14 +84,94 @@ export class Recorder {
         requestBlob: request.blob,
         responseBlob: response.blob,
         durationMs: exchange.durationMs,
+        kind: exchange.kind,
+        requestEncoding: exchange.requestEncoding,
+        responseEncoding: exchange.responseEncoding,
         // Kinds and counts only — never values (10-security.md).
-        scrubSummary: this.scrubber.summary(),
+        scrubSummary: this.summaryWithBinaryNote([exchange.requestEncoding, exchange.responseEncoding]),
         source,
       })
       .run();
 
     this.touchService(service);
     return { id: rowId, service, method: exchange.method.toUpperCase(), pathTemplate, statusCode: exchange.statusCode };
+  }
+
+  /**
+   * Persist one WebSocket conversation: a `websocket` recording plus its frames
+   * (03-capture.md's deferred list, picked up in phase 4). One row per socket rather than
+   * per frame — "what does this channel carry" is the question a generating agent asks.
+   */
+  recordSocket(socket: CapturedSocket): RecordedRow | null {
+    const scrubbed = this.scrubber.scrub({
+      id: socket.id,
+      method: 'GET',
+      url: socket.url.replace(/^ws/, 'http'),
+      statusCode: socket.statusCode,
+      requestHeaders: socket.requestHeaders,
+      responseHeaders: socket.responseHeaders,
+      requestBody: '',
+      responseBody: '',
+    });
+
+    const { service, path, pathTemplate, query } = normalizeUrl(scrubbed.url);
+    const rowId = id('rec');
+
+    this.db
+      .insert(schema.recordings)
+      .values({
+        id: rowId,
+        sessionId: this.sessionId,
+        service,
+        // The upgrade is a GET; keeping the verb makes a socket row sort and read with the
+        // rest of the corpus instead of needing its own vocabulary.
+        method: 'GET',
+        path,
+        pathTemplate,
+        query,
+        statusCode: socket.statusCode,
+        requestHeaders: stripVolatile(scrubbed.requestHeaders, 'request'),
+        responseHeaders: stripVolatile(scrubbed.responseHeaders, 'response'),
+        requestBody: null,
+        responseBody: null,
+        requestBlob: null,
+        responseBlob: null,
+        durationMs: socket.durationMs,
+        kind: 'websocket',
+        socketClose: socket.close,
+        scrubSummary: this.summaryWithBinaryNote(socket.frames.map((frame) => frame.encoding)),
+      })
+      .run();
+
+    for (const [ordinal, frame] of socket.frames.entries()) {
+      this.db
+        .insert(schema.socketFrames)
+        .values({
+          id: id('frm'),
+          recordingId: rowId,
+          ordinal,
+          direction: frame.direction,
+          encoding: frame.encoding,
+          // Text frames go through the same scrubber as a body; binary ones cannot.
+          body: frame.encoding === 'text' ? this.scrubber.scrubBody(frame.body, guessFrameType(frame.body)) : frame.body,
+          atMs: frame.atMs,
+        })
+        .run();
+    }
+
+    this.touchService(service);
+    return { id: rowId, service, method: 'GET', pathTemplate, statusCode: socket.statusCode };
+  }
+
+  /**
+   * The scrub summary, plus an explicit marker when part of this row could not be scrubbed
+   * at all. Binary is a real hole in 10-security.md's promise — pattern rules cannot see
+   * inside protobuf — and a corpus that stayed silent about it would be claiming a
+   * guarantee it did not deliver. `mocktown scrub audit` reads this.
+   */
+  private summaryWithBinaryNote(encodings: ('text' | 'base64')[]): { kind: string; count: number }[] {
+    const binary = encodings.filter((encoding) => encoding === 'base64').length;
+    return binary === 0 ? this.scrubber.summary() : [...this.scrubber.summary(), { kind: 'unscrubbable-binary', count: binary }];
   }
 
   /** Large bodies land in `blobs/` under their own hash; the row keeps the pointer. */
@@ -125,6 +209,12 @@ export class Recorder {
       .onConflictDoNothing()
       .run();
   }
+}
+
+/** A WS frame carries no content type; JSON is overwhelmingly what real channels send. */
+function guessFrameType(body: string): string {
+  const trimmed = body.trimStart();
+  return trimmed.startsWith('{') || trimmed.startsWith('[') ? 'application/json' : 'text/plain';
 }
 
 /** Start a session: the unit recordings, issues and journal entries are tagged by. */

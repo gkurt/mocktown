@@ -12,11 +12,16 @@
 import { oc } from '@orpc/contract';
 import * as z from 'zod/v4';
 import {
+  DriftFinding,
+  DriftRun,
   EkbEntry,
+  FeedEvent,
   Issue,
   IssueStatus,
   IssueType,
   KnobDescriptor,
+  Panel,
+  PortlessStatus,
   Profile,
   ProjectInput,
   ProviderRef,
@@ -26,6 +31,8 @@ import {
   SealCheck,
   SealStamp,
   Service,
+  SocketFrame,
+  StateCollection,
   VerifyResult,
   withProject,
 } from '#src/contract/schemas.ts';
@@ -66,6 +73,40 @@ export const contract = {
       ),
   },
 
+  feed: {
+    tail: oc
+      .route({
+        method: 'GET',
+        path: '/feed',
+        summary: 'Live feed: what the front door, the issue engine and the providers just did',
+      })
+      .input(
+        z.object({
+          ...ProjectInput,
+          since: z.coerce.number().int().min(0).default(0).describe('Highest `seq` already seen; 0 starts from the oldest kept event'),
+          limit: z.coerce.number().int().min(1).max(500).default(100),
+          kind: FeedEvent.shape.kind.optional(),
+          service: z.string().optional(),
+          waitMs: z.coerce
+            .number()
+            .int()
+            .min(0)
+            .max(25_000)
+            .default(0)
+            .describe('Park up to this long waiting for the next event, then return whatever there is. 0 returns immediately'),
+        }),
+      )
+      .output(
+        withProject({
+          cursor: z.number().int().describe('Pass this back as `since` on the next call'),
+          events: z.array(FeedEvent),
+          gap: z
+            .boolean()
+            .describe('True when events were dropped between `since` and the oldest kept one — the feed is a window, not a log'),
+        }),
+      ),
+  },
+
   services: {
     list: oc
       .route({ method: 'GET', path: '/services', summary: "List the project's service registry" })
@@ -101,9 +142,13 @@ export const contract = {
       .output(withProject({ total: z.number().int(), recordings: z.array(Recording) })),
 
     get: oc
-      .route({ method: 'GET', path: '/recordings/{id}', summary: 'One exchange in full, with any spilled body inlined' })
+      .route({
+        method: 'GET',
+        path: '/recordings/{id}',
+        summary: 'One exchange in full, with any spilled body inlined and any WebSocket frames in order',
+      })
       .input(z.object({ ...ProjectInput, id: z.string() }))
-      .output(withProject({ recording: Recording })),
+      .output(withProject({ recording: Recording, frames: z.array(SocketFrame).describe('Empty unless the recording is a WebSocket') })),
 
     routes: oc
       .route({ method: 'GET', path: '/recordings/routes', summary: 'The corpus collapsed to distinct routes — what a mock has to cover' })
@@ -115,6 +160,7 @@ export const contract = {
               service: z.string(),
               method: z.string(),
               pathTemplate: z.string(),
+              kind: z.enum(['http', 'websocket', 'grpc']),
               count: z.number().int(),
               statuses: z.array(z.number().int()),
               lastSeenAt: z.string().nullable(),
@@ -160,6 +206,27 @@ export const contract = {
               statefulHints: z.array(z.string()),
             }),
           ),
+          sockets: z
+            .array(
+              z.object({
+                pathTemplate: z.string(),
+                observations: z.number().int(),
+                frames: z.array(
+                  z.object({
+                    direction: z.enum(['sent', 'received']),
+                    encoding: z.enum(['text', 'base64']),
+                    body: z.string(),
+                    atMs: z.number().int(),
+                  }),
+                ),
+                truncatedFrames: z.boolean().describe('The transcript hit the per-socket frame cap; the conversation went on'),
+                close: z.object({ code: z.number().int(), reason: z.string(), by: z.enum(['client', 'upstream']) }).nullable(),
+              }),
+            )
+            .describe('WebSocket channels, one whole transcript each — what a `sockets` entry in the mock has to reproduce'),
+          grpcMethods: z
+            .array(z.object({ path: z.string(), observations: z.number().int() }))
+            .describe('gRPC methods seen. Recorded, but a generated mock cannot serve them: Bun.serve does not accept HTTP/2'),
           secretKinds: z.array(z.string()).describe('Placeholder kinds present; the mock must accept credentials of these shapes'),
         }),
       ),
@@ -307,6 +374,25 @@ export const contract = {
       .input(z.object({ ...ProjectInput }))
       .output(EnvOutput),
 
+    portless: {
+      get: oc
+        .route({
+          method: 'GET',
+          path: '/env/portless',
+          summary: 'Whether services have stable `<service>.<project>.localhost` names, and why not',
+        })
+        .input(z.object({ ...ProjectInput }))
+        .output(withProject(PortlessStatus.shape)),
+
+      // Proving portless works costs a registered alias and a real request, so the check is
+      // a POST and `env portless get` reads what it last proved — a GET that mutated a
+      // machine's proxy state would be a read-only-looking tool with side effects.
+      sync: oc
+        .route({ method: 'POST', path: '/env/portless/sync', summary: 'Prove portless is usable and claim a stable name per service' })
+        .input(z.object({ ...ProjectInput }))
+        .output(withProject(PortlessStatus.shape)),
+    },
+
     // Writing files is a separate, mutating procedure rather than a `--write` flag on the
     // read: `readOnlyHint` follows the HTTP method, so a GET that writes to the workspace
     // would hand agents a read-only-looking tool that edits their repo (07-issues-agent-loop.md).
@@ -423,6 +509,49 @@ export const contract = {
       ),
   },
 
+  drift: {
+    get: oc
+      .route({ method: 'GET', path: '/drift', summary: 'Drift-watch schedule and the last run — has the mock rotted?' })
+      .input(z.object({ ...ProjectInput }))
+      .output(
+        withProject({
+          enabled: z.boolean().describe('Whether the schedule runs. Off by default: a drift run calls the real services'),
+          intervalHours: z.number().int(),
+          services: z.array(z.string()).describe('Services that would be judged by a run right now'),
+          flows: z.array(z.string()).describe('Commands the re-record runs; falls back to seal.flows'),
+          nextRunAt: z.string().nullable().describe('Null when the schedule is off'),
+          lastRun: DriftRun.nullable(),
+          openDriftIssues: z.number().int(),
+        }),
+      ),
+
+    check: oc
+      .route({
+        method: 'POST',
+        path: '/drift/check',
+        summary: 'Re-record the flows against the REAL services and diff them against the mocks',
+      })
+      .input(
+        z.object({
+          ...ProjectInput,
+          services: z.array(z.string()).optional().describe('Override the service list for this run'),
+          flows: z.array(z.string()).optional().describe('Override the flow list for this run'),
+        }),
+      )
+      .output(
+        withProject({
+          ok: z.boolean().describe('False when anything drifted, and also when the run could not judge what it claimed to'),
+          runId: z.string(),
+          session: z.string().nullable().describe('The recording session the re-record produced — the fresh evidence'),
+          services: z.array(z.string()),
+          flows: z.array(z.object({ command: z.string(), exitCode: z.number().int(), durationMs: z.number().int(), output: z.string() })),
+          checked: z.number().int().describe('Fresh exchanges replayed against the providers'),
+          findings: z.array(DriftFinding),
+          reasons: z.array(z.string()).describe('Why this run judged less than it set out to'),
+        }),
+      ),
+  },
+
   browser: {
     launch: oc
       .route({
@@ -528,20 +657,56 @@ export const contract = {
       ),
   },
 
+  panels: {
+    /**
+     * 09-gui-plugins.md's plugin model. A listing, not a loader: the shell iframes `url`,
+     * and a manifest that could not be read is reported in `problems` rather than dropped —
+     * a panel that silently does not appear reads as a bug in the shell.
+     */
+    list: oc
+      .route({ method: 'GET', path: '/panels', summary: 'Single-file HTML panels the GUI shell can iframe' })
+      .input(z.object({ ...ProjectInput }))
+      .output(
+        withProject({
+          dir: z.string().nullable().describe('The workspace panel directory, or null when the project has no workspace'),
+          panels: z.array(Panel),
+          problems: z.array(z.string()),
+        }),
+      ),
+  },
+
   state: {
+    /**
+     * Across every provider at once, which is the question a dashboard and a panel index
+     * ask. Counts only — a full dump per service could be enormous, and `state get` is one
+     * call away. A service whose provider cannot introspect is listed with the reason
+     * rather than omitted (06-emulation.md: gaps here are acceptable, silence is not).
+     */
+    list: oc
+      .route({ method: 'GET', path: '/state', summary: 'State introspection across every running provider, as counts' })
+      .input(z.object({ ...ProjectInput, profile: z.string().optional() }))
+      .output(
+        withProject({
+          services: z.array(
+            z.object({
+              service: z.string(),
+              provider: z.string().nullable(),
+              introspectable: z.boolean(),
+              collections: z.array(z.object({ name: z.string(), count: z.number().int() })),
+              note: z.string().nullable(),
+            }),
+          ),
+        }),
+      ),
+
     get: oc
       .route({ method: 'GET', path: '/state/{service}', summary: 'Provider state introspection — backs the GUI panels' })
       .input(z.object({ ...ProjectInput, service: z.string(), profile: z.string().optional(), collection: z.string().optional() }))
       .output(
         withProject({
           service: z.string(),
-          collections: z.array(
-            z.object({
-              name: z.string(),
-              count: z.number().int(),
-              entries: z.array(z.object({ key: z.string(), profile: z.string(), seeded: z.boolean(), value: z.unknown() })),
-            }),
-          ),
+          provider: z.string().describe('Which provider answered — introspection fidelity depends on it'),
+          collections: z.array(StateCollection),
           note: z.string().nullable().describe('Set when introspection is best-effort, e.g. an emulate-backed service'),
         }),
       ),

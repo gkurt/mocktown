@@ -16,6 +16,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { EMULATE_RECIPES } from '#src/ekb/emulate-recipes.ts';
+import { noProbeReason, probesFor, type StateProbe } from '#src/ekb/emulate-state.ts';
 import type { EndpointRecipe } from '#src/mocks/types.ts';
 import type { Provider, ProviderCtx, ResetScope, StateSnapshot } from '#src/providers/types.ts';
 import { findFreePortRun, waitForListening } from '#src/util/ports.ts';
@@ -161,13 +162,73 @@ export class EmulateProvider implements Provider {
 
   /**
    * Best-effort, and 06-emulation.md says gaps here are acceptable: emulate exposes no
-   * introspection API, so we report what we know rather than inventing a shape.
+   * introspection API, so the only honest way to list what an emulator holds is to call one
+   * of its own list endpoints. The probe table is in `ekb/emulate-state.ts`; a service with
+   * no probe reports why rather than an empty result, because "nothing there" and "we never
+   * learned how to look" are different facts.
+   *
+   * `seeded` is always false here: emulate's `--seed` is additive to its own built-in
+   * defaults (spike 03), so nothing in a response distinguishes our fixture from the
+   * emulator's. Claiming otherwise would be a guess dressed as a fact.
    */
-  state(service: string): StateSnapshot {
+  async state(service: string, opts: { profile?: string; collection?: string } = {}): Promise<StateSnapshot> {
+    const emulateService = [...this.options.hostnames].find(([, host]) => host === service)?.[0] ?? service;
+    const baseUrl = this.urls.get(emulateService);
+    if (!baseUrl) {
+      return { collections: [], note: `The emulate process is not running, so there is no state to read for ${service}.` };
+    }
+
+    const probes = probesFor(emulateService).filter((probe) => !opts.collection || probe.collection === opts.collection);
+    if (probes.length === 0) return { collections: [], note: noProbeReason(emulateService) };
+
+    const collections: StateSnapshot['collections'] = [];
+    const failures: string[] = [];
+    for (const probe of probes) {
+      const result = await this.probe(baseUrl, probe, opts.profile ?? 'default');
+      if ('error' in result) failures.push(`${probe.collection}: ${result.error}`);
+      else collections.push(result.collection);
+    }
+
     return {
-      collections: [],
-      note: `State introspection is not available for emulate-backed services. ${service} is served by an emulate child process; use its own API to inspect entities.`,
+      collections,
+      note: [
+        "Best-effort: read from the emulator's own list endpoints, so it shows what a client would see rather than its internal store.",
+        "`seeded` is always false — emulate's --seed is additive to its built-in defaults, so a response cannot say which is which.",
+        ...(failures.length ? [`Probes that did not answer: ${failures.join('; ')}.`] : []),
+      ].join(' '),
     };
+  }
+
+  private async probe(
+    baseUrl: string,
+    probe: StateProbe,
+    profile: string,
+  ): Promise<{ collection: StateSnapshot['collections'][number] } | { error: string }> {
+    try {
+      const response = await fetch(`${baseUrl}${probe.path}`, {
+        headers: probe.auth ? { authorization: `Bearer ${probe.auth}` } : {},
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) return { error: `HTTP ${response.status}` };
+      const body = (await response.json()) as unknown;
+      const items = probe.itemsAt ? (body as Record<string, unknown>)?.[probe.itemsAt] : body;
+      if (!Array.isArray(items)) return { error: `expected an array at "${probe.itemsAt || '(root)'}"` };
+
+      return {
+        collection: {
+          name: probe.collection,
+          count: items.length,
+          entries: items.map((item, index) => ({
+            key: String((item as Record<string, unknown>)?.[probe.keyField] ?? index),
+            profile,
+            seeded: false,
+            value: item,
+          })),
+        },
+      };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   ekbEntries(): { service: string; recipe: EndpointRecipe }[] {

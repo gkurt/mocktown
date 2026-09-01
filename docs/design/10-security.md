@@ -46,6 +46,18 @@ wrong; we must not.
   secrets). A `mocktown scrub audit` command re-scans the corpus after rule changes.
 - The seal report and issues embed requests — they flow through the same scrubber.
 
+*Amended 2026-09-01 by the phase-4 implementation:* **a body that is not valid UTF-8 cannot
+be scrubbed at all**, and the corpus now says so. Binary HTTP bodies and binary WebSocket
+frames are stored base64 and the row carries an `unscrubbable-binary` entry in its scrub
+summary, which `mocktown scrub audit` and the CLI's recording view both surface. Pattern
+rules cannot see inside protobuf or a compressed body; the honest response is to mark the
+hole rather than let a silent pass imply the body was checked. Text-vs-binary is decided by a
+UTF-8 round trip rather than by `content-type`, because a mislabelled body is exactly the
+case a header check gets wrong.
+
+The live feed carries no bodies at all — it drops query strings and runs path templates
+through the scrubber, since a credential in a path segment is a real pattern.
+
 ## Trust boundaries
 
 - **Project root CA**: generated per project, private key `0600` in the local data
@@ -55,6 +67,14 @@ wrong; we must not.
 - **Daemon API**: binds `127.0.0.1` only, with a per-session bearer token written to
   the data dir (protects against other local users / drive-by browser requests to
   localhost). Panels get the token injected by the GUI shell, never hardcoded.
+
+  *Amended 2026-09-01 by the phase-4 implementation:* the token is injected by the **daemon**
+  as it serves any HTML — the shell and panels alike — as a `<meta name="mocktown-boot">`
+  element, with `Cache-Control: no-store`. So a GUI build on disk carries no capability, and
+  the token never travels in a URL where browser and shell history would keep it. Panel
+  documents additionally get a CSP with no external origin in it
+  ([09-gui-plugins.md](09-gui-plugins.md)): they can talk to this daemon and nowhere else,
+  because what they can read is scrubbed traffic.
 - **Sandbox**: the guarantee direction is *inside → out* (agent can't reach prod).
   We do not claim the inverse (protecting the host from the agent) beyond what the
   container runtime provides — that's the sandbox vendor's job.

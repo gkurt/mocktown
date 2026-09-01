@@ -83,6 +83,59 @@ export interface MockRoute {
 }
 
 /**
+ * The upgrade request a socket handler is given. There is no body — a WebSocket handshake
+ * is a GET — so everything a mock can branch on is here.
+ */
+export interface MockSocketRequest {
+  path: string;
+  params: Record<string, string>;
+  query: Record<string, string>;
+  headers: Record<string, string>;
+  /** Subprotocols the client offered, in its order of preference. */
+  protocols: string[];
+  auth: string | null;
+}
+
+/** One frame, as the mock sees it. `data` is a string for text frames, bytes for binary. */
+export interface MockSocketMessage {
+  data: string | Uint8Array;
+  isBinary: boolean;
+}
+
+/**
+ * What a socket handler can do: the whole of `MockCtx` plus the connection itself. Sockets
+ * are the one place a mock is not request/response, so `send` is the only way to say
+ * anything and there is no return value to speak of.
+ */
+export interface MockSocketCtx extends MockCtx {
+  send(data: string | Uint8Array): void;
+  close(code?: number, reason?: string): void;
+  /** Per-connection scratch space. Reset when the socket closes, unlike `ctx.state`. */
+  readonly connection: Record<string, unknown>;
+}
+
+/**
+ * A mocked WebSocket channel (03-capture.md's deferred list, picked up in phase 4).
+ *
+ * Matched by path template exactly like a route, so `/v1/streams/{streamId}` works and the
+ * corpus's own path templating lines up with what a mock declares. A service with no
+ * matching channel rejects the upgrade and files an issue — the same loud failure an
+ * unmatched HTTP request gets, rather than a socket that connects and then says nothing,
+ * which is the hardest kind of mock bug to diagnose.
+ */
+export interface MockSocket {
+  /** Route template in corpus form: `/v1/streams/{streamId}`. */
+  path: string;
+  /** One line saying what this channel carries — it shows up in issues and the GUI. */
+  describe?: string;
+  /** Subprotocol to accept, when the recorded traffic negotiated one. */
+  protocol?: string;
+  onOpen?: (req: MockSocketRequest, ctx: MockSocketCtx) => void | Promise<void>;
+  onMessage?: (message: MockSocketMessage, req: MockSocketRequest, ctx: MockSocketCtx) => void | Promise<void>;
+  onClose?: (event: { code: number; reason: string }, req: MockSocketRequest, ctx: MockSocketCtx) => void | Promise<void>;
+}
+
+/**
  * A knob is an agent-declared configuration parameter. Declaration is a Zod schema, so
  * the GUI renders its form with no per-mock UI work (12-scenario-controls.md).
  */
@@ -114,6 +167,8 @@ export interface MockModule {
   /** The hostname this mock serves, e.g. `internal-billing.acme`. */
   service: string;
   routes: MockRoute[];
+  /** WebSocket channels this mock serves. Optional: most services have none. */
+  sockets?: MockSocket[];
   knobs?: KnobManifest;
   /**
    * Seed data per profile. Every project starts with at least `default` (typical data,

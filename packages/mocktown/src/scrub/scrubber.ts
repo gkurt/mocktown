@@ -204,6 +204,15 @@ export class Scrubber {
     return node;
   }
 
+  /**
+   * Pass 2 on a bare string, for the places that are neither a header nor a body: a feed
+   * summary, a drift diff line, a path segment. Placeholders stay consistent with the rest
+   * of the session because the registry is shared.
+   */
+  scrubText(text: string): string {
+    return this.scrubValue(text);
+  }
+
   /** Pass 1 for bodies: redact by field name, keeping the document's structure intact. */
   scrubBody(body: string, contentType: string): string {
     if (!body) return body;
