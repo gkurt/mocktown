@@ -9,7 +9,7 @@
  */
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
-import { captureEnv } from '#src/capture/launch.ts';
+import { bypassedByNoProxy, captureEnv } from '#src/capture/launch.ts';
 import { templatePath } from '#src/capture/normalize.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
@@ -20,7 +20,7 @@ import { openProjectDb, schema } from '#src/db/client.ts';
 import { type EnvArtifacts, generateEnv } from '#src/env/generate.ts';
 import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { type CapturedExchange, type CapturedSocket, FrontDoor, type WallHit } from '#src/frontdoor/controller.ts';
-import { type Route, type RoutingTable, routeForProvider } from '#src/frontdoor/routing.ts';
+import { escapingHosts, type Route, type RoutingTable, routeForProvider } from '#src/frontdoor/routing.ts';
 import { IssueEngine } from '#src/issues/engine.ts';
 import { EmulateProvider, emulateServiceId } from '#src/providers/emulate.ts';
 import { GeneratedProvider } from '#src/providers/generated.ts';
@@ -347,10 +347,18 @@ export class ProjectRuntime {
     // Full base URLs, not host:port — the route needs the provider's scheme as well, or
     // an https client reaches a cleartext emulator and gets a 502.
     const baseUrls = this.allBaseUrls();
+    const serving = this.mode.kind === 'serve';
+    const sealed = serving && this.mode.sealed;
+    const servedBy = this.providerNamesByService();
     const routes: Route[] = this.services().map((service) =>
       this.recordOverride.has(service.id)
         ? { host: service.id, mode: 'record' as const }
-        : routeForProvider(service.id, service.provider, baseUrls),
+        : routeForProvider(service.id, service.provider, baseUrls, {
+            serving,
+            sealed,
+            discovered: service.discovered,
+            servedBy: servedBy.get(service.id),
+          }),
     );
 
     return {
@@ -399,9 +407,10 @@ export class ProjectRuntime {
     };
   }
 
-  async stopRecord(): Promise<{ session: string | null; recorded: number; services: string[] }> {
+  async stopRecord(): Promise<{ session: string | null; recorded: number; services: string[]; warnings: string[] }> {
     const session = this.sessionId;
     const recorded = this.recordedCount;
+    const warnings = recorded === 0 ? this.emptyRecordingHints() : [];
     const services = session
       ? [
           ...new Set(
@@ -423,7 +432,29 @@ export class ProjectRuntime {
     this.mode = { kind: 'idle', sealed: false };
     await this.frontDoor?.stop();
     this.frontDoor = undefined;
-    return { session, recorded, services };
+    return { session, recorded, services, warnings };
+  }
+
+  /**
+   * Why a recording run captured nothing. Both causes are invisible from the outside —
+   * the app looks correctly configured and the front door reports no error — so the
+   * moment the count comes back zero is the only place to say it.
+   */
+  private emptyRecordingHints(): string[] {
+    const bypassed = this.services()
+      .map((service) => service.id)
+      .filter((host) => bypassedByNoProxy(host));
+    return [
+      'No exchange reached the front door. The usual cause is a client that ignores the proxy env vars — ' +
+        'anything on fetch/undici needs NODE_USE_ENV_PROXY=1, and Java needs the keystore flags (`mocktown env`).',
+      // Named when the registry already knows the service, described either way: a host
+      // that never got through is a host discovery never saw, so it cannot be listed.
+      (bypassed.length > 0
+        ? `NO_PROXY excludes ${bypassed.join(', ')}. `
+        : 'If the service is a `.localhost` name, NO_PROXY excludes it: ') +
+        'proxy clients match NO_PROXY by domain suffix, so the `localhost` entry that keeps loopback unproxied ' +
+        'also excludes every `*.localhost` name. Give the service a hostname outside `.localhost` to record it.',
+    ];
   }
 
   // ── Serve mode ──────────────────────────────────────────────────────────────
@@ -455,8 +486,20 @@ export class ProjectRuntime {
       proxyUrl,
       caCertPath: ca.certPath,
       env: captureEnv({ proxyUrl, caCertPath: ca.certPath }),
-      warnings: this.providers.flatMap((p) => p.warnings),
+      warnings: [...this.providers.flatMap((p) => p.warnings), ...this.escapeWarnings()],
     };
+  }
+
+  /**
+   * A served run that still reaches a real third-party API has to say so. The registry
+   * decision stands — this is the warning that stops it from being a silent one.
+   */
+  private escapeWarnings(): string[] {
+    return escapingHosts(this.routingTable()).map(
+      (host) =>
+        `${host} still reaches the real upstream: the registry says \`${this.services().find((s) => s.id === host)?.provider}\`. ` +
+        `Serve it with \`mocktown services set --id ${host} --provider generated:${host}\`, or \`--provider deny\` to wall it off.`,
+    );
   }
 
   private async startProviders(): Promise<void> {
@@ -911,6 +954,13 @@ export class ProjectRuntime {
   allBaseUrls(): Map<string, string> {
     const out = new Map<string, string>();
     for (const provider of this.providers) for (const [service, url] of provider.baseUrls()) out.set(service, url);
+    return out;
+  }
+
+  /** Which provider is serving each host right now, for routing and issue attribution. */
+  private providerNamesByService(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const provider of this.providers) for (const service of provider.baseUrls().keys()) out.set(service, provider.name);
     return out;
   }
 

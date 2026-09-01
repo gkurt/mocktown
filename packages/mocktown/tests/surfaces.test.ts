@@ -22,7 +22,7 @@ const { parseHar } = await import('#src/capture/har.ts');
 const { Recorder, startSession } = await import('#src/capture/recorder.ts');
 const { generateEnv, renderAgentsSection, renderEnvFile } = await import('#src/env/generate.ts');
 const { contract } = await import('#src/contract/index.ts');
-const { walkContract, inputShape } = await import('#src/contract/walk.ts');
+const { walkContract, inputShape, describedAs, fieldInfo } = await import('#src/contract/walk.ts');
 const { captureEnv } = await import('#src/capture/launch.ts');
 const { RENDERERS } = await import('#src/cli/render.ts');
 
@@ -268,5 +268,34 @@ describe("the contract's house rules are structural", () => {
   test('MCP tool names survive the dot-to-underscore flattening without colliding', () => {
     const names = procedures.map((p) => p.path.join('_'));
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  test('a described input field reaches the generated flag', () => {
+    // Zod 4 keeps `.describe()` text in `z.globalRegistry`, not on `_zod.def`. Reading the
+    // def compiles, type-checks and returns `undefined` for every field, which is how the
+    // whole CLI lost its flag help at once. This is the guard against reading it again.
+    const set = procedures.find((p) => p.path.join('.') === 'services.set')!;
+    const id = inputShape(set.inputSchema)!.id!;
+    expect(describedAs(id)).toBe('Hostname or logical service id');
+    expect(fieldInfo(id).description).toBe('Hostname or logical service id');
+  });
+
+  test('a union flag documents the forms it accepts', () => {
+    // `--provider generated` failing with a bare validation error taught nobody that the
+    // value wanted a qualifier. The accepted forms belong in the help text.
+    const set = procedures.find((p) => p.path.join('.') === 'services.set')!;
+    const provider = inputShape(set.inputSchema)!.provider!;
+    const { description } = fieldInfo(provider);
+    expect(description).toContain('generated:<name>');
+    expect(description).toContain('record');
+    expect(description).toContain('deny');
+  });
+
+  test('an optional field stays optional through the description lookup', () => {
+    const set = procedures.find((p) => p.path.join('.') === 'services.set')!;
+    const shape = inputShape(set.inputSchema)!;
+    expect(fieldInfo(shape.seed!).optional).toBe(true);
+    // A required field must stay required, or the CLI stops demanding it up front.
+    expect(fieldInfo(shape.id!).optional).toBe(false);
   });
 });

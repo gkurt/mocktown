@@ -30,21 +30,19 @@ export interface RoutingTable {
   fallthrough: 'record' | 'deny';
 }
 
-/**
- * Resolve one service registry entry into a front-door mode.
- *
- * @param providerBaseUrls service -> the base URL a running provider is listening on.
- */
-export function routeForProvider(host: string, provider: string, providerBaseUrls: Map<string, string>): Route {
-  if (provider === 'passthrough') return { host, mode: 'passthrough' };
-  if (provider === 'record') return { host, mode: 'record' };
-  if (provider === 'deny') return { host, mode: 'deny' };
+/** What the front door knows about a service beyond the provider the registry names. */
+export interface RouteContext {
+  /** Serve mode. A provider that is actually up outranks a pin nobody committed. */
+  serving?: boolean;
+  /** Sealed serve: no request may reach a real upstream, whatever the registry says. */
+  sealed?: boolean;
+  /** The registry row came from observed traffic, not from `mocktown.json`. */
+  discovered?: boolean;
+  /** Provider instance serving this host right now, for issue attribution. */
+  servedBy?: string;
+}
 
-  const baseUrl = providerBaseUrls.get(host);
-  // A configured provider that isn't running must not fall back to the real upstream.
-  // Denying is loud and files an issue; passing through would leak to production.
-  if (!baseUrl) return { host, mode: 'deny', provider };
-
+function mockRoute(host: string, baseUrl: string, provider: string): Route {
   const url = new URL(baseUrl);
   return {
     host,
@@ -53,6 +51,43 @@ export function routeForProvider(host: string, provider: string, providerBaseUrl
     targetProtocol: url.protocol === 'https:' ? 'https' : 'http',
     provider,
   };
+}
+
+/**
+ * Resolve one service registry entry into a front-door mode.
+ *
+ * @param providerBaseUrls service -> the base URL a running provider is listening on.
+ */
+export function routeForProvider(host: string, provider: string, providerBaseUrls: Map<string, string>, context: RouteContext = {}): Route {
+  const baseUrl = providerBaseUrls.get(host);
+
+  // The recorder pins every host it observes to `record`, so a service discovered during
+  // a recording run carries that pin into serve mode — where honouring it would forward a
+  // served request to the real upstream. A running provider outranks a pin nobody wrote
+  // down, and a discovered pin under seal is denied rather than allowed to escape.
+  if (context.serving && context.discovered && provider === 'record') {
+    if (baseUrl) return mockRoute(host, baseUrl, context.servedBy ?? provider);
+    if (context.sealed) return { host, mode: 'deny' };
+  }
+
+  if (provider === 'passthrough') return { host, mode: 'passthrough' };
+  if (provider === 'record') return { host, mode: 'record' };
+  if (provider === 'deny') return { host, mode: 'deny' };
+
+  // A configured provider that isn't running must not fall back to the real upstream.
+  // Denying is loud and files an issue; passing through would leak to production.
+  if (!baseUrl) return { host, mode: 'deny', provider };
+
+  return mockRoute(host, baseUrl, provider);
+}
+
+/**
+ * Services whose route still reaches a real third-party upstream. A committed `record` or
+ * `passthrough` is a decision we keep, but a served run must say out loud which hosts it
+ * is not mocking — silence is what made this class of escape hard to notice.
+ */
+export function escapingHosts(table: RoutingTable): string[] {
+  return table.routes.filter((route) => route.mode === 'record' || route.mode === 'passthrough').map((route) => route.host);
 }
 
 /** Stable signature, so the controller only re-applies rules when routing actually changed. */

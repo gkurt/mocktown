@@ -26,6 +26,24 @@ export interface LaunchEnvOptions {
 const NEVER_PROXIED = ['127.0.0.1', 'localhost', '::1'];
 
 /**
+ * Whether `NO_PROXY` sends this host straight past the front door.
+ *
+ * Proxy clients match `NO_PROXY` entries by domain suffix, so the `localhost` entry above
+ * also excludes every `*.localhost` name — a `.localhost` service silently bypasses
+ * capture and records nothing. The entry has to stay (an app calling its own
+ * `localhost:3000` must not be routed into the front door), so the escape hatch is to
+ * report the collision rather than to pretend it cannot happen.
+ */
+export function bypassedByNoProxy(host: string, noProxy: string[] = NEVER_PROXIED): boolean {
+  const name = host.replace(/:\d+$/, '').toLowerCase();
+  return noProxy.some((entry) => {
+    const rule = entry.replace(/^\./, '').toLowerCase();
+    if (!rule) return false;
+    return name === rule || name.endsWith(`.${rule}`);
+  });
+}
+
+/**
  * The env a recorded child process gets. Returned rather than applied so `mocktown env`
  * can render exactly the same set into `.env.mocktown` (05-redirection.md) — one
  * definition, so the launch wrapper and the generated file cannot drift.

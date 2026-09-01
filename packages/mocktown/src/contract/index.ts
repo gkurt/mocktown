@@ -120,7 +120,7 @@ export const contract = {
           ...ProjectInput,
           id: z.string().describe('Hostname or logical service id'),
           provider: ProviderRef,
-          seed: z.string().optional(),
+          seed: z.string().optional().describe('Path to a seed file, relative to the repo root'),
         }),
       )
       .output(withProject({ service: Service })),
@@ -241,7 +241,14 @@ export const contract = {
     stop: oc
       .route({ method: 'POST', path: '/record/stop', summary: 'Close the recording session' })
       .input(z.object({ ...ProjectInput }))
-      .output(withProject({ session: z.string().nullable(), recorded: z.number().int(), services: z.array(z.string()) })),
+      .output(
+        withProject({
+          session: z.string().nullable(),
+          recorded: z.number().int(),
+          services: z.array(z.string()),
+          warnings: z.array(z.string()),
+        }),
+      ),
   },
 
   serve: {

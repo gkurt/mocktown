@@ -237,7 +237,9 @@ export default defineMock({
   // The seed IS the reset target. Every project needs at least \`default\` and \`empty-org\`.
   seed: ({ state, profile }) => {
     if (profile === "empty-org") return;   // brand-new signup: zero of everything
-    // TODO: seed the entities the corpus shows this service holding.
+    // TODO: seed the entities the corpus shows this service holding, keyed by their id:
+    //   state.set("things", "thing_1", { id: "thing_1", … });
+    // \`set\` takes (collection, key, value) — a two-argument call throws at serve time.
   },
 
   routes: [

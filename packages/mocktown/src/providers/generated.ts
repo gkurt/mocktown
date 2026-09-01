@@ -72,7 +72,16 @@ export class GeneratedProvider implements Provider {
     this.host.setModules(mocks.map((m) => m.module));
     await this.host.start();
 
-    this.seedMissing(ctx);
+    // Seeding can fail on a defect in the mock, and a half-seeded mock is not servable.
+    // Dropping it here — after the host is up — keeps the failure identical to a module
+    // that would not import: the service is denied, with the reason on the provider.
+    const unseedable = this.seedMissing(ctx);
+    if (unseedable.length > 0) {
+      this.loaded = this.loaded.filter((m) => !unseedable.some((f) => f.service === m.module.service));
+      this.loadFailures = [...this.loadFailures, ...unseedable];
+      this.warnings = this.loadFailures.map((f) => `mock "${f.service}" failed to load: ${f.reason}`);
+      this.host.setModules(this.loaded.map((m) => m.module));
+    }
     return this.baseUrls();
   }
 
@@ -81,9 +90,10 @@ export class GeneratedProvider implements Provider {
    * (service, profile) and left alone afterwards — re-running it on every start would
    * wipe state the app built up during a session.
    */
-  private seedMissing(ctx: ProviderCtx): void {
+  private seedMissing(ctx: ProviderCtx): { service: string; file: string; reason: string }[] {
     const profiles = this.options.db.select().from(schema.profiles).all();
-    for (const { module } of this.loaded) {
+    const failed: { service: string; file: string; reason: string }[] = [];
+    for (const { module, file } of this.loaded) {
       if (!module.seed) continue;
       for (const profile of profiles) {
         const alreadySeeded = this.options.db
@@ -98,9 +108,16 @@ export class GeneratedProvider implements Provider {
           )
           .get();
         if (alreadySeeded) continue;
-        this.seedOne(ctx, module.service, profile.name);
+        try {
+          this.seedOne(ctx, module.service, profile.name);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          failed.push({ service: module.service, file, reason: `seed() threw for profile "${profile.name}": ${reason}` });
+          break; // one broken seed condemns the module; the other profiles add no information
+        }
       }
     }
+    return failed;
   }
 
   private seedOne(ctx: ProviderCtx, service: string, profile: string): void {
@@ -146,7 +163,14 @@ export class GeneratedProvider implements Provider {
           .delete(schema.mockState)
           .where(and(eq(schema.mockState.service, service), eq(schema.mockState.profile, profile)))
           .run();
-        this.seedOne(ctx, service, profile);
+        try {
+          this.seedOne(ctx, service, profile);
+        } catch (error) {
+          // A reset is something the caller asked for, so this one is loud rather than a
+          // load failure — but it names the mock, which the bare seed error does not.
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new Error(`seed() threw while resetting "${service}" (profile "${profile}"): ${reason}`);
+        }
       }
     }
   }

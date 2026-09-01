@@ -25,7 +25,7 @@ import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
 import { ProjectFile } from '#src/config/schema.ts';
 import { contract } from '#src/contract/index.ts';
-import { inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
+import { fieldInfo, inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
 import { readDaemonState } from '#src/daemon/server.ts';
 import { guiDist } from '#src/gui/serve.ts';
 
@@ -36,25 +36,6 @@ const program = new Command('mocktown')
   .option('--json', 'Emit the raw API response');
 
 // ── Flag generation ───────────────────────────────────────────────────────────
-
-/** Unwrap `.optional()` / `.default()` so the flag reflects the value's real type. */
-function coreType(field: any): { type: string; optional: boolean; description: string } {
-  let node = field;
-  let optional = false;
-  let description = node?._zod?.def?.description ?? '';
-  for (let depth = 0; depth < 8; depth++) {
-    const def = node?._zod?.def;
-    if (!def) break;
-    description ||= def.description ?? '';
-    if (def.type === 'optional' || def.type === 'default' || def.type === 'nullable' || def.type === 'pipe') {
-      if (def.type !== 'pipe') optional = true;
-      node = def.innerType ?? def.in ?? node;
-      continue;
-    }
-    return { type: def.type ?? 'string', optional, description };
-  }
-  return { type: 'string', optional, description };
-}
 
 const kebab = (name: string) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
@@ -67,7 +48,7 @@ function addOptions(command: Command, schema: z.ZodType, commandLine = false): v
     // --project on every command would defeat it.
     if (name === 'project' || name === 'source') continue;
 
-    const { type, optional, description } = coreType(field);
+    const { type, optional, description } = fieldInfo(field);
     const flag = type === 'boolean' ? `--${kebab(name)}` : `--${kebab(name)} <value>`;
     const option = new Option(flag, description || undefined);
     // Path parameters and other required inputs are mandatory, so a missing one fails
@@ -86,7 +67,7 @@ function coerceInput(schema: z.ZodType, options: Record<string, unknown>): Recor
   for (const [name, value] of Object.entries(options)) {
     const field = shape[name];
     if (value === undefined || !field) continue;
-    const { type } = coreType(field);
+    const { type } = fieldInfo(field);
     if (type === 'object' || type === 'record' || type === 'array') {
       // Nested inputs (seed editors, knob values, profile credentials) arrive as JSON on
       // one flag — spike 02 flagged this as the open question; JSON is the honest answer.
@@ -116,7 +97,7 @@ const collapsedProcedures = new Set(
     .filter((p) => p.path.length === 2 && p.path[1] === 'get')
     .filter((p) => {
       const shape = inputShape(p.inputSchema) ?? {};
-      return Object.entries(shape).every(([name, field]) => name === 'project' || name === 'source' || coreType(field).optional);
+      return Object.entries(shape).every(([name, field]) => name === 'project' || name === 'source' || fieldInfo(field).optional);
     })
     .map((p) => p.path.join('.')),
 );
@@ -314,6 +295,8 @@ recordCommand
     const stopped = await client.record.stop({ project: project.name });
     console.log(`\n${stopped.recorded} exchange${stopped.recorded === 1 ? '' : 's'} recorded across ${stopped.services.length} service(s)`);
     for (const service of stopped.services) console.log(`  ${service}`);
+    if (stopped.warnings.length > 0) console.log('\nwarnings');
+    for (const warning of stopped.warnings) console.log(`  ! ${warning}`);
     process.exitCode = result.exitCode;
   });
 

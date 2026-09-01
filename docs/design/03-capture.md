@@ -14,6 +14,16 @@ the **front door**. Its behavior per service is a mode, not a separate binary:
 | `passthrough` | Forward without recording (explicitly allowlisted hosts only) |
 | `deny` | Refuse + file an issue (default for unknown hosts in sealed mode) |
 
+**A discovered `record` pin is not a decision.** The recorder registers every host it
+observes with `provider: record`, so every service learned during a recording run arrives
+in serve mode still pinned to "forward to the real upstream" — which is exactly the silent
+escape the fallthrough rule below exists to prevent, except reached through a *known* host
+rather than an unknown one. In serve mode a running provider therefore outranks a pin
+nobody wrote to `mocktown.json`, and a discovered pin with no provider up is denied under
+seal rather than allowed out. A pin that *is* committed to the file is a decision and
+stands — but `serve start` names every host still reaching a real upstream in its warnings,
+so the escape is never the quiet option.
+
 **Implementation rule found in phase 0** ([spikes/05-scrubber](../../spikes/05-scrubber/FINDINGS.md)):
 Mockttp rules stop matching once consumed unless `.always()` is set. A forwarding rule that
 silently expires sends subsequent traffic to the **real** upstream — the worst failure mode
@@ -56,6 +66,12 @@ The escalation ladder — each rung covers the previous rung's failure case:
    GitHub API and came back with a genuine request id. Without this knob a large and
    growing class of modern SDKs escapes the front door in host mode while appearing
    correctly configured.
+   **`NO_PROXY` takes `*.localhost` with it.** The list always carries `localhost`, because
+   an app calling its own `localhost:3000` must not be routed into the front door — and
+   proxy clients match `NO_PROXY` by domain suffix, so `billing.localhost` is excluded too.
+   A `.localhost` upstream therefore records nothing while looking perfectly wired up. The
+   entry cannot be dropped, so `record stop` reports the collision by name when a run
+   captures zero exchanges. Give a test upstream a hostname outside `.localhost`.
 2. **Launched browser** — for web-app client traffic: `mocktown browser` starts a
    Chromium-family browser on a fresh profile with `--proxy-server` set. *Trust is
    narrower than "in that profile"* (phase 3): the CA is passed as an

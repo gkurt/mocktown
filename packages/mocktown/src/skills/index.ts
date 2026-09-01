@@ -66,7 +66,7 @@ const HOUSE_RULES = `
 export const SKILLS: Skill[] = [
   {
     name: 'generate-mock',
-    version: '1.0.0',
+    version: '1.1.0',
     summary: 'Build a generated mock for one service from its recorded corpus.',
     body: `
 # Generate a mock from the corpus
@@ -116,6 +116,24 @@ export default defineMock({
 \`req\` gives you \`params\`, \`query\`, \`headers\`, a parsed \`body\` and \`auth\`.
 \`ctx\` gives you \`profile\`, \`prng\`, \`knobs\`, \`state\`, \`fakeSecret()\` and \`signIn()\`.
 A socket handler's \`ctx\` adds \`send()\`, \`close()\` and \`connection\`.
+
+## The state store
+
+Every entry is addressed by **collection *and* key** — \`set\` takes three arguments, not
+two. A two-argument \`set\` is the most common way a mock throws on its very first request.
+
+\`\`\`ts
+state.set(collection, key, value)          // e.g. state.set("invoices", inv.id, inv)
+state.get<T>(collection, key)              // T | undefined
+state.list<T>(collection)                  // [{ key, value }]
+state.delete(collection, key)              // boolean
+state.count(collection)                    // number
+state.nextId(collection, prefix?)          // monotonic, stable, addressable
+\`\`\`
+
+A throwing \`seed()\` is not fatal to the daemon, but it does leave your service **denied**
+with the reason in \`mocktown providers list\` — check there first if a mock you just wrote
+is not answering.
 
 ## Done means
 

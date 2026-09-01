@@ -88,6 +88,7 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `session ${r.session ?? '(none)'} closed`,
     `${r.recorded} exchange${r.recorded === 1 ? '' : 's'} recorded across ${r.services.length} service${r.services.length === 1 ? '' : 's'}`,
     ...r.services.map((s: string) => `  ${s}`),
+    ...(r.warnings.length ? ['', 'warnings', ...r.warnings.map((w: string) => `  ! ${w}`)] : []),
   ],
 
   'serve.start': (r) => [

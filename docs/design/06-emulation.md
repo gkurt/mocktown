@@ -84,6 +84,12 @@ recordings corpus (03) ──▶ agent generates a mock module ──▶ served 
   mock and diffs, and the issue loop for everything that slips through.
 - Generated mocks are committed to the repo (they contain no recorded payloads beyond
   scrubbed, reviewed fixtures) so the team and CI share them.
+- **Every way a mock can be defective ends the same way: that service is denied, with the
+  reason on the provider.** A module that will not import, one with no `service`, and one
+  whose `seed()` throws are all load failures — `serve start` still comes up, the other
+  mocks are unaffected, and `mocktown providers list` carries the reason. A half-written
+  mock is the *normal* state of this loop, so a mock defect must never be able to take the
+  daemon's serve path down with it.
 
 ### 3. Passthrough
 

@@ -43,13 +43,25 @@ that exists. `mocktown scrub audit` re-scans it with the current rules.
    the corpus.
 3. A coding agent fills in the module — `mocktown skills get --name generate-mock` is the
    prompt pack for exactly that job.
-4. `mocktown serve start --sealed` serves it. Anything unserved is **denied loudly** and
-   filed: `mocktown issues list`.
+4. `mocktown serve start --sealed` serves it — a mock you have written takes over the
+   service the recorder discovered, without a registry edit. Anything unserved is **denied
+   loudly** and filed: `mocktown issues list`.
 5. `mocktown mocks verify --service <host>` replays the corpus against the mock,
    comparing status class and response *shape* — never values.
 
 Resolving an issue is a patch to a mock plus `mocktown issues resolve --id <id>`. A fix
 that does not hold reopens the same issue rather than filing a new one.
+
+A mock that is broken — will not import, or throws while seeding — leaves *its* service
+denied and says why in `mocktown providers list`; the rest keep serving. Any host still
+pointed at a real upstream is named in `mocktown serve start`'s warnings, so serving and
+escaping never look alike.
+
+> **Recording a `.localhost` upstream captures nothing.** `NO_PROXY` always carries
+> `localhost` so an app can still reach its own local services, and proxy clients match it
+> by domain suffix — which takes every `*.localhost` name with it. `mocktown record stop`
+> says so when a run records zero exchanges. Give a test upstream a name outside
+> `.localhost`.
 
 ## The seal
 

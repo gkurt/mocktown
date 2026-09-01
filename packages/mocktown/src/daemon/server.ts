@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { OpenAPIGenerator } from '@orpc/openapi';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
+import { ORPCError, onError } from '@orpc/server';
 import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 import { daemonStateFile, globalConfigDir } from '#src/config/paths.ts';
 import { loadGlobalConfig } from '#src/config/project.ts';
@@ -22,7 +23,44 @@ import { panelFile } from '#src/gui/panels.ts';
 import { assetPath, guiDist, htmlResponse, PANEL_CSP, SHELL_CSP } from '#src/gui/serve.ts';
 import { findFreePort } from '#src/util/ports.ts';
 
-const handler = new OpenAPIHandler(router);
+/**
+ * A thrown `Error` reaches the client as its message, not as `Internal server error`.
+ *
+ * oRPC's default is to swallow non-`ORPCError` throws so a public API cannot leak
+ * internals. This API is bound to `127.0.0.1` behind a per-session bearer token and its
+ * only callers are the CLI, the GUI and the MCP server on the same machine, so the
+ * trade-off runs the other way: the message is the whole diagnostic. Without this, a
+ * defect in a generated mock — the routine case this loop is built around — surfaced as
+ * `error: Internal server error` with nothing written anywhere.
+ */
+export function surfaceUnexpected(error: unknown): never {
+  // A deliberate failure is already an ORPCError carrying its own message and status;
+  // rethrowing it untouched keeps `NOT_FOUND` and `CONFLICT` meaning what they say.
+  if (error instanceof ORPCError) throw error;
+  throw new ORPCError('INTERNAL_SERVER_ERROR', {
+    message: error instanceof Error ? error.message : String(error),
+    cause: error,
+  });
+}
+
+const handler = new OpenAPIHandler(router, {
+  interceptors: [
+    onError((error) => {
+      if (error instanceof ORPCError) return;
+      // The daemon is detached, so its stderr is the only place a stack survives.
+      console.error(error);
+    }),
+  ],
+  clientInterceptors: [
+    async ({ next }) => {
+      try {
+        return await next();
+      } catch (error) {
+        surfaceUnexpected(error);
+      }
+    },
+  ],
+});
 
 export const openapi = await new OpenAPIGenerator({ schemaConverters: [new ZodToJsonSchemaConverter()] }).generate(contract, {
   info: {

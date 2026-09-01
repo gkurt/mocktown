@@ -13,6 +13,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { ORPCError } from '@orpc/client';
 
 const root = join(import.meta.dir, '.tmp-gui');
 process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
@@ -21,7 +22,7 @@ process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 const workspace = join(root, 'app');
 const shell = join(root, 'shell');
 
-const { startDaemon } = await import('#src/daemon/server.ts');
+const { startDaemon, surfaceUnexpected } = await import('#src/daemon/server.ts');
 const { ensureRegistered, resolveProject } = await import('#src/config/project.ts');
 const { assetPath, injectBoot } = await import('#src/gui/serve.ts');
 const { listPanels, panelFile } = await import('#src/gui/panels.ts');
@@ -74,6 +75,22 @@ test('the API refuses everything without the token, and documents itself without
 
   const allowed = await fetch(`${origin}/api/v1/status?project=gui-test`, { headers: { authorization: `Bearer ${daemon.token}` } });
   expect(allowed.status).toBe(200);
+});
+
+test('an unexpected throw reaches the caller as its message, not as `Internal server error`', () => {
+  // The daemon is local, token-gated and single-user, so the message is worth more than
+  // the concealment oRPC defaults to. Without this a defective generated mock — the
+  // routine case of this loop — surfaced as `error: Internal server error` and nothing else.
+  expect(() => surfaceUnexpected(new Error('seed() threw for profile "default": bad binding'))).toThrow(
+    'seed() threw for profile "default": bad binding',
+  );
+
+  // A deliberate failure keeps its own code, or `NOT_FOUND` would become a 500.
+  const deliberate = new ORPCError('NOT_FOUND', { message: 'no issue "iss_1"' });
+  expect(() => surfaceUnexpected(deliberate)).toThrow(deliberate);
+
+  // A non-Error throw still has to say something.
+  expect(() => surfaceUnexpected('a bare string')).toThrow('a bare string');
 });
 
 test('the shell is served with an injected token and a same-origin CSP', async () => {
