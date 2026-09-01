@@ -27,6 +27,7 @@ import { ProjectFile } from '#src/config/schema.ts';
 import { contract } from '#src/contract/index.ts';
 import { contractSignature, fieldInfo, inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
 import { readDaemonState } from '#src/daemon/server.ts';
+import { shellAssignment } from '#src/env/generate.ts';
 import { guiDist } from '#src/gui/serve.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -284,7 +285,7 @@ recordCommand
 
     if (argv.length === 0) {
       console.log('front door is up; stop with `mocktown record stop`. Env for the app under test:');
-      for (const [key, value] of Object.entries(started.env)) console.log(`  export ${key}=${value}`);
+      for (const [key, value] of Object.entries(started.env)) console.log(`  export ${shellAssignment(key, String(value))}`);
       return;
     }
 

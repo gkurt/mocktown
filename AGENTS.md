@@ -67,7 +67,9 @@ subsystem you are touching, not all of them.
 - **The front door runs Mockttp in a Node sidecar, not in Bun** — its native TLS path
   segfaults under Bun (`spikes/01-mockttp-bun/FINDINGS.md`). The sidecar must stay a real
   `node` process, which is why `bunfig.toml` omits `[run] bun = true`: that setting shims
-  `node` to Bun and silently breaks the front door.
+  `node` to Bun and silently breaks the front door. `bun run` does the same shim on its own
+  when no Node is installed; the sidecar refuses to start under Bun, so the test suite
+  needs a real Node on PATH or named by `MOCKTOWN_NODE`.
 - **Nothing reaches a real upstream silently** — the worst failure this product has. Every
   Mockttp rule sets `.always()` (one that expires forwards upstream), the fallthrough
   denies loudly, and any new path that resolves a service to a mode defaults to deny rather

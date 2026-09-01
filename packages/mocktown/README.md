@@ -17,6 +17,10 @@ From the repo root, install and put `mocktown` on your PATH:
 bun install && cd packages/mocktown && bun link
 ```
 
+The front door is Mockttp in a Node process, so a `node` binary has to be on the PATH of
+the shell that first starts the daemon — Bun alone is not enough. `MOCKTOWN_NODE=<path>`
+names one explicitly.
+
 Then, in the app you want to mock:
 
 ```bash

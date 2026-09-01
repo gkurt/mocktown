@@ -14,6 +14,17 @@
  */
 import * as mockttp from 'mockttp';
 
+// `bun run` puts a `node` on PATH that is Bun in disguise when no Node is installed, so
+// the sidecar would come up on the runtime it exists to avoid — and pass every test that
+// stays off the HTTP/2 and WebSocket paths. Refusing here keeps the failure loud.
+if (process.versions.bun) {
+  console.error(
+    'front door sidecar: `node` resolved to Bun (bun run shims it when Node is not installed). ' +
+      'The proxy must run on real Node; install one on PATH or set MOCKTOWN_NODE to its path.',
+  );
+  process.exit(3);
+}
+
 const adminPort = Number(process.argv[2]);
 if (!Number.isInteger(adminPort) || adminPort <= 0) {
   console.error('usage: node sidecar.ts <adminPort>');

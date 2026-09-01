@@ -116,7 +116,7 @@ export interface WallHit {
 export interface FrontDoorOptions {
   ca: { cert: string; key: string };
   port?: number;
-  /** Node binary to run the sidecar with; the distribution bundles its own. */
+  /** Node binary to run the sidecar with; `node` from the daemon's PATH when unset. */
   nodePath?: string;
 }
 
@@ -194,27 +194,43 @@ export class FrontDoor {
     this.adminPort = await findFreePort(4700);
     this.port = this.options.port ?? (await findFreePort(4400));
 
-    this.sidecar = spawn(this.options.nodePath ?? 'node', [sidecarPath, String(this.adminPort)], {
+    const nodePath = this.options.nodePath ?? 'node';
+    const sidecar = spawn(nodePath, [sidecarPath, String(this.adminPort)], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    this.sidecar = sidecar;
 
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`front door sidecar did not start within 20s\n${this.log.join('')}`)), 20_000);
-      const onData = (buf: Buffer) => {
-        const text = buf.toString();
-        this.log.push(text);
-        if (text.includes('"ready":true')) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`front door sidecar did not start within 20s\n${this.log.join('')}`)), 20_000);
+        const onData = (buf: Buffer) => {
+          const text = buf.toString();
+          this.log.push(text);
+          if (text.includes('"ready":true')) {
+            clearTimeout(timer);
+            resolve();
+          }
+        };
+        sidecar.stdout?.on('data', onData);
+        sidecar.stderr?.on('data', onData);
+        sidecar.once('exit', (code) => {
           clearTimeout(timer);
-          resolve();
-        }
-      };
-      this.sidecar!.stdout?.on('data', onData);
-      this.sidecar!.stderr?.on('data', onData);
-      this.sidecar!.once('exit', (code) => {
-        clearTimeout(timer);
-        reject(new Error(`front door sidecar exited with code ${code}\n${this.log.join('')}`));
+          reject(new Error(`front door sidecar exited with code ${code}\n${this.log.join('')}`));
+        });
+        // A spawn failure is an `error` event, not an exit, and an unhandled one takes the
+        // daemon down with it — which is how a Bun-only machine used to surface: the CLI saw
+        // a closed socket and nothing else. The commonest cause gets named.
+        sidecar.once('error', (error: NodeJS.ErrnoException) => {
+          clearTimeout(timer);
+          reject(error.code === 'ENOENT' ? new Error(missingNodeMessage(nodePath)) : error);
+        });
       });
-    });
+    } catch (error) {
+      // Otherwise `isRunning` keeps pointing at a child that never ran and the next start
+      // is refused, so a fixed PATH would still need a daemon restart.
+      this.sidecar = undefined;
+      throw error;
+    }
 
     this.proxy = mockttp.getRemote({
       adminServerUrl: `http://127.0.0.1:${this.adminPort}`,
@@ -503,6 +519,14 @@ export class FrontDoor {
       child.kill('SIGTERM');
     });
   }
+}
+
+function missingNodeMessage(nodePath: string): string {
+  return (
+    `front door sidecar: cannot run \`${nodePath}\` — not found. The front door is Mockttp in a real Node ` +
+    'process (02-architecture.md), so the daemon needs a Node binary: install one on the PATH the daemon was started ' +
+    'with, or set MOCKTOWN_NODE to its path, then `mocktown daemon stop` so the next command restarts the daemon with it.'
+  );
 }
 
 function requestStepFor(route: Route) {

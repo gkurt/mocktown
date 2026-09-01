@@ -5,6 +5,7 @@
  * the contract has to carry it, which is what keeps agents and humans looking at the same
  * truth.
  */
+import { shellAssignment } from '#src/env/generate.ts';
 
 const pad = (value: unknown, width: number) => String(value ?? '').padEnd(width);
 
@@ -81,7 +82,7 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `CA:    ${r.caCertPath}`,
     '',
     'point a process at it with:',
-    ...Object.entries(r.env).map(([key, value]) => `  export ${key}=${value}`),
+    ...Object.entries(r.env).map(([key, value]) => `  export ${shellAssignment(key, String(value))}`),
     ...(r.warnings.length ? ['', 'warnings', ...r.warnings.map((w: string) => `  ! ${w}`)] : []),
   ],
 

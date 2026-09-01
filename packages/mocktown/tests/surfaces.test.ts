@@ -157,6 +157,20 @@ describe('mocktown env', () => {
     expect(renderEnvFile('surfaces-test', artifacts.variables)).toContain('NODE_USE_ENV_PROXY=1');
   });
 
+  test('the env file survives the paths macOS actually uses', () => {
+    // The documented loader is `. ./.env.mocktown`; the default data dir sits under
+    // "Application Support", so an unquoted value made the tail of the line a command.
+    const caPath = "/Users/dev/Library/Application Support/mocktown/it's/ca.pem";
+    mkdirSync(root, { recursive: true });
+    const file = join(root, 'env-quoting.env');
+    writeFileSync(file, renderEnvFile('surfaces-test', { MOCKTOWN_CA: caPath, PLAIN: 'http://127.0.0.1:4400' }));
+    const shell = Bun.spawnSync(['sh', '-c', `set -a && . "$1" && set +a && printf '%s\\n%s' "$MOCKTOWN_CA" "$PLAIN"`, 'sh', file]);
+    expect(shell.stderr.toString()).toBe('');
+    expect(shell.stdout.toString()).toBe(`${caPath}\nhttp://127.0.0.1:4400`);
+    // Quoting is reserved for values that need it, so the common line still reads as before.
+    expect(renderEnvFile('surfaces-test', { PLAIN: 'http://127.0.0.1:4400' })).toContain('PLAIN=http://127.0.0.1:4400');
+  });
+
   test('the AGENTS.md section pins the project rather than trusting the global default', () => {
     const artifacts = generateEnv(inputs);
     const section = renderAgentsSection('surfaces-test', artifacts.agentTasks, artifacts.report);

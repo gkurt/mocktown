@@ -180,8 +180,10 @@ export class ProjectRuntime {
   private async ensureFrontDoor(): Promise<FrontDoor> {
     if (this.frontDoor?.isRunning) return this.frontDoor;
     const ca = await ensureProjectCa(this.project.name);
+    // Which Node runs the proxy is a fact about the machine, not the project, so it comes
+    // from the daemon's own environment — inherited from whichever command started it.
     this.frontDoor = new FrontDoor(
-      { ca, port: this.project.local.frontDoorPort },
+      { ca, port: this.project.local.frontDoorPort, nodePath: process.env.MOCKTOWN_NODE },
       {
         onExchange: (exchange) => this.onExchange(exchange),
         onSocket: (socket) => this.onSocket(socket),

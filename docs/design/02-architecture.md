@@ -46,7 +46,9 @@ This discipline is what makes the later plugin model nearly free
 sidecar.** The daemon, API, CLI, and generated mocks run on Bun; generated mocks are plain
 Bun modules, which keeps the artifact agents produce and patch in one language. The proxy
 runs as a separate Node process, driven by the daemon over Mockttp's own admin-server
-protocol (a supported configuration, not a workaround).
+protocol (a supported configuration, not a workaround). The daemon runs whatever `node`
+its PATH resolves, or the binary `MOCKTOWN_NODE` names; a Bun-only machine gets a named
+error from `record start` rather than a dead daemon.
 *Amended 2026-08-31 by the phase-0 spike* ([spikes/01-mockttp-bun](../../spikes/01-mockttp-bun/FINDINGS.md)):
 single-runtime Bun was the original decision, but Mockttp under Bun loses HTTP/2 (Bun's
 `SNICallback` suppresses ALPN) and WebSockets (Bun's builtin `ws` shadows the npm package
