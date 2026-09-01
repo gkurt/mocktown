@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { ORPCError } from '@orpc/client';
 import { implement } from '@orpc/server';
 import { and, desc, eq } from 'drizzle-orm';
+import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
@@ -19,12 +20,16 @@ import { contract } from '#src/contract/index.ts';
 import type { ProviderRef, Recording, Service } from '#src/contract/schemas.ts';
 import { runtimeFor } from '#src/daemon/runtime.ts';
 import { schema } from '#src/db/client.ts';
-import { generateEnv, renderAgentsSection, renderEnvFile, writeAgentsSection } from '#src/env/generate.ts';
+import { renderAgentsSection, renderEnvFile, writeAgentsSection } from '#src/env/generate.ts';
+import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { exportCorpus, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
 import { scaffoldMock } from '#src/mocks/scaffold.ts';
 import { verifyRecordings } from '#src/mocks/verify.ts';
+import { writeDevcontainer } from '#src/sandbox/devcontainer.ts';
 import { setKnobs } from '#src/scenario/knobs.ts';
 import { listProfiles, mintProfileSession } from '#src/scenario/profiles.ts';
+import { certifySeal } from '#src/seal/certify.ts';
+import { configHash, currentCommit, latestStamp, stalenessOf } from '#src/seal/stamp.ts';
 import { findSkill, SKILLS } from '#src/skills/index.ts';
 import { id } from '#src/util/id.ts';
 
@@ -389,12 +394,12 @@ export const router = os.router({
   env: {
     get: os.env.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      return { project: runtime.name, ...envArtifacts(runtime), written: [] };
+      return { project: runtime.name, ...runtime.envArtifacts(), written: [] };
     }),
 
     write: os.env.write.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const artifacts = envArtifacts(runtime);
+      const artifacts = runtime.envArtifacts();
       const paths = runtime.resolved.paths;
       if (!paths)
         throw new ORPCError('BAD_REQUEST', {
@@ -407,6 +412,150 @@ export const router = os.router({
         writeAgentsSection(paths.root, renderAgentsSection(runtime.name, artifacts.agentTasks, artifacts.report)),
       ];
       return { project: runtime.name, ...artifacts, written };
+    }),
+  },
+
+  sandbox: {
+    get: os.sandbox.get.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      return { project: runtime.name, ...(await runtime.sandboxStatus()) };
+    }),
+
+    up: os.sandbox.up.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      return { project: runtime.name, ...(await runtime.sandboxUp({ mode: input.mode, rebuild: input.rebuild })) };
+    }),
+
+    down: os.sandbox.down.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      return { project: runtime.name, ...(await runtime.sandboxDown()) };
+    }),
+
+    exec: os.sandbox.exec.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const result = await runtime.sandboxExec(input.command);
+      return { project: runtime.name, ok: result.exitCode === 0, ...result };
+    }),
+
+    /**
+     * The deny-wall probe is only half a check. 04-sandbox.md's guarantee is that *every
+     * escape attempt is evidence*, so the issue the probe should have filed is confirmed
+     * here — a wall that denies silently would pass the network checks and still break the
+     * loop the product is built around.
+     */
+    verify: os.sandbox.verify.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const result = await runtime.sandboxVerify();
+      const wallHitFiled = result.probedHost ? runtime.issues.list({}).some((issue) => issue.service === result.probedHost) : false;
+      const checks = result.probedHost
+        ? [
+            ...result.checks,
+            {
+              name: 'The denied request became an issue',
+              status: (wallHitFiled ? 'pass' : 'fail') as 'pass' | 'fail',
+              detail: wallHitFiled
+                ? `filed against ${result.probedHost}`
+                : 'the request was denied but nothing was filed, so the escape left no evidence',
+            },
+          ]
+        : result.checks;
+
+      return {
+        project: runtime.name,
+        ok: checks.every((check) => check.status !== 'fail'),
+        checks,
+        inconclusive: checks.filter((check) => check.status === 'inconclusive').length,
+        wallHitFiled,
+      };
+    }),
+
+    devcontainer: os.sandbox.devcontainer.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const paths = runtime.resolved.paths;
+      if (!paths) {
+        throw new ORPCError('CONFLICT', {
+          message: 'the devcontainer files are written into the repo, so this needs a workspace. Run `mocktown init` there first.',
+        });
+      }
+      const status = await runtime.sandboxStatus();
+      if (!status.running || !status.network || !status.relayIp) {
+        throw new ORPCError('CONFLICT', {
+          message:
+            'the generated devcontainer joins the sealed network by name, so the sandbox has to be up to name it. ' +
+            'Run `mocktown sandbox up` first.',
+        });
+      }
+      const ca = await ensureProjectCa(runtime.name);
+      const artifacts = writeDevcontainer(paths.root, {
+        project: runtime.name,
+        caCert: ca.cert,
+        browser: status.browser,
+        network: status.network,
+        relayIp: status.relayIp,
+      });
+      return { project: runtime.name, ...artifacts };
+    }),
+  },
+
+  seal: {
+    get: os.seal.get.handler(({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const stamp = latestStamp(runtime.db);
+      const flows = runtime.resolved.file?.seal.flows ?? [];
+      const current = {
+        commit: currentCommit(runtime.resolved.workspace),
+        configHash: configHash({
+          services: Object.fromEntries(runtime.services().map((s) => [s.id, s.provider])),
+          envVars: Object.keys(runtime.envArtifacts().variables),
+          flows,
+        }),
+      };
+      const stale = stalenessOf(stamp, current);
+      return {
+        project: runtime.name,
+        // A stale stamp is not a pass. Treating "sealed once, against a different
+        // configuration" as sealed is how a new dependency reaches production behind a
+        // green CI check (05-redirection.md).
+        ok: Boolean(stamp?.sealed) && stale.length === 0,
+        stamp,
+        stale,
+        flows,
+        ...current,
+      };
+    }),
+
+    verify: os.seal.verify.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      return { project: runtime.name, ...(await certifySeal(runtime, { flows: input.flows, rebuild: input.rebuild })) };
+    }),
+  },
+
+  browser: {
+    launch: os.browser.launch.handler(async ({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const frontDoor = runtime.frontDoorStatus();
+      if (!frontDoor.running || !frontDoor.port) {
+        throw new ORPCError('CONFLICT', {
+          message:
+            'the launched browser points at the front door, which is not running. Start it with `mocktown record start` ' +
+            'to capture what the browser does, or `mocktown serve start` to browse against mocks.',
+        });
+      }
+      const ca = await ensureProjectCa(runtime.name);
+      const launched = launchBrowser({
+        proxyUrl: `http://127.0.0.1:${frontDoor.port}`,
+        caCert: ca.cert,
+        profileDir: projectPaths(runtime.name).browserProfile,
+        url: input.url,
+        executable: input.executable,
+      });
+      return {
+        project: runtime.name,
+        ...launched,
+        note:
+          'This window is outside the sandbox boundary, so its traffic is captured cooperatively and best-effort. ' +
+          'Only the sandbox carries the no-egress guarantee (04-sandbox.md).',
+      };
     }),
   },
 
@@ -550,20 +699,3 @@ export const router = os.router({
 });
 
 export type Router = typeof router;
-
-/** Both env procedures generate the same artifacts; only `write` puts them on disk. */
-function envArtifacts(runtime: ReturnType<typeof runtimeFor>) {
-  const frontDoor = runtime.frontDoorStatus();
-  return generateEnv({
-    project: runtime.name,
-    proxyUrl: `http://127.0.0.1:${frontDoor.port ?? runtime.resolved.local.frontDoorPort ?? 4400}`,
-    caCertPath: projectPaths(runtime.name).caCert,
-    baseUrls: runtime.allBaseUrls(),
-    ekb: runtime.db
-      .select()
-      .from(schema.ekb)
-      .all()
-      .map((row) => ({ ...row })),
-    services: runtime.services().map((s) => s.id),
-  });
-}

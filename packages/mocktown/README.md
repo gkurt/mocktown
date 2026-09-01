@@ -3,8 +3,9 @@
 Record an app's outbound traffic, serve it back as stateful mocks, and keep those mocks
 alive as the real services change.
 
-This package is the whole product as of phases 1–2: the daemon, the front door, the
-corpus, the providers, the issue engine, and the three surfaces (CLI, HTTP API, MCP).
+This package is the whole product as of phases 1–3: the daemon, the front door, the
+corpus, the providers, the issue engine, the sealed sandbox, and the three surfaces (CLI,
+HTTP API, MCP).
 Design rationale lives in [`docs/design`](../../docs/design/README.md) — read the file for
 the subsystem you are touching, not all of them.
 
@@ -50,6 +51,24 @@ that exists. `mocktown scrub audit` re-scans it with the current rules.
 Resolving an issue is a patch to a mock plus `mocktown issues resolve --id <id>`. A fix
 that does not hold reopens the same issue rather than filing a new one.
 
+## The seal
+
+Everything above is cooperative: an SDK that ignores proxy variables reaches the real API
+without ever touching the front door. The sandbox is where that stops being possible.
+
+```bash
+mocktown sandbox up              # sealed network, DNS catch-all, CA in the trust store
+mocktown sandbox exec -- bun test
+mocktown sandbox verify          # the escape attempts, against a negative control
+mocktown seal verify             # run the flows inside, stamp the result — exits non-zero
+```
+
+Inside the boundary there is no route out except the front door, so an unregistered
+dependency hits the deny wall and becomes an issue instead of reaching production. That is
+also why `mocktown seal verify` refuses to run outside the sandbox: with no container
+engine it reports `unverifiable`, never a pass. `mocktown sandbox devcontainer` writes the
+same boundary as a devcontainer feature for a repo that already has one.
+
 ## Layout
 
 | Path | What lives there |
@@ -63,6 +82,8 @@ that does not hold reopens the same issue rather than filing a new one.
 | `src/mocks/` | The public mock-authoring API, matching/diagnosis, corpus export, replay verify |
 | `src/issues/` | The issue engine and the `.mocktown/issues` file queue |
 | `src/db/` | Drizzle schema and the per-project SQLite client |
+| `src/sandbox/` | The container engine seam, the generated images, the topology, the escape-attempt harness |
+| `src/seal/` | Seal certification and its staleness-aware stamp |
 | `src/skills/` | The prompt packs shipped for the recurring agent jobs |
 
 ## House rules worth knowing before you edit
@@ -83,6 +104,11 @@ the real upstream:
 - Every Mockttp rule is `always()`; a consumed rule silently forwards to production.
 - The fallthrough **denies and files**; it never passes through.
 
+One more, because CI depends on it:
+
+- **A response carrying `ok: false` exits non-zero.** The verdict is a field of the
+  contract, not a flag on a command.
+
 ## Testing
 
 ```bash
@@ -90,5 +116,7 @@ bun test
 ```
 
 `tests/loop.test.ts` runs a real front door against a real upstream and asserts both phase
-exit criteria. `tests/emulate.test.ts` spawns a real `emulate` process. Neither is mocked,
-which is the point: the failures this product must not have are integration failures.
+exit criteria. `tests/emulate.test.ts` spawns a real `emulate` process. `tests/sandbox.test.ts`
+builds real images and asserts the seal against a negative control, skipping itself when no
+container engine is installed. None of it is mocked, which is the point: the failures this
+product must not have are integration failures.

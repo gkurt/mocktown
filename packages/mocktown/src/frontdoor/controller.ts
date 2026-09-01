@@ -288,7 +288,7 @@ export class FrontDoor {
       completionChecker: new completionCheckers.Always(),
     }));
 
-    // WebSockets are recorded, not mocked, until phase 3 (03-capture.md). Denied hosts
+    // WebSockets are recorded, not mocked, until phase 4 (03-capture.md). Denied hosts
     // deny here too, so a WS upgrade can't become an escape hatch past the wall.
     const webSocketRules: WebSocketRuleData[] = table.routes.map((route) => ({
       matchers: [new matchers.WildcardMatcher(), new matchers.HostnameMatcher(route.host)],

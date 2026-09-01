@@ -9,9 +9,12 @@ import { fileURLToPath } from 'node:url';
  * hand except the ones that are not API calls at all (`init`, `record -- <cmd>`,
  * `daemon`, `studio`, `mcp`), and those are marked as such below.
  *
- * Two house rules are structural rather than per-command discipline (spike 02):
+ * Three house rules are structural rather than per-command discipline (spike 02):
  *   - `--json` exists on every command, and the human rendering is a projection of it
  *   - the resolved project is the first line of output (08-projects-config.md)
+ *   - a response carrying `ok: false` exits non-zero, so any command that can report a
+ *     verdict is usable as a CI step without a per-command flag or a `jq` incantation
+ *     (05-redirection.md wants `mocktown seal verify` to break a build loudly)
  */
 import { Command, Option } from 'commander';
 import type * as z from 'zod/v4';
@@ -54,7 +57,7 @@ function coreType(field: any): { type: string; optional: boolean; description: s
 
 const kebab = (name: string) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
-function addOptions(command: Command, schema: z.ZodType): void {
+function addOptions(command: Command, schema: z.ZodType, commandLine = false): void {
   const shape = inputShape(schema);
   if (!shape) return;
   for (const [name, field] of Object.entries(shape)) {
@@ -67,8 +70,9 @@ function addOptions(command: Command, schema: z.ZodType): void {
     const flag = type === 'boolean' ? `--${kebab(name)}` : `--${kebab(name)} <value>`;
     const option = new Option(flag, description || undefined);
     // Path parameters and other required inputs are mandatory, so a missing one fails
-    // before a request goes out rather than as a 400 from the daemon.
-    if (!optional && type !== 'boolean') option.makeOptionMandatory();
+    // before a request goes out rather than as a 400 from the daemon. The command line is
+    // the exception: it may arrive after `--` instead, and is checked once both are in.
+    if (!optional && type !== 'boolean' && !(commandLine && name === COMMAND_INPUT)) option.makeOptionMandatory();
     command.addOption(option);
   }
 }
@@ -133,7 +137,18 @@ const GROUP_DESCRIPTIONS: Record<string, string> = {
   knobs: 'Scenario dials on a generated mock',
   profiles: 'Auth profiles \u2014 the personas a scenario is tested as',
   state: 'Provider state: inspect it, reset it',
+  sandbox: 'The sealed sandbox: bring it up, run things inside it, prove it holds',
+  seal: 'Seal certification — the CI-facing proof that nothing escapes',
+  browser: 'Launch a browser through the front door (03-capture.md rung 2)',
 };
+
+/**
+ * An input field named `command` is a shell command line, so the CLI also accepts it
+ * after `--` — `mocktown sandbox exec -- bun test` rather than `--command "bun test"`.
+ * The same convention as `mocktown record -- <cmd>`, applied by the generator instead of
+ * by hand, so a future procedure taking a command line gets it for free.
+ */
+const COMMAND_INPUT = 'command';
 
 /** `recordings.list` -> `mocktown recordings list`. */
 function commandFor(procedure: ProcedureInfo): Command {
@@ -150,12 +165,24 @@ function commandFor(procedure: ProcedureInfo): Command {
 
 for (const procedure of procedures) {
   const command = commandFor(procedure);
-  addOptions(command, procedure.inputSchema);
+  const shape = inputShape(procedure.inputSchema) ?? {};
+  const takesCommandLine = Boolean(shape[COMMAND_INPUT]);
+  addOptions(command, procedure.inputSchema, takesCommandLine);
+  if (takesCommandLine) command.argument('[command...]', 'Command to run, after --');
   command.option('--json', 'Emit the raw API response');
-  command.action(async (options: Record<string, unknown>) => {
+  // Commander passes declared arguments first, then the option bag, then the command.
+  command.action(async (...invocation: unknown[]) => {
+    const options = invocation.at(-2) as Record<string, unknown>;
+    const argv = takesCommandLine ? ((invocation[0] as string[] | undefined) ?? []) : [];
     const globals = program.opts();
     const wantsJson = Boolean(options.json ?? globals.json);
     const { json: _json, ...rest } = options;
+    if (argv.length) rest[COMMAND_INPUT] = argv.join(' ');
+    if (takesCommandLine && !rest[COMMAND_INPUT]) {
+      console.error(`error: give a command, either after -- or with --${COMMAND_INPUT} <value>`);
+      process.exitCode = 1;
+      return;
+    }
 
     try {
       const project = resolveProject({ project: globals.project as string | undefined });
@@ -174,6 +201,9 @@ for (const procedure of procedures) {
 
       if (wantsJson) console.log(JSON.stringify(result));
       else console.log(renderResult(procedure.path, result).join('\n'));
+      // A verdict the caller can act on without parsing: `ok: false` is a failed check,
+      // not a failed call, so it is reported *and* it fails the process.
+      if ((result as { ok?: boolean }).ok === false) process.exitCode = 1;
     } catch (error: any) {
       const message = error?.message ?? String(error);
       if (wantsJson) console.log(JSON.stringify({ error: message }));

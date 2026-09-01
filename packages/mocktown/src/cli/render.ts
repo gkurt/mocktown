@@ -208,7 +208,86 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `new session: ${r.session}`,
     ...(r.restarted.length ? [`restarted (a few seconds each): ${r.restarted.join(', ')}`] : []),
   ],
+
+  'sandbox.get': (r) => renderSandbox(r),
+  'sandbox.up': (r) => renderSandbox(r),
+
+  'sandbox.down': (r) => (r.removed.length ? ['torn down', ...r.removed.map((n: string) => `  ${n}`)] : ['  (nothing was up)']),
+
+  'sandbox.exec': (r) => [...(r.stdout ? [r.stdout.trimEnd()] : []), ...(r.stderr ? [r.stderr.trimEnd()] : []), `exit ${r.exitCode}`],
+
+  'sandbox.verify': (r) => [
+    ...r.checks.map((c: any) => `  ${pad(c.status.toUpperCase(), 13)} ${pad(c.name, 52)} ${c.detail}`),
+    '',
+    r.ok ? 'the seal holds on this host' : 'the seal does NOT hold on this host',
+    // An inconclusive check is not a pass, and rounding it up is the exact mistake
+    // 04-sandbox.md warns about with IPv6 ("easy to forget, classic leak").
+    ...(r.inconclusive ? [`${r.inconclusive} check(s) proved nothing either way — read the detail above before relying on them`] : []),
+  ],
+
+  'sandbox.devcontainer': (r) => [
+    'wrote',
+    ...r.files.map((f: string) => `  ${f}`),
+    '',
+    'merge mocktown.devcontainer.json into your devcontainer.json — the feature installs the CA,',
+    'and runArgs join the sealed network. Both halves are needed; either alone is an ordinary container.',
+  ],
+
+  'seal.get': (r) => [
+    ...(r.stamp
+      ? [
+          `${r.stamp.sealed ? 'SEALED' : 'BROKEN'} at ${r.stamp.createdAt}${r.stamp.commit ? ` for ${r.stamp.commit.slice(0, 8)}` : ''}`,
+          `wall hits: ${r.stamp.wallHits}`,
+          'flows exercised',
+          ...r.stamp.flows.map((f: string) => `  ${f}`),
+        ]
+      : ['no seal run recorded']),
+    ...(r.stale.length ? ['', 'this stamp does not apply right now', ...r.stale.map((s: string) => `  ! ${s}`)] : []),
+  ],
+
+  'seal.verify': (r) => [
+    r.sealed ? 'SEALED' : r.instrument === 'none' ? 'UNVERIFIABLE — this run proves nothing' : 'NOT SEALED',
+    `instrument: ${r.instrument}  config ${r.configHash}${r.commit ? `  commit ${r.commit.slice(0, 8)}` : ''}`,
+    ...(r.flows.length
+      ? ['', 'flows', ...r.flows.map((f: any) => `  ${f.exitCode === 0 ? 'ok  ' : 'FAIL'} ${pad(`${f.durationMs}ms`, 9)} ${f.command}`)]
+      : []),
+    ...(r.servicesExercised.length ? ['', `services exercised: ${r.servicesExercised.join(', ')}`] : []),
+    ...(r.wallHits.length
+      ? ['', 'wall hits', ...r.wallHits.map((h: any) => `  ${pad(h.method, 7)} ${h.host}${h.path}  (${h.reason})`)]
+      : []),
+    ...(r.gaps.length
+      ? ['', 'redirect gaps', ...r.gaps.map((g: any) => `  ${pad(g.service, 26)} rung ${g.rung ?? '-'}  ${g.instruction}`)]
+      : []),
+    ...(r.reasons.length ? ['', 'why it is not sealed', ...r.reasons.map((reason: string) => `  ! ${reason}`)] : []),
+  ],
+
+  'browser.launch': (r) => [
+    `launched ${r.executable}${r.pid ? ` (pid ${r.pid})` : ''}`,
+    `profile: ${r.profileDir}`,
+    `trusting one key: ${r.spkiHash}`,
+    '',
+    `note: ${r.note}`,
+  ],
 };
+
+function renderSandbox(r: any): string[] {
+  return [
+    r.running ? `sandbox up (${r.mode}) on ${r.engine}` : `sandbox down${r.engine ? ` (${r.engine} available)` : ''}`,
+    ...(r.running
+      ? [
+          `container:  ${r.container}`,
+          `network:    ${r.network}  every hostname resolves to ${r.relayIp}`,
+          `front door: :${r.frontDoorPort}`,
+          `image:      ${r.image}${r.browser ? '  (with headless Chromium)' : ''}`,
+          ...(r.workspace ? [`workspace:  ${r.workspace} -> /workspace`] : []),
+          '',
+          'run things inside it with `mocktown sandbox exec -- <command>`,',
+          'and prove the seal on this host with `mocktown sandbox verify`.',
+        ]
+      : []),
+    ...(r.warnings.length ? ['', 'warnings', ...r.warnings.map((w: string) => `  ! ${w}`)] : []),
+  ];
+}
 
 function renderIssue(issue: any): string[] {
   return [

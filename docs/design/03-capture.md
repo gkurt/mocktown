@@ -1,6 +1,7 @@
 # 03 — Traffic Capture & the Front Door
 
-**Status:** Implemented — phase 1; WebSocket/gRPC mocking and OS-level capture remain deferred
+**Status:** Implemented — phase 1, launched browser in phase 3; WebSocket/gRPC mocking and
+OS-level capture remain deferred
 
 All traffic — recording real APIs and serving mocked ones — flows through one proxy,
 the **front door**. Its behavior per service is a mode, not a separate binary:
@@ -54,8 +55,14 @@ The escalation ladder — each rung covers the previous rung's failure case:
    GitHub API and came back with a genuine request id. Without this knob a large and
    growing class of modern SDKs escapes the front door in host mode while appearing
    correctly configured.
-2. **Launched browser** — for web-app client traffic: fresh browser profile,
-   `--proxy-server` set, CA trusted in that profile only (HTTP Toolkit's pattern).
+2. **Launched browser** — for web-app client traffic: `mocktown browser` starts a
+   Chromium-family browser on a fresh profile with `--proxy-server` set. *Trust is
+   narrower than "in that profile"* (phase 3): the CA is passed as an
+   `--ignore-certificate-errors-spki-list` entry, which names one public key and applies
+   only to this launch. Chrome accepts a certificate whose chain contains a listed key and
+   nothing else, so a stray HTTPS error in that window is still an error and **no trust is
+   written to disk**. *Rejected:* editing the profile's NSS database — more
+   platform-specific code, and it leaves trust behind after the window closes.
 3. **In-sandbox record mode** — for code that ignores proxy env vars: inside the
    namespace there is no "direct"; everything transits the front door by construction.
 4. **HAR import** — `mocktown import <file.har>`: the escape hatch for traffic only
@@ -77,7 +84,10 @@ Each project gets its own root CA (generated at project creation, key in the pro
 data dir, never committed).
 
 - **Sandbox:** CA baked into the image trust store + every runtime knob at build time.
-  Solved by construction.
+  Solved by construction — with one thing that is easy to miss: **Chromium reads its own
+  NSS database, not the system store**, so an in-sandbox browser needs a `certutil` entry
+  as well or every mocked page is a full-screen certificate warning
+  ([04-sandbox.md](04-sandbox.md)).
 - **Host:** we do *not* touch the system trust store by default. `mocktown record`
   injects per-runtime env (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`,
   `CURL_CA_BUNDLE`, Java via `-Djavax.net.ssl.trustStore` guidance). `mocktown trust`
@@ -98,6 +108,6 @@ scrubbing ([10-security.md](10-security.md)).
 ## Explicitly deferred
 
 - HTTP/3 / QUIC (deny at the front door so clients fall back to h2)
-- WebSocket *mocking* (recording yes; generated mocks treat WS as passthrough or deny
-  until [11-roadmap.md](11-roadmap.md) phase 3)
+- WebSocket *mocking* (recording yes; generated mocks treat WS as passthrough or deny —
+  scheduled for [11-roadmap.md](11-roadmap.md) phase 4, alongside gRPC)
 - gRPC (record as opaque h2 first; typed support later)

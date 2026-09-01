@@ -22,6 +22,9 @@ import {
   ProviderRef,
   ProviderStatus,
   Recording,
+  SandboxStatus,
+  SealCheck,
+  SealStamp,
   Service,
   VerifyResult,
   withProject,
@@ -311,6 +314,139 @@ export const contract = {
       .route({ method: 'POST', path: '/env/write', summary: 'Write .env.mocktown and the AGENTS.md section' })
       .input(z.object({ ...ProjectInput }))
       .output(EnvOutput),
+  },
+
+  sandbox: {
+    get: oc
+      .route({ method: 'GET', path: '/sandbox', summary: 'Whether the sealed boundary is up, and what it is made of' })
+      .input(z.object({ ...ProjectInput }))
+      .output(withProject(SandboxStatus.shape)),
+
+    up: oc
+      .route({ method: 'POST', path: '/sandbox/up', summary: 'Bring up the sealed network, the relay and the app container' })
+      .input(
+        z.object({
+          ...ProjectInput,
+          mode: z
+            .enum(['sealed', 'record'])
+            .default('sealed')
+            .describe('`sealed` denies unknown hosts; `record` lets them out through the front door to build the corpus'),
+          rebuild: z.boolean().optional().describe('Rebuild the images even if they exist — after a CA or base-image change'),
+        }),
+      )
+      .output(withProject(SandboxStatus.shape)),
+
+    down: oc
+      .route({ method: 'POST', path: '/sandbox/down', summary: 'Tear the boundary down: containers and networks' })
+      .input(z.object({ ...ProjectInput }))
+      .output(withProject({ removed: z.array(z.string()) })),
+
+    exec: oc
+      .route({
+        method: 'POST',
+        path: '/sandbox/exec',
+        summary: 'Run a command inside the boundary — the agent surface for flows and tests',
+      })
+      .input(z.object({ ...ProjectInput, command: z.string().describe('Shell command line, run in /workspace') }))
+      .output(withProject({ ok: z.boolean(), exitCode: z.number().int(), stdout: z.string(), stderr: z.string() })),
+
+    verify: oc
+      .route({
+        method: 'POST',
+        path: '/sandbox/verify',
+        summary: 'Prove the seal on this host: escape attempts against a negative control',
+      })
+      .input(z.object({ ...ProjectInput }))
+      .output(
+        withProject({
+          ok: z.boolean(),
+          checks: z.array(SealCheck),
+          inconclusive: z.number().int().describe('Checks that proved nothing either way — never counted as passes'),
+          wallHitFiled: z.boolean().describe('Whether the deny-wall probe became an issue, as it must'),
+        }),
+      ),
+
+    devcontainer: oc
+      .route({
+        method: 'POST',
+        path: '/sandbox/devcontainer',
+        summary: 'Generate the devcontainer feature that adds the boundary to an existing devcontainer',
+      })
+      .input(z.object({ ...ProjectInput }))
+      .output(withProject({ files: z.array(z.string()), fragment: z.unknown() })),
+  },
+
+  seal: {
+    get: oc
+      .route({ method: 'GET', path: '/seal', summary: 'The latest seal stamp, and whether it still applies' })
+      .input(z.object({ ...ProjectInput }))
+      .output(
+        withProject({
+          ok: z.boolean().describe('A current, passing stamp — what a CI step checks'),
+          stamp: SealStamp.nullable(),
+          stale: z.array(z.string()).describe('Why the stamp no longer applies, if it does not'),
+          flows: z.array(z.string()),
+          configHash: z.string(),
+          commit: z.string().nullable(),
+        }),
+      ),
+
+    verify: oc
+      .route({
+        method: 'POST',
+        path: '/seal/verify',
+        summary: 'Run the flows inside the sandbox and stamp the result — designed as a CI step',
+      })
+      .input(
+        z.object({
+          ...ProjectInput,
+          flows: z.array(z.string()).optional().describe("Override mocktown.json's flow list for this run"),
+          rebuild: z.boolean().optional(),
+        }),
+      )
+      .output(
+        withProject({
+          ok: z.boolean(),
+          sealed: z.boolean(),
+          instrument: z
+            .enum(['sandbox', 'none'])
+            .describe('`none` means the run proved nothing: without the sandbox an escape is invisible, not absent'),
+          commit: z.string().nullable(),
+          configHash: z.string(),
+          flows: z.array(z.object({ command: z.string(), exitCode: z.number().int(), durationMs: z.number().int(), output: z.string() })),
+          wallHits: z.array(z.object({ host: z.string(), method: z.string(), path: z.string(), reason: z.string() })),
+          gaps: z.array(z.object({ service: z.string(), rung: z.number().int().nullable(), instruction: z.string() })),
+          servicesExercised: z.array(z.string()),
+          reasons: z.array(z.string()),
+          stamp: SealStamp.nullable(),
+        }),
+      ),
+  },
+
+  browser: {
+    launch: oc
+      .route({
+        method: 'POST',
+        path: '/browser/launch',
+        summary: 'Launch a browser through the front door, trusting the project CA for this window only',
+      })
+      .input(
+        z.object({
+          ...ProjectInput,
+          url: z.string().optional(),
+          executable: z.string().optional().describe('Explicit browser binary, for one we do not know about'),
+        }),
+      )
+      .output(
+        withProject({
+          executable: z.string(),
+          profileDir: z.string(),
+          args: z.array(z.string()),
+          spkiHash: z.string().describe('The one public key this window accepts beyond the system store'),
+          pid: z.number().int().nullable(),
+          note: z.string().describe('The host-browser gap: attended use does not carry the sandbox guarantee'),
+        }),
+      ),
   },
 
   skills: {

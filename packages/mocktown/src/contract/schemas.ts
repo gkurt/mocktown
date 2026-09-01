@@ -127,6 +127,41 @@ export const VerifyResult = z.object({
 });
 export type VerifyResult = z.infer<typeof VerifyResult>;
 
+/** The sealed boundary's runtime state (04-sandbox.md). */
+export const SandboxStatus = z.object({
+  engine: z.string().nullable().describe('Container engine in use, or null when none is installed'),
+  running: z.boolean(),
+  mode: z.enum(['sealed', 'record']).nullable(),
+  container: z.string().nullable().describe('Name of the app container — what `sandbox exec` runs in'),
+  network: z.string().nullable(),
+  relayIp: z.string().nullable().describe('The relay: every hostname inside the sandbox resolves here'),
+  frontDoorPort: z.number().int().nullable(),
+  image: z.string().nullable(),
+  browser: z.boolean().describe('Whether the image ships headless Chromium'),
+  workspace: z.string().nullable(),
+  warnings: z.array(z.string()),
+});
+
+/**
+ * A certification check. `inconclusive` is a first-class outcome, not a rounding error:
+ * an IPv6 attempt blocked on a host with no IPv6 egress proves nothing (spike 04).
+ */
+export const SealCheck = z.object({
+  name: z.string(),
+  status: z.enum(['pass', 'fail', 'inconclusive', 'skipped']),
+  detail: z.string(),
+});
+
+export const SealStamp = z.object({
+  id: z.string(),
+  commit: z.string().nullable(),
+  configHash: z.string().describe('Registry, generated env and flow list — a change makes the stamp stale'),
+  sealed: z.boolean(),
+  flows: z.array(z.string()).describe('The flows exercised; a seal is only as good as these'),
+  wallHits: z.number().int(),
+  createdAt: z.string(),
+});
+
 /** Every response carries the resolved project: misdirection must be visible. */
 export const withProject = <T extends z.ZodRawShape>(shape: T) => z.object({ project: z.string(), ...shape });
 

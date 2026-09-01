@@ -85,6 +85,21 @@ the control network with `--ipv6 --subnet <ULA>/64`, confirm the control contain
 `2606:4700:4700::1111`, and only then assert the sealed container cannot. Until that run
 happens, the IPv6 half of the guarantee is unverified and should not be claimed.
 
+> **Phase 3 re-run, 2026-09-01 — still INCONCLUSIVE, but no longer a spike's problem.**
+> The re-run was done as specified: the control network was created with
+> `--ipv6 --subnet fd00:c0de::/64` and the control container did get a global ULA address,
+> but it still could not reach `2606:4700:4700::1111` — this host has no IPv6 default route
+> at all (`route -n get -inet6 2606:4700:4700::1111` reports the destination is not in the
+> table), so there is no baseline to assert against on any network Docker can build here.
+>
+> Two things changed instead of a green tick. The sealed network is now created **without
+> IPv6**, so there is no IPv6 stack to leak over — structural rather than blocked. And the
+> whole check, negative control included, shipped as `mocktown sandbox verify`, which
+> reports `inconclusive` as an outcome distinct from `pass` and only asserts the seal when
+> the control actually reached the IPv6 address. The first user on an IPv6-capable host
+> closes this by running a command, which is a better place for it than a spike nobody
+> re-runs.
+
 ## Notes for the implementation
 
 - **The front door listens on 443 directly**, not only as a CONNECT proxy. Inside the
@@ -107,7 +122,9 @@ happens, the IPv6 half of the guarantee is unverified and should not be claimed.
   sandboxes users already have. Only Docker was tested. `--internal` is a Docker concept;
   the equivalent for each target needs its own verification.
 - **In-sandbox Chromium.** The image ships no browser, so the "browser traffic is covered"
-  guarantee is untested.
+  guarantee is untested. *Closed in phase 3:* the shipped image installs Chromium, and the
+  certificate has to be added to its **NSS database** with `certutil` — Chromium ignores the
+  system CA store, so the baked-in trust the spike verified is not enough on its own.
 - **A determined escape from a compromised front door.** The threat model is inside → out
   for an *agent*, and the front door is trusted. Nothing here tests the front door itself
   being hostile.

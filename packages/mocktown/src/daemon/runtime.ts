@@ -7,7 +7,7 @@
  * in `router.ts` are a thin projection of this class, which is what makes the CLI, the
  * MCP server and (later) the GUI equivalent by construction rather than by care.
  */
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
 import { captureEnv } from '#src/capture/launch.ts';
 import { templatePath } from '#src/capture/normalize.ts';
@@ -16,6 +16,7 @@ import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, type ResolvedProject, resolveProject } from '#src/config/project.ts';
 import type { Db } from '#src/db/client.ts';
 import { openProjectDb, schema } from '#src/db/client.ts';
+import { type EnvArtifacts, generateEnv } from '#src/env/generate.ts';
 import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { type CapturedExchange, FrontDoor, type WallHit } from '#src/frontdoor/controller.ts';
 import { type Route, type RoutingTable, routeForProvider } from '#src/frontdoor/routing.ts';
@@ -23,6 +24,8 @@ import { IssueEngine } from '#src/issues/engine.ts';
 import { EmulateProvider, emulateServiceId } from '#src/providers/emulate.ts';
 import { GeneratedProvider } from '#src/providers/generated.ts';
 import type { Provider } from '#src/providers/types.ts';
+import { Sandbox, type SandboxMode, type SandboxStatus } from '#src/sandbox/sandbox.ts';
+import { type SandboxVerifyResult, verifySandbox } from '#src/sandbox/verify.ts';
 import { describeKnobs, effectiveKnobs } from '#src/scenario/knobs.ts';
 import { ensureDefaultProfiles } from '#src/scenario/profiles.ts';
 import { rulesFromConfig } from '#src/scrub/rules.ts';
@@ -33,6 +36,19 @@ export interface RuntimeMode {
   kind: 'idle' | 'record' | 'serve';
   sealed: boolean;
 }
+
+/**
+ * What a seal run needs to know about a window of traffic: which services were actually
+ * exercised, and what hit the wall. Kept as a window rather than a running total because
+ * the question a seal answers is "during *these* flows", not "ever".
+ */
+export interface Observation {
+  services: Set<string>;
+  wallHits: { host: string; method: string; path: string; reason: string }[];
+}
+
+/** A window is evidence, not a log: past this many hits the flows have already failed. */
+const MAX_OBSERVED_WALL_HITS = 200;
 
 export class ProjectRuntime {
   readonly db: Db;
@@ -45,6 +61,8 @@ export class ProjectRuntime {
   private sessionId: string | null = null;
   private sessionSeed = 'mocktown-default-seed';
   private recordedCount = 0;
+  private observation: Observation | null = null;
+  private configStamp = '-';
   mode: RuntimeMode = { kind: 'idle', sealed: false };
 
   constructor(project: ResolvedProject) {
@@ -55,6 +73,7 @@ export class ProjectRuntime {
     this.syncRegistryFromConfig();
     this.issues = new IssueEngine(this.db, project.paths?.issuesDir ?? null);
     this.scrubber = new Scrubber(rulesFromConfig(project.file?.scrub), project.file?.scrub?.entropyBackstop ?? true);
+    this.configStamp = this.stampConfig();
   }
 
   get name(): string {
@@ -73,8 +92,26 @@ export class ProjectRuntime {
   /** Re-read `mocktown.json` — an agent editing the registry should not need a restart. */
   reload(): void {
     this.project = resolveProject({ project: this.project.name, cwd: this.project.workspace ?? process.cwd() });
+    this.configStamp = this.stampConfig();
     this.syncRegistryFromConfig();
     this.scrubber = new Scrubber(rulesFromConfig(this.project.file?.scrub), this.project.file?.scrub?.entropyBackstop ?? true);
+  }
+
+  /** Modification times of the two config files, so a reload only happens when one changed. */
+  private stampConfig(): string {
+    const mtime = (path: string) => {
+      try {
+        return String(statSync(path).mtimeMs);
+      } catch {
+        return '-';
+      }
+    };
+    if (!this.project.paths) return '-';
+    return `${mtime(this.project.paths.projectFile)}:${mtime(this.project.paths.localConfig)}`;
+  }
+
+  reloadIfChanged(): void {
+    if (this.stampConfig() !== this.configStamp) this.reload();
   }
 
   /**
@@ -123,6 +160,11 @@ export class ProjectRuntime {
   }
 
   private onExchange(exchange: CapturedExchange): void {
+    // Served traffic is not persisted, but a seal run still has to know a service was
+    // *used* — that is what separates a real redirect gap from a dependency the flows
+    // never touched (05-redirection.md).
+    if (this.observation) this.observation.services.add(hostOf(exchange.url));
+
     // Only `record` persists. `passthrough` is explicitly not recorded (03-capture.md's
     // mode table), and `mock` traffic is the mock's own output, not evidence about reality.
     if (exchange.mode !== 'record' || !this.recorder) return;
@@ -132,6 +174,9 @@ export class ProjectRuntime {
 
   private onWallHit(hit: WallHit): void {
     const url = new URL(hit.url);
+    if (this.observation && this.observation.wallHits.length < MAX_OBSERVED_WALL_HITS) {
+      this.observation.wallHits.push({ host: url.hostname, method: hit.method, path: url.pathname, reason: hit.reason });
+    }
     // Scrub before the request is stored on an issue: issues embed requests and flow
     // through the same scrubber (10-security.md).
     const scrubbed = this.scrubber.scrub({
@@ -467,6 +512,104 @@ export class ProjectRuntime {
     return { reset: [...new Set(reset)], session: this.sessionId, restarted };
   }
 
+  // ── The sandbox ─────────────────────────────────────────────────────────────
+
+  /**
+   * Built from the *current* project file every time, so a `mocktown.json` edit to the
+   * base image or the port list takes effect on the next `sandbox up` without a daemon
+   * restart. It is safe to rebuild freely: the boundary's state lives on disk and in the
+   * container engine, never in this object.
+   */
+  private sandbox(): Sandbox {
+    return new Sandbox({
+      project: this.project.name,
+      workspace: this.project.workspace,
+      dataDir: projectPaths(this.project.name).root,
+      loadCaCert: async () => (await ensureProjectCa(this.project.name)).cert,
+      config: {
+        image: this.project.file?.sandbox.image ?? 'auto',
+        browser: this.project.file?.sandbox.browser ?? true,
+        ports: this.project.file?.sandbox.ports ?? [],
+      },
+    });
+  }
+
+  sandboxStatus(): Promise<SandboxStatus> {
+    return this.sandbox().status();
+  }
+
+  /**
+   * The sandbox needs a front door to relay to, so a mode is started if none is running.
+   * `record` and `sealed` differ only in the front door's fallthrough — the boundary
+   * itself is identical, which is what makes `sandbox record` usable for building the
+   * corpus and for certification alike (04-sandbox.md).
+   */
+  async sandboxUp(opts: { mode?: SandboxMode; frontDoorPort?: number; rebuild?: boolean } = {}): Promise<SandboxStatus> {
+    const mode = opts.mode ?? 'sealed';
+    let port = opts.frontDoorPort ?? this.frontDoorStatus().port;
+    if (!port) {
+      if (mode === 'record') await this.startRecord({ label: 'sandbox' });
+      else await this.startServe({ sealed: true });
+      port = this.frontDoorStatus().port;
+    }
+    if (!port) throw new Error('the front door could not be started, so there is nothing for the sandbox to relay to');
+    return this.sandbox().up({ mode, frontDoorPort: port, rebuild: opts.rebuild });
+  }
+
+  sandboxDown(): Promise<{ removed: string[] }> {
+    return this.sandbox().down();
+  }
+
+  sandboxExec(command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    return this.sandbox().exec(command);
+  }
+
+  sandboxVerify(): Promise<SandboxVerifyResult> {
+    const sandbox = this.sandbox();
+    const state = sandbox.readState();
+    if (!state) {
+      return Promise.resolve({
+        ok: false,
+        checks: [{ name: 'sandbox is running' as const, status: 'fail' as const, detail: 'bring it up first with `mocktown sandbox up`' }],
+        probedHost: null,
+      });
+    }
+    return verifySandbox(sandbox, { mode: state.mode, image: state.image });
+  }
+
+  // ── Observation windows ─────────────────────────────────────────────────────
+
+  beginObservation(): void {
+    this.observation = { services: new Set(), wallHits: [] };
+  }
+
+  endObservation(): Observation {
+    const observed = this.observation ?? { services: new Set<string>(), wallHits: [] };
+    this.observation = null;
+    return observed;
+  }
+
+  /**
+   * The generated env-var setup. It lives here rather than in the API handler because the
+   * seal reads the same coverage report the `env` procedures render — one computation, so
+   * a service reported "covered" by `mocktown env` cannot be a redirect gap in a seal run.
+   */
+  envArtifacts(): EnvArtifacts {
+    const frontDoor = this.frontDoorStatus();
+    return generateEnv({
+      project: this.name,
+      proxyUrl: `http://127.0.0.1:${frontDoor.port ?? this.project.local.frontDoorPort ?? 4400}`,
+      caCertPath: projectPaths(this.name).caCert,
+      baseUrls: this.allBaseUrls(),
+      ekb: this.db
+        .select()
+        .from(schema.ekb)
+        .all()
+        .map((row) => ({ ...row })),
+      services: this.services().map((s) => s.id),
+    });
+  }
+
   // ── Status ──────────────────────────────────────────────────────────────────
 
   providerStatuses() {
@@ -516,7 +659,10 @@ const runtimes = new Map<string, ProjectRuntime>();
 
 export function runtimeFor(projectName: string, cwd?: string): ProjectRuntime {
   const existing = runtimes.get(projectName);
-  if (existing) return existing;
+  if (existing) {
+    existing.reloadIfChanged();
+    return existing;
+  }
   const runtime = new ProjectRuntime(resolveProject({ project: projectName, cwd }));
   runtime.ensureDirs();
   runtimes.set(projectName, runtime);
@@ -526,6 +672,15 @@ export function runtimeFor(projectName: string, cwd?: string): ProjectRuntime {
 export async function shutdownAllRuntimes(): Promise<void> {
   await Promise.all([...runtimes.values()].map((r) => r.shutdown()));
   runtimes.clear();
+}
+
+/** The service a URL belongs to, for the observation window. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
 }
 
 /**

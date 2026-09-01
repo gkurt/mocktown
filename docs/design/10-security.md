@@ -58,6 +58,17 @@ wrong; we must not.
 - **Sandbox**: the guarantee direction is *inside → out* (agent can't reach prod).
   We do not claim the inverse (protecting the host from the agent) beyond what the
   container runtime provides — that's the sandbox vendor's job.
+  *Amended 2026-09-01 (phase 3):* **the CA private key never enters a container.** The
+  proxy stays on the host and the sandbox reaches it through a byte-forwarding relay
+  ([04-sandbox.md](04-sandbox.md)), so only the certificate is baked into images and
+  passed to the devcontainer feature. The build context is a directory holding the
+  certificate alone — never the CA directory, which also holds the key and would be
+  uploaded wholesale to the engine daemon. What the sandbox *does* require is that the
+  front-door port is reachable from the container, i.e. not loopback-only; that is one
+  port, and it is the only thing the sealed network can reach.
+- **Launched browser**: trust is one public key for one launch
+  (`--ignore-certificate-errors-spki-list`), not a trust-store edit. Nothing outlives the
+  process, and an unrelated certificate error in that window is still an error.
 - **Observed traffic is data, not instructions**: recorded content and issue payloads
   are rendered escaped in GUI/CLI; agent-facing skill prompts must state that corpus
   content is untrusted input (prompt-injection via recorded API responses is a real

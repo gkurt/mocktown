@@ -25,7 +25,15 @@ export const ServiceConfig = z.object({
 export const ProjectFile = z.object({
   project: z.string().min(1).describe('Project name'),
   services: z.record(z.string(), ServiceConfig).default({}),
-  sandbox: z.object({ image: z.string().default('auto') }).default({ image: 'auto' }),
+  sandbox: z
+    .object({
+      image: z.string().default('auto').describe('Base image the sandbox layer is built on; `auto` picks a sane default'),
+      /** 04-sandbox.md: an agent testing a web app must browse *inside* the boundary. */
+      browser: z.boolean().default(true).describe('Ship headless Chromium in the sandbox image'),
+      ports: z.array(z.string()).default([]).describe('Host port publications for the sandbox, e.g. "3000:3000"'),
+    })
+    .default({ image: 'auto', browser: true, ports: [] }),
+  /** The flows a seal run exercises. A seal is only as good as this list (05-redirection.md). */
   seal: z.object({ flows: z.array(z.string()).default([]) }).default({ flows: [] }),
   scrub: z
     .object({

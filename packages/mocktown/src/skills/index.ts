@@ -198,6 +198,24 @@ mocktown ekb list           # the recipes known for each service
 - **\`NODE_USE_ENV_PROXY=1\` is required** for anything built on \`fetch\`/undici. Without it
   an SDK ignores \`HTTPS_PROXY\` entirely and reaches the real API while looking configured.
 
+## How the work is checked
+
+\`\`\`bash
+mocktown seal verify --json
+\`\`\`
+
+It runs the project's flows **inside the sealed sandbox**, where every hostname resolves to
+the front door, and stamps the result against the current commit and config. Two things
+follow for you:
+
+- A service the flows exercised that is still not mechanically redirected becomes a
+  \`redirect-gap\` issue — that is the dependency that would reach production the moment
+  the app ran outside the sandbox. Your job is done when those are empty, not when the
+  tests pass.
+- \`unverifiable\` is not a pass. With no container engine there is no boundary, so an
+  unconfigured SDK would reach the real API and the run would look green. Do not report a
+  seal you did not get.
+
 ${UNTRUSTED}
 `.trim(),
   },

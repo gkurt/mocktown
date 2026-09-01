@@ -44,6 +44,8 @@ docs/design/           Per-subsystem design docs — the source of truth for int
 | `mocks/` | The corpus and mock serving: `corpus.ts` exports the agent-legible corpus, `loader.ts`/`host.ts` serve generated mocks, `match.ts` matches requests, `state.ts` is the stateful store, `verify.ts` checks mocks against recordings. |
 | `providers/` | The provider seam (`types.ts`) and its two implementations: `emulate.ts` supervises an `emulate` process, `generated.ts` serves our own mocks. |
 | `issues/` | The issue engine — every unservable request becomes a self-contained work item. |
+| `sandbox/` | The sealed boundary: `engine.ts` is the container-runtime seam, `images.ts` generates the Dockerfiles, `sandbox.ts` owns the topology, `verify.ts` runs the escape attempts against a negative control, `devcontainer.ts` emits the feature. |
+| `seal/` | Certification: `certify.ts` runs the flows inside the sandbox, `stamp.ts` records and ages the stamp. |
 | `scenario/` | Runtime knobs and auth profiles. |
 | `cli/`, `mcp/`, `skills/` | The three agent/human surfaces, all clients of the daemon API. |
 | `db/` | Drizzle schema and client; migrations live in `packages/mocktown/drizzle/`. |
@@ -65,6 +67,12 @@ subsystem you are touching, not all of them.
   silently expires would forward traffic to the real upstream — the worst failure this
   product has.
 - **Scrub before disk.** The corpus you can browse is the corpus that exists.
+- **The sandbox does not run a second front door.** The proxy stays on the host; the sealed
+  network reaches it through a relay container that only forwards bytes, so sandboxed
+  traffic lands in the same corpus, issue queue and providers as a recorded child process —
+  and the CA private key never enters a container.
+- **A response with `ok: false` exits the CLI non-zero.** That is what makes
+  `mocktown seal verify` usable as a CI step; do not add per-command exit-code flags.
 
 ## Key Conventions
 

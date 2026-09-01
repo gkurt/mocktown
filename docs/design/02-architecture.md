@@ -101,6 +101,15 @@ requirement here); bare REST handlers (no shared types, three surfaces drift);
 adding a web framework (Hono/Elysia/Express) — oRPC handlers + static file serving
 on `Bun.serve` cover the daemon's needs.
 
+*Amended 2026-09-01 by phase 3.* A third structural rule joins them: **a response
+carrying `ok: false` exits the CLI non-zero.** `mocktown seal verify` has to break a build
+loudly ([05-redirection.md](05-redirection.md)), and the alternatives were a per-command
+`--exit-code` flag or asking users to pipe `--json` through `jq`. Making the verdict a
+field of the contract means every future procedure that reports one gets CI behaviour for
+free, and the human and JSON surfaces cannot disagree about whether something passed. The
+same generator convention covers command lines: an input field named `command` is also
+accepted after `--`, so `mocktown sandbox exec -- bun test` needs no hand-written command.
+
 *Amended 2026-08-31 by the phase-1/2 implementation.* Deriving `readOnlyHint` from the
 HTTP method turns "does this procedure mutate?" into a property of the route, which makes
 a mutating flag on a `GET` a **contract defect** rather than a style question: `env.get`
@@ -184,6 +193,10 @@ HTTP as:
 - `GET  /state/<service>/…` — provider state introspection (backs GUI panels)
 - `GET/PUT /knobs/<service>` · `GET /profiles` · `POST /profiles/<n>/session` ·
   `POST /state/reset` — scenario controls ([12-scenario-controls.md](12-scenario-controls.md))
+- `GET /sandbox` · `POST /sandbox/up|down|exec|verify` — the sealed boundary
+  ([04-sandbox.md](04-sandbox.md))
+- `GET /seal` · `POST /seal/verify` — certification and its stamps
+  ([05-redirection.md](05-redirection.md))
 
 The same API is exposed to agents as an MCP server
 ([07-issues-agent-loop.md](07-issues-agent-loop.md)).

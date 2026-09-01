@@ -1,6 +1,6 @@
 # 11 — Roadmap
 
-**Status:** Living — phases 0–2 done, phase 3 next
+**Status:** Living — phases 0–3 done, phase 4 next
 
 Sequencing principle: ship the thin composed version fast (the market window —
 [01-product.md](01-product.md)), let the long-tail generator and EKB accrete as the
@@ -89,11 +89,35 @@ house rules ([02-architecture.md](02-architecture.md)).
 
 ## Phase 3 — The seal & the sandbox
 
-Sandbox image + devcontainer feature ([04-sandbox.md](04-sandbox.md)) · sealed and
-record modes · in-sandbox Chromium · seal certification + `mocktown seal verify` for
-CI ([05-redirection.md](05-redirection.md)) · launched-browser interceptor for host
-web dev. **Exit criterion:** an unattended coding agent runs a web app's integration
-flows inside the sandbox with zero real egress, and CI enforces the seal.
+- [x] Sandbox image + devcontainer feature ([04-sandbox.md](04-sandbox.md)) — both ship;
+  the image is generated per project so it trusts that project's CA and nothing else, and
+  the feature carries the same certificate as an option into someone else's devcontainer.
+- [x] Sealed and record modes over one boundary, with the front door left on the host and
+  reached through a relay, so a sandboxed request lands in the same corpus, issue queue and
+  providers as a recorded child process.
+- [x] In-sandbox Chromium, reachable by Playwright and Puppeteer through the executable-path
+  variables they already read.
+- [x] Seal certification + `mocktown seal verify` for CI
+  ([05-redirection.md](05-redirection.md)), reporting `unverifiable` rather than a false
+  pass when the instrument is missing.
+- [x] `mocktown sandbox verify` — spike 04's escape attempts and its negative control,
+  shipped as a command so the guarantee is checkable on the user's own host.
+- [x] Launched-browser interceptor for host web dev, trusting one public key for one
+  window instead of touching a trust store.
+
+**Exit criterion met:** `tests/sandbox.test.ts` runs a mock service and a flow inside the
+boundary against a real container engine — unmodified code reaches the mock with TLS
+verified, an escape attempt is denied and filed, the escape attempts fail against a
+negative control that proves they work unsealed, and `seal verify` stamps a pass and
+refuses one when a flow reaches an unregistered dependency.
+
+*Amendments produced:* the front door stays on the host and the sandbox reaches it through
+a relay ([04-sandbox.md](04-sandbox.md)); a seal run happens inside the sandbox or is
+reported `unverifiable`, and redirect coverage is judged from the EKB rather than from wall
+hits ([05-redirection.md](05-redirection.md)); browser trust is one key for one launch
+([03-capture.md](03-capture.md)); `ok: false` in a response is a structural non-zero exit
+([02-architecture.md](02-architecture.md)). IPv6 is still INCONCLUSIVE — the check now
+ships, and the development host has no IPv6 egress to prove it against.
 
 ## Phase 4 — Surface polish
 

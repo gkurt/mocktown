@@ -6,6 +6,8 @@
  *   ~/.local/share/mocktown/<project>/    machine-local project data (never committed)
  *     ├─ mocktown.sqlite                  recordings, issues, EKB, seal stamps, mock state
  *     ├─ blobs/                           content-addressed large bodies
+ *     ├─ browser-profile/                 the launched browser's own profile
+ *     ├─ sandbox.json                     the running sandbox's topology
  *     └─ ca/                              project root CA (key: 0600)
  */
 import { homedir, platform } from 'node:os';
@@ -46,6 +48,8 @@ export const projectPaths = (project: string) => {
     ca: join(root, 'ca'),
     caCert: join(root, 'ca', 'ca.pem'),
     caKey: join(root, 'ca', 'ca.key'),
+    /** A profile the launched browser owns, so nothing is added to the user's own (03-capture.md). */
+    browserProfile: join(root, 'browser-profile'),
   };
 };
 
