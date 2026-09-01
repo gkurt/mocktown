@@ -139,6 +139,32 @@ That last variable is not in the doc's list of knobs, and without it a large and
 class of modern SDKs escapes the front door in host mode while appearing to be configured
 correctly. It belongs in the launch wrapper alongside `NODE_EXTRA_CA_CERTS`.
 
+### The wrapper's env vars also work when the recorded app runs on Bun
+
+Checked 2026-09-01, because `mocktown record -- <cmd>` cannot assume the child is Node —
+plenty of target apps run on Bun. Measured at a local proxy that counts absolute-URI
+requests and CONNECTs separately, so a transparent tunnel can't be mistaken for a direct
+hit:
+
+| | Node 24.20.0 | Bun 1.4.0 |
+|---|---|---|
+| `HTTP_PROXY` alone → `fetch` | ignored | **proxied** |
+| `HTTP_PROXY` alone → `node:http` | ignored | ignored |
+| `+ NODE_USE_ENV_PROXY=1` → both | proxied | proxied |
+| `NO_PROXY` honoured | yes | yes |
+| `NODE_EXTRA_CA_CERTS` honoured | yes | yes |
+
+Three things follow. **The wrapper needs no per-runtime branch** — the same
+`NODE_EXTRA_CA_CERTS` + `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1` set captures both runtimes
+for both `fetch` and `node:http`. **Bun proxies `fetch` even without the opt-in**, so a
+developer with `HTTPS_PROXY` already exported for unrelated reasons will silently route a
+Bun app's fetch traffic somewhere we don't control; the wrapper should set the variables
+explicitly rather than inheriting them, and warn if it is overriding a pre-existing value.
+**The two runtimes proxy plain HTTP differently** — Node's undici opens a CONNECT tunnel
+even for `http://`, Bun sends an absolute-URI request — so the front door has to accept
+both forms for the same URL. httpolyglot handles both, but a `seal verify` test should
+cover the pair rather than assuming one.
+
 ## Not covered here
 
 - **Streaming and binary bodies.** Everything here is text. Large bodies become
