@@ -135,6 +135,38 @@ export interface AuditFinding {
  * this session" — the property generated mocks rely on to correlate a credential across
  * requests without ever seeing it.
  */
+/**
+ * `JSON.rawJSON` / `JSON.isRawJSON` are ES2025 and implemented by both JavaScriptCore and
+ * V8, but TypeScript 7's `lib.esnext` has not caught up. Declared here rather than widened
+ * to `any` at the call sites, so the compiler still checks how they are used.
+ */
+declare global {
+  interface JSON {
+    rawJSON(text: string): { readonly rawJSON: string };
+    isRawJSON(value: unknown): boolean;
+  }
+}
+
+/**
+ * `JSON.parse` then `JSON.stringify` is not the identity on a JSON document. Every number
+ * becomes an IEEE double on the way in, so an integer past 2^53 comes back changed:
+ * `1788789099537123456` is written out as `1788789099537123300`. Real corpora are full of
+ * these — an OpenTelemetry `time_unix_nano` is exactly 19 digits — and the corruption is
+ * silent, which makes it worse than a crash: the recording still looks like a recording,
+ * and a mock generated from it returns a timestamp that was never sent.
+ *
+ * The reviver's `source` is the literal as written. Wrapping only the literals that would
+ * actually change keeps ordinary numbers as numbers, so the field rules downstream still
+ * see a number where the document had one.
+ */
+function parsePreservingNumbers(text: string): unknown {
+  return JSON.parse(text, function reviveExactly(_key, value, context?: { source?: string }) {
+    const source = context?.source;
+    if (typeof value === 'number' && source !== undefined && String(value) !== source) return JSON.rawJSON(source);
+    return value;
+  });
+}
+
 export class Scrubber {
   private readonly registry = new Map<string, string>(); // secret value -> placeholder
   private readonly kindCounts = new Map<string, number>();
@@ -237,6 +269,15 @@ export class Scrubber {
 
   private scrubJson(node: unknown, keyName = ''): unknown {
     if (typeof node === 'string') return this.scrubField(keyName, node);
+    // A number too precise to survive the round-trip arrives wrapped (see
+    // `parsePreservingNumbers`). It is still a number to the field rules, and it is not an
+    // object, so this has to come before the object branch below or the wrapper is
+    // destructured into `{ rawJSON: … }`.
+    if (JSON.isRawJSON(node)) {
+      const literal = (node as { rawJSON: string }).rawJSON;
+      const rule = this.fieldRule(keyName);
+      return rule ? this.placeholderFor(literal, this.classify(literal, rule.kind)) : node;
+    }
     if (typeof node === 'number') {
       const rule = this.fieldRule(keyName);
       if (rule) return this.placeholderFor(String(node), this.classify(String(node), rule.kind));
@@ -257,14 +298,27 @@ export class Scrubber {
     return this.scrubValue(text);
   }
 
-  /** Pass 1 for bodies: redact by field name, keeping the document's structure intact. */
+  /**
+   * Pass 1 for bodies: redact by field name, keeping the document's structure intact.
+   *
+   * The format is decided by **what the body is**, not by what the `content-type` claims.
+   * Field-name rules are the only layer that can catch a secret with no shape of its own —
+   * a password is just a word — so gating them on a header the client chose is gating the
+   * strongest layer on the least trustworthy input. `fetch(url, { body: JSON.stringify(x) })`
+   * with no explicit header sends `text/plain;charset=UTF-8`, which is how a real login
+   * body reached the corpus with its `password` field in the clear: the JSON branch never
+   * ran, and pass 2 has no field names to reason about. Parsing is the test — a body that
+   * is not JSON throws and falls through, costing one failed parse per non-JSON body.
+   */
   scrubBody(body: string, contentType: string): string {
     if (!body) return body;
-    if (contentType.includes('json')) {
+    // A JSON document starts with `{` or `[` after whitespace; anything else cannot parse,
+    // so this only skips the attempt, never a real document.
+    if (contentType.includes('json') || /^\s*[{[]/.test(body)) {
       try {
-        return JSON.stringify(this.scrubJson(JSON.parse(body)));
+        return JSON.stringify(this.scrubJson(parsePreservingNumbers(body)));
       } catch {
-        return this.scrubValue(body); // not valid JSON after all
+        // Not valid JSON after all — fall through to the shape rules.
       }
     }
     if (contentType.includes('x-www-form-urlencoded')) {

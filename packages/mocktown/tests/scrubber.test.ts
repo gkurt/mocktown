@@ -76,6 +76,38 @@ describe('the corpus stays agent-legible', () => {
     expect(serialised).toMatch(/cus_[A-Za-z0-9_]+/);
   });
 
+  test('numbers survive the round-trip exactly', () => {
+    // Scrubbing a JSON body means parsing and re-serialising it, and that is not the
+    // identity: every number becomes a double, so an integer past 2^53 comes back changed.
+    // An OpenTelemetry `time_unix_nano` is 19 digits, so a real corpus is full of them, and
+    // nothing announces the corruption — the recording still looks like a recording.
+    const body = (text: string) =>
+      new Scrubber().scrub({
+        id: 'e1',
+        method: 'GET',
+        url: 'https://example.test/x',
+        statusCode: 200,
+        requestHeaders: {},
+        requestBody: '',
+        responseHeaders: { 'content-type': 'application/json' },
+        responseBody: text,
+      }).responseBody;
+
+    for (const exact of [
+      '{"time_unix_nano":1788789099537123456}',
+      '{"id":9007199254740993}', // 2^53 + 1: the smallest integer a double cannot hold
+      '{"big":-12345678901234567890}',
+      '{"precise":0.1000000000000000055511151231257827}',
+      '{"nested":[{"t":1788793359178000001}]}',
+    ])
+      expect(body(exact)).toBe(exact);
+
+    // Ordinary numbers stay numbers, so the field rules still see one where the document
+    // had one rather than a wrapper object.
+    expect(body('{"count":3,"ratio":0.5}')).toBe('{"count":3,"ratio":0.5}');
+    expect(body('{"card_number":4242424242424242}')).toContain('{{secret:card-number#');
+  });
+
   test('auth scheme kept, credential replaced', () => {
     const auths = scrubbed.map((e) => String(e.requestHeaders.authorization ?? '')).filter(Boolean);
     expect(auths.length).toBeGreaterThanOrEqual(2);
@@ -227,6 +259,37 @@ describe('defence in depth is a property, not luck', () => {
 
     // And none of it happens unless the project asks.
     expect(body('{"creator":"dana@example.com"}', DEFAULT_RULES)).toContain('dana@example.com');
+  });
+
+  test('field rules do not depend on the client naming its content type', () => {
+    // `fetch(url, { body: JSON.stringify(x) })` with no explicit header sends
+    // `text/plain;charset=UTF-8`. A real login body reached a corpus that way with its
+    // password in the clear: the JSON branch never ran, and a password has no shape for
+    // pass 2 to recognise. The format has to be decided by the body, not the header.
+    const scrub = (body: string, contentType: string) =>
+      new Scrubber().scrub({
+        id: 'e1',
+        method: 'POST',
+        url: 'https://example.test/auth/login',
+        statusCode: 200,
+        requestHeaders: { 'content-type': contentType },
+        requestBody: body,
+        responseHeaders: {},
+        responseBody: '',
+      }).requestBody;
+
+    const login = '{"username":"ada@example.com","password":"hunter2-correct-horse","state":"abc"}';
+    for (const contentType of ['text/plain;charset=UTF-8', 'application/json', '']) {
+      const out = scrub(login, contentType);
+      expect(out, contentType).not.toContain('hunter2-correct-horse');
+      expect(out, contentType).toContain('{{secret:password#');
+      // Structure survives, so the corpus is still a legible example of the contract.
+      expect(JSON.parse(out).username).toBe('ada@example.com');
+    }
+
+    // A body that only looks like it might be JSON still goes through the shape rules
+    // rather than being dropped on the floor by a failed parse.
+    expect(scrub('{not json at all sk_test_abcdefghij', 'text/plain')).toContain('{{secret:stripe-secret-key#');
   });
 
   test('summary records kinds and counts, never values', () => {
