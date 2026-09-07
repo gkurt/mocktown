@@ -1,5 +1,5 @@
 /**
- * The shell. TanStack Router with code-based routes — there are eight of them and they are
+ * The shell. TanStack Router with code-based routes — there are ten of them and they are
  * all one component with one prop, so a file-based tree and its generated route file would
  * be machinery around nothing.
  *
@@ -17,15 +17,19 @@ import { Dashboard } from './pages/dashboard.tsx';
 import { Feed } from './pages/feed.tsx';
 import { Issues } from './pages/issues.tsx';
 import { Panels } from './pages/panels.tsx';
+import { Profiles } from './pages/profiles.tsx';
 import { Seal } from './pages/seal.tsx';
 import { Services } from './pages/services.tsx';
 import { State } from './pages/state.tsx';
+import { Urls } from './pages/urls.tsx';
 import './styles.css';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
   { to: '/feed', label: 'Feed' },
   { to: '/issues', label: 'Issues' },
+  { to: '/urls', label: 'Addresses' },
+  { to: '/profiles', label: 'Profiles' },
   { to: '/services', label: 'Services' },
   { to: '/corpus', label: 'Corpus' },
   { to: '/state', label: 'State' },
@@ -101,6 +105,8 @@ const routeTree = rootRoute.addChildren([
   page('/', Dashboard),
   page('/feed', Feed),
   page('/issues', Issues),
+  page('/urls', Urls),
+  page('/profiles', Profiles),
   page('/services', Services),
   page('/corpus', Corpus),
   page('/state', State),

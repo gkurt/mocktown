@@ -25,6 +25,8 @@ export const useSeal = (project: string) => useProjectQuery(['seal'], project, (
 export const useSandbox = (project: string) => useProjectQuery(['sandbox'], project, () => api.sandbox.get({ project }));
 export const useDrift = (project: string) => useProjectQuery(['drift'], project, () => api.drift.get({ project }));
 export const usePortless = (project: string) => useProjectQuery(['portless'], project, () => api.env.portless.get({ project }));
+export const useProfiles = (project: string) => useProjectQuery(['profiles'], project, () => api.profiles.list({ project }));
+export const useEnv = (project: string) => useProjectQuery(['env'], project, () => api.env.get({ project }));
 
 export type FeedEvent = Awaited<ReturnType<typeof api.feed.tail>>['events'][number];
 

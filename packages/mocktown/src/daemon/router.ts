@@ -85,6 +85,7 @@ export const router = os.router({
         // misreported resolution is exactly the confusion 08-projects-config.md warns of.
         source: input.source ?? 'unknown',
         workspace: runtime.resolved.workspace,
+        appUrl: runtime.resolved.file?.app?.url ?? null,
         frontDoor: runtime.frontDoorStatus(),
         services,
         providers: runtime.providerStatuses(),

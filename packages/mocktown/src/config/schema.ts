@@ -81,6 +81,16 @@ export const ProjectFile = z.object({
     })
     .default({ enabled: false, intervalHours: 24, services: [], flows: [] }),
   /**
+   * Where the app under test is reachable while mocktown is serving. Nothing dispatches on
+   * it and nothing breaks without it — it is the one URL every screen wants to link to and
+   * that mocktown cannot derive, because the app is the developer's process, not ours.
+   */
+  app: z
+    .object({
+      url: z.string().nullable().default(null).describe('The app under test, e.g. http://localhost:5173'),
+    })
+    .default({ url: null }),
+  /**
    * portless stable names (05-redirection.md). Off by default like drift, for a different
    * reason: portless binds 443 with sudo, edits `/etc/hosts` and puts a CA in the system
    * trust store. Opting into that is a person's decision, not a config default's.

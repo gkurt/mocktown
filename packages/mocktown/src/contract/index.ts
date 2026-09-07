@@ -62,6 +62,7 @@ export const contract = {
         withProject({
           source: z.string().describe('How the project was resolved: flag, env, file, default, or unknown if the caller did not say'),
           workspace: z.string().nullable(),
+          appUrl: z.string().nullable().describe('The app under test, from `app.url` — mocktown never derives this'),
           frontDoor: z.object({ running: z.boolean(), port: z.number().int().nullable(), mode: z.enum(['record', 'deny']) }),
           services: z.array(Service),
           providers: z.array(ProviderStatus),
