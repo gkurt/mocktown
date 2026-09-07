@@ -174,6 +174,21 @@ test('a same-origin request gets no CORS headers', async () => {
   expect(response.headers.get('access-control-allow-origin')).toBeNull();
 });
 
+test('a JSON body is parsed even when the client called it text/plain', async () => {
+  // `fetch(url, { body: JSON.stringify(x) })` sends text/plain unless told otherwise, and
+  // real front ends ship that way. Handing the handler a string where it expects an object
+  // does not throw — it reads `body.email` as undefined and answers "invalid credentials"
+  // to correct ones, which is the kind of defect that looks like a config problem for a day.
+  const baseUrl = runtime.allBaseUrls().get(SESSION);
+  const login = await fetch(`${baseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { host: SESSION, 'content-type': 'text/plain;charset=UTF-8' },
+    body: JSON.stringify({ email: 'default@mocktown.test', password: 'mock-default-1' }),
+  });
+  expect(login.status).toBe(200);
+  expect(login.headers.get('set-cookie') ?? '').toContain('app-session=mtk_');
+});
+
 test('a session cookie resolves the profile, not just a bearer token', async () => {
   // How a browser app actually carries a session: sign-in ends with Set-Cookie and no
   // request after it has an Authorization header at all. Reading only that header pinned

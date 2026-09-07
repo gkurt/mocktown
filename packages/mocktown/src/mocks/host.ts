@@ -468,13 +468,23 @@ function describeRequest(request: Request, url: URL, body: string) {
   };
 }
 
+/**
+ * What `req.body` is, decided by reading the body rather than believing the header.
+ *
+ * `fetch(url, { body: JSON.stringify(x) })` sends `text/plain;charset=UTF-8` unless the
+ * caller sets otherwise, and plenty of real front ends never do. Trusting the header there
+ * handed the mock a string where its handler expected an object, and the handler then read
+ * `body.username` as undefined and carried on — a login that answers "invalid credentials"
+ * to correct credentials, with nothing anywhere saying why. Parsing is the test: a body
+ * that is not JSON throws and falls through to the branches below.
+ */
 function parseBody(raw: string, contentType: string): unknown {
   if (!raw) return null;
-  if (contentType.includes('json')) {
+  if (contentType.includes('json') || /^\s*[{[]/.test(raw)) {
     try {
       return JSON.parse(raw);
     } catch {
-      return raw;
+      // Not JSON after all.
     }
   }
   if (contentType.includes('x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(raw));
