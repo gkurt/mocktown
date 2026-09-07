@@ -367,13 +367,25 @@ export class MockHost {
   /**
    * The front door maps incoming auth to a profile; unauthenticated requests get the
    * `anonymous` profile (12-scenario-controls.md).
+   *
+   * A bearer token is one of the two ways a session travels, and for a browser app it is
+   * usually the rarer one: sign-in ends with `Set-Cookie` and every later request carries
+   * the cookie and no `Authorization` at all. Reading only the header pinned such an app to
+   * `anonymous` for its whole run, which quietly emptied the axis profiles exist for — the
+   * mock could not tell a signed-in caller from a signed-out one, and `default` vs
+   * `empty-org` never took effect.
+   *
+   * The cookie's *name* is the app's business — `ed-admin-session`, `sid`, anything — so
+   * this matches on the token's own shape instead of requiring configuration. Only a value
+   * a mock minted through `ctx.signIn` can match, and the lookup is by primary key, so a
+   * page's other cookies cost one indexed miss each and nothing else.
    */
   private profileFor(request: Request): string {
-    const auth = request.headers.get('authorization');
-    if (!auth) return 'anonymous';
-    const token = auth.replace(/^(Bearer|token|Basic)\s+/i, '').trim();
-    const row = this.deps.db.select().from(schema.profileSessions).where(eq(schema.profileSessions.token, token)).get();
-    return row?.profile ?? 'anonymous';
+    for (const token of sessionTokens(request)) {
+      const row = this.deps.db.select().from(schema.profileSessions).where(eq(schema.profileSessions.token, token)).get();
+      if (row) return row.profile;
+    }
+    return 'anonymous';
   }
 
   private contextFor(service: string, profile: string, endpoint: string, request: MockRequest): MockCtx {
@@ -414,6 +426,26 @@ export class MockHost {
       },
     };
   }
+}
+
+/**
+ * Every value in this request that could be a profile session token, header first.
+ *
+ * `mtk_` is the prefix `ctx.signIn` and `POST /profiles/<name>/session` both mint, so it is
+ * the one thing a session token is guaranteed to have in common across transports.
+ */
+function sessionTokens(request: Request): string[] {
+  const out: string[] = [];
+  const auth = request.headers.get('authorization');
+  if (auth) out.push(auth.replace(/^(Bearer|token|Basic)\s+/i, '').trim());
+  const cookie = request.headers.get('cookie');
+  if (cookie) {
+    for (const pair of cookie.split(';')) {
+      const value = pair.slice(pair.indexOf('=') + 1).trim();
+      if (value.startsWith('mtk_')) out.push(value);
+    }
+  }
+  return out;
 }
 
 /** gRPC is an ordinary POST wearing a content type; nothing else about it is ordinary. */

@@ -21,6 +21,7 @@ const { resolveProject } = await import('#src/config/project.ts');
 const workspace = join(root, 'app');
 const GOOD = 'good.example.com';
 const BAD = 'bad.example.com';
+const SESSION = 'session.example.com';
 let runtime: InstanceType<typeof ProjectRuntime>;
 
 const typesModule = join(import.meta.dir, '..', 'src', 'mocks', 'types.ts');
@@ -42,7 +43,11 @@ beforeAll(async () => {
     JSON.stringify(
       {
         project: 'generated-test',
-        services: { [GOOD]: { provider: `generated:${GOOD}` }, [BAD]: { provider: `generated:${BAD}` } },
+        services: {
+          [GOOD]: { provider: `generated:${GOOD}` },
+          [BAD]: { provider: `generated:${BAD}` },
+          [SESSION]: { provider: `generated:${SESSION}` },
+        },
       },
       null,
       2,
@@ -64,6 +69,33 @@ beforeAll(async () => {
     state.set("invoices", "inv_1", { id: "inv_1" });
   },
   routes: [{ method: "GET", path: "/v1/invoices", describe: "List", handler: () => ({ status: 200, body: { ok: true } }) }],`,
+  );
+
+  writeMock(
+    SESSION,
+    `  routes: [
+    {
+      method: "POST",
+      path: "/auth/login",
+      describe: "Sign in and hand back a session cookie",
+      handler: (req, ctx) => {
+        const body = req.body as { email: string; password: string };
+        const session = ctx.signIn({ email: body.email, password: body.password });
+        if (!session) return { status: 401, body: { error: "bad credentials" } };
+        return {
+          status: 200,
+          headers: { "set-cookie": \`app-session=\${session.token}; Path=/; HttpOnly\` },
+          body: { ok: true },
+        };
+      },
+    },
+    {
+      method: "GET",
+      path: "/whoami",
+      describe: "Report the profile this request resolved to",
+      handler: (_req, ctx) => ({ status: 200, body: { profile: ctx.profile } }),
+    },
+  ],`,
   );
 
   runtime = new ProjectRuntime(resolveProject({ cwd: workspace }));
@@ -140,4 +172,39 @@ test('a same-origin request gets no CORS headers', async () => {
   const baseUrl = runtime.allBaseUrls().get(GOOD);
   const response = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: GOOD } });
   expect(response.headers.get('access-control-allow-origin')).toBeNull();
+});
+
+test('a session cookie resolves the profile, not just a bearer token', async () => {
+  // How a browser app actually carries a session: sign-in ends with Set-Cookie and no
+  // request after it has an Authorization header at all. Reading only that header pinned
+  // such an app to `anonymous` for its whole run, which emptied the axis profiles exist
+  // for — `default` and `empty-org` could never take effect.
+  const baseUrl = runtime.allBaseUrls().get(SESSION);
+
+  const anon = await fetch(`${baseUrl}/whoami`, { headers: { host: SESSION } });
+  expect(await anon.json()).toEqual({ profile: 'anonymous' });
+
+  const login = await fetch(`${baseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { host: SESSION, 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'default@mocktown.test', password: 'mock-default-1' }),
+  });
+  expect(login.status).toBe(200);
+  const cookie = login.headers.get('set-cookie') ?? '';
+  expect(cookie).toContain('app-session=mtk_');
+
+  const named = await fetch(`${baseUrl}/whoami`, {
+    headers: { host: SESSION, cookie: cookie.split(';')[0]! },
+  });
+  expect(await named.json()).toEqual({ profile: 'default' });
+
+  // The app's other cookies sit beside it without confusing the lookup, and a cookie that
+  // no mock minted leaves the caller anonymous rather than guessing.
+  const noisy = await fetch(`${baseUrl}/whoami`, {
+    headers: { host: SESSION, cookie: `ph_id=abc; ${cookie.split(';')[0]!}; theme=dark` },
+  });
+  expect(await noisy.json()).toEqual({ profile: 'default' });
+
+  const forged = await fetch(`${baseUrl}/whoami`, { headers: { host: SESSION, cookie: 'app-session=mtk_nope' } });
+  expect(await forged.json()).toEqual({ profile: 'anonymous' });
 });
