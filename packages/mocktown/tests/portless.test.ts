@@ -51,6 +51,9 @@ let provider: Bun.Server<never>;
 let proxyPort = 0;
 let providerPort = 0;
 let providerHits = 0;
+/** How long a freshly written route stays invisible, standing in for the proxy's reload. */
+let routeDelayMs = 0;
+const firstSeen = new Map<string, number>();
 
 function installStub(body: string): string {
   const path = join(binDir, 'node_modules', '.bin', 'portless');
@@ -86,6 +89,10 @@ beforeAll(() => {
       const name = host.replace(/\.localhost$/, '');
       const port = routes()[name];
       if (!port) return new Response('no route', { status: 502 });
+      const since = firstSeen.get(name) ?? Date.now();
+      firstSeen.set(name, since);
+      // Real portless serves its own 404 page for a name it has not reloaded yet.
+      if (Date.now() - since < routeDelayMs) return new Response('not found', { status: 404 });
       return fetch(`http://127.0.0.1:${port}${new URL(request.url).pathname}`);
     },
   });
@@ -127,9 +134,18 @@ test('off is off, and says which key turns it on', async () => {
 });
 
 test('a missing binary is reported as installable, not as broken', async () => {
-  const status = await syncPortless(input({ workspace: join(root, 'no-such-workspace') }));
-  expect(status.available).toBe(false);
-  expect(status.reason).toContain('not on PATH');
+  // The PATH fallback reads the developer's own machine, so on one that actually has
+  // portless this would run the real binary against the stub's state directory and rewrite
+  // `routes.json` in portless's own format, breaking every test after it.
+  const path = process.env.PATH;
+  process.env.PATH = join(root, 'no-such-bin');
+  try {
+    const status = await syncPortless(input({ workspace: join(root, 'no-such-workspace') }));
+    expect(status.available).toBe(false);
+    expect(status.reason).toContain('not on PATH');
+  } finally {
+    process.env.PATH = path;
+  }
   expect(portlessBinary(binDir)).toBe(join(binDir, 'node_modules', '.bin', 'portless'));
 });
 
@@ -163,6 +179,21 @@ test('a proven name serves the provider, and the probe never touched it', async 
 
   await releasePortless(status, settings(), binDir);
   expect(routes()).toEqual({});
+});
+
+test('a route the proxy has not reloaded yet is waited for, not called a stranger', async () => {
+  // `portless alias` exits once the route is written, a moment before the running proxy
+  // picks it up. Probing once always lost that race, so every working setup failed.
+  routeDelayMs = 600;
+  firstSeen.clear();
+  try {
+    const status = await syncPortless(input());
+    expect(status.reason).toContain('proven');
+    expect(status.available).toBe(true);
+    await releasePortless(status, settings(), binDir);
+  } finally {
+    routeDelayMs = 0;
+  }
 });
 
 test('a base URL with no port cannot be aliased, and says so per service', async () => {

@@ -36,6 +36,7 @@ import { findFreePort } from '#src/util/ports.ts';
 /** A command that prompts in a TTY exits with a descriptive error here instead — we want the error. */
 const ALIAS_TIMEOUT_MS = 15_000;
 const PROBE_TIMEOUT_MS = 5_000;
+const PROBE_POLL_MS = 150;
 
 export interface PortlessSettings {
   tld: string;
@@ -73,7 +74,9 @@ export function unavailable(enabled: boolean, reason: string, binary: string | n
 export function portlessBinary(workspace: string | null): string | null {
   const local = workspace ? join(workspace, 'node_modules', '.bin', 'portless') : null;
   if (local && existsSync(local)) return local;
-  return Bun.which('portless');
+  // `Bun.which` searches the PATH this process started with unless it is handed one, and
+  // the daemon outlives the shell that launched it.
+  return Bun.which('portless', { PATH: process.env.PATH ?? '' });
 }
 
 const slug = (value: string) =>
@@ -179,24 +182,32 @@ async function proveUsable(
     const registered = await alias(binary, name, port, settings);
     if (!registered.ok) return { ok: false, reason: `\`portless alias\` failed: ${registered.output}` };
 
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      // Verifying against the bundle we assembled is the point: if the app would not trust
-      // this certificate, neither should this probe, and a pass here means the bundle is right.
-      tls: settings.tls ? { ca: readFileSync(caBundle, 'utf8') } : undefined,
-    });
-    const body = await response.text();
-    if (body.trim() !== nonce)
-      return { ok: false, reason: `${url} answered ${response.status} but not from our listener, so something else owns that name` };
-    return { ok: true, reason: `proven: ${url} reached a mocktown listener on :${port} through the portless proxy` };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      reason:
-        `${url} did not answer (${detail}). The proxy may not be running (\`portless proxy start\`), the CA may not be trusted ` +
-        `(\`portless trust\`), or the name may not resolve (\`portless hosts sync\`).`,
-    };
+    // `portless alias` exits once the route is written, which is a moment before the running
+    // proxy reloads it — fetching immediately gets the proxy's own 404 for an unknown name.
+    // Every probe would fail on a working setup, so poll instead of trusting the exit code.
+    const deadline = Date.now() + PROBE_TIMEOUT_MS;
+    let last = 'no attempt made';
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+          // Verifying against the bundle we assembled is the point: if the app would not trust
+          // this certificate, neither should this probe, and a pass here means the bundle is right.
+          tls: settings.tls ? { ca: readFileSync(caBundle, 'utf8') } : undefined,
+        });
+        const body = await response.text();
+        if (body.trim() === nonce)
+          return { ok: true, reason: `proven: ${url} reached a mocktown listener on :${port} through the portless proxy` };
+        last = `${url} answered ${response.status} but not from our listener, so something else owns that name`;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        last =
+          `${url} did not answer (${detail}). The proxy may not be running (\`portless proxy start\`), the CA may not be trusted ` +
+          `(\`portless trust\`), or the name may not resolve (\`portless hosts sync\`).`;
+      }
+      await Bun.sleep(PROBE_POLL_MS);
+    }
+    return { ok: false, reason: last };
   } finally {
     await unalias(binary, name, settings).catch(() => {});
     server.stop(true);
