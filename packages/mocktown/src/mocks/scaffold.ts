@@ -14,8 +14,23 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CorpusExport } from '#src/mocks/corpus.ts';
 
+/**
+ * The corpus is a sample of the contract, never the contract itself. Preflights are
+ * answered by the host (see `preflightResponse` in host.ts), so an `OPTIONS` twin per route
+ * is pure transcription — on one real capture it was 77 of 158 routes. Dropping them here
+ * is what stops the scaffold from teaching the habit it exists to discourage.
+ *
+ * A service whose preflight really is part of its contract can still declare the route by
+ * hand; an explicit route always beats the host's default.
+ */
+const isPreflight = (route: { method: string }) => route.method.toUpperCase() === 'OPTIONS';
+
 const HOUSE_RULES = [
   'Never invent auth-shaped fields. Credentials in the corpus appear as `{{secret:<kind>#<n>}}` placeholders; accept a credential of that shape and use `ctx.fakeSecret(kind)` if you must return one.',
+  'The corpus is a sample of the contract, not a script to replay. Implement the contract it implies: a route observed with one id must work for any id, and a list observed with three entries must work for none or thirty.',
+  'Collapse routes that differ only by an identifier into one parameterised route. `/things/abc` and `/things/def` are `/things/{thingId}`. Do this without asking — the individual recordings are examples, not separate endpoints.',
+  "Never hard-code an identifier from the corpus. Recorded ids — raw in a path, or a `{{secret:…}}` placeholder in a body — are one real org's data. Mint your own in `seed` with `state.nextId`/`ctx.prng`, and keep them referentially consistent, so what a route returns matches the id its path was given.",
+  'CORS preflight is handled for you. The host answers `OPTIONS` by reflecting the request origin, so do not write an `OPTIONS` route unless this service does something unusual with it.',
   'Prefer widening an existing matcher over duplicating a route. Two routes that differ only by an optional query parameter are one route.',
   'State fidelity over verbatim replay. If the corpus shows `POST /x` followed by `GET /x/{id}`, the created entity must be readable. Keep it in `ctx.state`, not in a closure.',
   'All randomness goes through `ctx.prng`. `Math.random()`, `Date.now()` and `crypto.randomUUID()` break the determinism contract that makes runs reproducible.',
@@ -87,7 +102,7 @@ function renderBrief(corpus: CorpusExport): string {
     '',
   ];
 
-  for (const route of corpus.routes) {
+  for (const route of corpus.routes.filter((r) => !isPreflight(r))) {
     lines.push(`### \`${route.method} ${route.pathTemplate}\``, '');
     lines.push(`Observed ${route.observations} time${route.observations === 1 ? '' : 's'}.`, '');
     for (const hint of route.statefulHints) lines.push(`- **${hint}**`);
@@ -202,6 +217,7 @@ ${corpus.sockets
     : '';
 
   const routes = corpus.routes
+    .filter((route) => !isPreflight(route))
     .map(
       (route) => `    {
       method: ${JSON.stringify(route.method)},

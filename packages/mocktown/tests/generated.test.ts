@@ -100,3 +100,44 @@ test('the healthy mock still serves', async () => {
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ ok: true });
 });
+
+test('preflight is answered by reflection, without a route for it', async () => {
+  // The mock above declares no OPTIONS route, and should never have to: a wildcard origin
+  // is illegal on a credentialed request, so the only correct answer reflects the caller.
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const origin = 'https://app.example.com';
+  const response = await fetch(`${baseUrl}/v1/invoices`, {
+    method: 'OPTIONS',
+    headers: {
+      host: GOOD,
+      origin,
+      'access-control-request-method': 'GET',
+      'access-control-request-headers': 'authorization,content-type',
+    },
+  });
+
+  expect(response.status).toBe(204);
+  expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+  expect(response.headers.get('access-control-allow-origin')).not.toBe('*');
+  expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+  expect(response.headers.get('access-control-allow-methods')).toBe('GET');
+  expect(response.headers.get('access-control-allow-headers')).toBe('authorization,content-type');
+  expect(response.headers.get('vary')).toContain('Origin');
+});
+
+test('the real response carries the origin too', async () => {
+  // A passing preflight only buys the right to send; without this the browser discards
+  // the answer and reports a CORS error on a request the mock served perfectly.
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const origin = 'https://app.example.com';
+  const response = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: GOOD, origin } });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+  expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+});
+
+test('a same-origin request gets no CORS headers', async () => {
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const response = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: GOOD } });
+  expect(response.headers.get('access-control-allow-origin')).toBeNull();
+});

@@ -77,7 +77,13 @@ export class MockHost {
     this.server = Bun.serve<SocketBinding>({
       port,
       hostname: '127.0.0.1', // 10-security.md: mocks never leave loopback
-      fetch: (request, server) => this.handle(request, server),
+      // Every answer gets the CORS headers, including the 501s: an unmatched route that the
+      // browser turns into an opaque CORS error instead of the body explaining itself is a
+      // diagnosis thrown away at the last step.
+      fetch: async (request, server) => {
+        const response = await this.handle(request, server);
+        return response && withCors(response, request);
+      },
       // WebSocket handlers are a property of the server, not of a response, so the whole
       // socket API is threaded through `ws.data` set at upgrade time.
       websocket: {
@@ -134,6 +140,11 @@ export class MockHost {
 
     const profile = this.profileFor(request);
     const match = matchRoute(module.routes, request.method, url.pathname);
+
+    // Answered here rather than routed, so a mock need not carry an OPTIONS twin per route.
+    // An explicit route wins, and a preflight that matches nothing is *not* an unmatched
+    // request: filing it would bury the issue queue under browser plumbing.
+    if (!match && request.method === 'OPTIONS' && request.headers.get('origin')) return preflightResponse(request);
 
     if (!match) {
       const near = diagnose(module.routes, request.method, url.pathname);
@@ -451,4 +462,52 @@ function toResponse(response: MockResponse): Response {
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+/**
+ * CORS is browser plumbing, not behaviour a mock should have to restate. A recorded corpus
+ * carries a preflight for every credentialed cross-origin route — on one real capture, 77
+ * of 158 routes were OPTIONS twins — and writing those out one per route teaches a
+ * generating agent to transcribe the corpus instead of implementing the contract.
+ *
+ * So the host answers preflight itself, by *reflection*: echo the Origin, echo the method
+ * and headers the browser asked about, and allow credentials. Reflection is what the real
+ * services do, and it is the only thing that works — a wildcard origin is illegal on a
+ * credentialed request, which is the exact failure that sent us looking here in the first
+ * place (see `cors: false` in frontdoor/controller.ts).
+ *
+ * A mock that declares its own `OPTIONS` route keeps it: an explicit route always wins,
+ * which is the escape hatch for a service whose preflight really is part of its contract.
+ */
+function corsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get('origin');
+  if (!origin) return {};
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-credentials': 'true',
+    vary: 'Origin',
+  };
+}
+
+function preflightResponse(request: Request): Response {
+  const headers = new Headers(corsHeaders(request));
+  headers.set('access-control-allow-methods', request.headers.get('access-control-request-method') ?? '*');
+  const asked = request.headers.get('access-control-request-headers');
+  if (asked) headers.set('access-control-allow-headers', asked);
+  headers.set('access-control-max-age', '86400');
+  headers.set('vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+  return new Response(null, { status: 204, headers });
+}
+
+/**
+ * The other half. A passing preflight only buys the right to *send* the request; the
+ * browser discards the response too unless it carries the origin as well. A handler that
+ * set its own CORS headers is left alone.
+ */
+function withCors(response: Response, request: Request): Response {
+  const origin = request.headers.get('origin');
+  if (!origin || response.headers.has('access-control-allow-origin')) return response;
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(corsHeaders(request))) headers.set(key, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
