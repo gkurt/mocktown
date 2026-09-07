@@ -26,7 +26,14 @@ import { IssueEngine } from '#src/issues/engine.ts';
 import { EmulateProvider, emulateServiceId } from '#src/providers/emulate.ts';
 import { GeneratedProvider } from '#src/providers/generated.ts';
 import type { Provider, StateSnapshot } from '#src/providers/types.ts';
-import { type PortlessSettings, type PortlessStatus, releasePortless, syncPortless, unavailable } from '#src/redirect/portless.ts';
+import {
+  type PortlessSettings,
+  type PortlessStatus,
+  releasePortless,
+  stableName,
+  syncPortless,
+  unavailable,
+} from '#src/redirect/portless.ts';
 import { Sandbox, type SandboxMode, type SandboxStatus } from '#src/sandbox/sandbox.ts';
 import { type SandboxVerifyResult, verifySandbox } from '#src/sandbox/verify.ts';
 import { describeKnobs, effectiveKnobs } from '#src/scenario/knobs.ts';
@@ -665,6 +672,7 @@ export class ProjectRuntime {
     }
 
     this.providers = started;
+    this.applyStableAliases();
     for (const provider of started) {
       this.note('provider', `${provider.name} (${provider.kind}) up for ${provider.services.join(', ') || 'no services'}`, {
         ref: provider.name,
@@ -706,6 +714,35 @@ export class ProjectRuntime {
           .run();
       }
     }
+  }
+
+  /**
+   * A generated mock is chosen by its Host header, and portless fronts it under a slugged
+   * name that is not the service, so the provider has to be told those names or "stable
+   * names: …" is followed by a 501 on every request.
+   *
+   * Derived from what mocktown would mint, not from what a sync just proved. A name we
+   * handed out stays registered in portless across runs, so it keeps arriving whether or
+   * not this process managed to prove the proxy — and a name we mint is never something a
+   * person should be asked to build a mock for. Both spellings go in: the Host as sent, and
+   * the form `loopbackAlias` leaves behind after stripping `.localhost`.
+   */
+  private applyStableAliases(): void {
+    const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
+    if (!generated) return;
+    // What the proxy is actually serving, which is not necessarily what the project declared.
+    const tld = this.portless?.resolved?.tld ?? this.portlessSettings().tld;
+    const aliases = new Map<string, string>();
+    for (const service of generated.services) {
+      const name = stableName(this.project.name, service);
+      aliases.set(name, service);
+      aliases.set(`${name}.${tld}`, service);
+    }
+    for (const entry of this.portless?.names ?? []) {
+      aliases.set(entry.name, entry.service);
+      aliases.set(`${entry.name}.${tld}`, entry.service);
+    }
+    generated.setAliases(aliases);
   }
 
   private onMockUnmatched(event: {
@@ -1024,13 +1061,7 @@ export class ProjectRuntime {
     } catch (error) {
       this.portless = unavailable(enabled, `portless sync failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    // A generated mock is chosen by its Host header, and portless fronts it under a
-    // slugged name that is not the service. Telling the provider about those names is what
-    // stops "stable names: …" from being followed by a 501 on every request.
-    const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
-    // What the proxy is actually serving, which is not necessarily what the project declared.
-    const tld = this.portless.resolved?.tld ?? this.portlessSettings().tld;
-    generated?.setAliases(new Map(this.portless.names.map((entry) => [`${entry.name}.${tld}`, entry.service])));
+    this.applyStableAliases();
 
     if (enabled)
       this.note(

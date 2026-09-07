@@ -241,6 +241,24 @@ test('a `.localhost` alias reaches the mock the Host names', async () => {
   expect(unknown.status).toBe(501);
 });
 
+test('a name mocktown mints is served without waiting for a sync to prove it', async () => {
+  // The alias map used to be set only by a successful `syncPortless`, so a failed probe — or
+  // a provider restart — made mocktown 501 on the very names it had handed out and written
+  // into `.env.mocktown`. portless keeps those routes across runs and goes on delivering
+  // them, so the request arrives either way. A name we mint is ours to answer.
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const minted = `${stableName('generated-test', GOOD)}.localhost`;
+
+  const response = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: minted } });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ ok: true });
+
+  // And after `loopbackAlias` has taken the suffix off, which is the form that reached the
+  // lookup when the tld was `.localhost`.
+  const stripped = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: stableName('generated-test', GOOD) } });
+  expect(stripped.status).toBe(200);
+});
+
 test('a provider answers to a stable name that is not the service name', async () => {
   // portless fronts each provider under a slugged name — `good.example.com` becomes
   // `good-example-com.<project>.localhost` — which no suffix-stripping turns back into the
@@ -253,6 +271,8 @@ test('a provider answers to a stable name that is not the service name', async (
   const before = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: stable } });
   expect(before.status).toBe(501);
 
+  // Replaces the map wholesale, derived entries included — the runtime only ever calls this
+  // with the full set, so a partial map is a test's privilege, not a supported use.
   provider.setAliases(new Map([[stable, GOOD]]));
   const after = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: stable } });
   expect(after.status).toBe(200);
