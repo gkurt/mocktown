@@ -139,6 +139,7 @@ export const VerifyResult = z.object({
       recordingId: z.string(),
       method: z.string(),
       path: z.string(),
+      pathTemplate: z.string(),
       reason: z.string(),
       expectedStatus: z.number().int().nullable(),
       actualStatus: z.number().int().nullable(),

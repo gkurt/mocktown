@@ -237,3 +237,22 @@ test('a schema catches what sampling one array element cannot', async () => {
 });
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+test('a failure names the route, not only the one request that showed it', async () => {
+  // Issues are filed per route and resolved by replaying that route's recordings. A failure
+  // that carries only the concrete path leaves the filing code nothing but a UUID-bearing
+  // path to store as a template, and no recording ever matches it again.
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('nope', { status: 500 }) });
+  try {
+    const result = await verifyRecordings(
+      [recording({ path: '/v1/orgs/0481a213/stats/graph', pathTemplate: '/v1/orgs/{orgId}/stats/graph', statusCode: 200 })],
+      { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' },
+      new Scrubber([]),
+    );
+    expect(result.failed).toBe(1);
+    expect(result.failures[0]!.path).toBe('/v1/orgs/0481a213/stats/graph');
+    expect(result.failures[0]!.pathTemplate).toBe('/v1/orgs/{orgId}/stats/graph');
+  } finally {
+    server.stop(true);
+  }
+});

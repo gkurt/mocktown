@@ -22,6 +22,9 @@ export interface VerifyFailure {
   recordingId: string;
   method: string;
   path: string;
+  /** The route this exchange belongs to. A concrete path identifies one request; only the
+   * template identifies the others that would exercise the same fix. */
+  pathTemplate: string;
   reason: string;
   expectedStatus: number | null;
   actualStatus: number | null;
@@ -147,6 +150,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
         recordingId: recording.id,
         method: recording.method,
         path: recording.path,
+        pathTemplate: recording.pathTemplate,
         reason: `request failed: ${error instanceof Error ? error.message : String(error)}`,
         expectedStatus: recording.statusCode,
         actualStatus: null,
@@ -164,6 +168,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
         recordingId: recording.id,
         method: recording.method,
         path: recording.path,
+        pathTemplate: recording.pathTemplate,
         reason: `status class differs (recorded ${recording.statusCode}, mock returned ${response.status})`,
         expectedStatus: recording.statusCode,
         actualStatus: response.status,
@@ -182,6 +187,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
           recordingId: recording.id,
           method: recording.method,
           path: recording.path,
+          pathTemplate: recording.pathTemplate,
           reason: 'recorded response was JSON, the mock returned something that does not parse as JSON',
           expectedStatus: recording.statusCode,
           actualStatus: response.status,
@@ -202,6 +208,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
           recordingId: recording.id,
           method: recording.method,
           path: recording.path,
+          pathTemplate: recording.pathTemplate,
           reason: schema
             ? `response does not satisfy the schema for ${schemaKey(recording.method, recording.pathTemplate)} ${recording.statusCode}`
             : 'response shape does not cover what the recording contained',

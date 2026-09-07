@@ -315,17 +315,19 @@ export const router = os.router({
       }
 
       runtime.issues.setStatus(input.id, 'verifying');
-      const recordings = recordingsForService(runtime.db, issue.service, undefined, 100)
-        .filter((row) => !issue.pathTemplate || row.pathTemplate === issue.pathTemplate)
-        .map((row) => inflateRecording(runtime.name, row));
+      const recordings = recordingsForService(runtime.db, issue.service, undefined, 1000, issue.pathTemplate ?? undefined).map((row) =>
+        inflateRecording(runtime.name, row),
+      );
 
       const result = await verifyRecordings(recordings, { baseUrl, service: issue.service }, runtime.currentScrubber);
-      const passed = result.failed === 0;
-      runtime.issues.setStatus(
-        input.id,
-        passed ? 'resolved' : 'reopened',
-        passed ? input.note : `verification failed: ${result.failed}/${result.total} replayed requests did not match`,
-      );
+      // An empty replay is not a passing replay. Closing an issue on zero evidence is worse
+      // than leaving it open, because the queue then reads as work that was actually done.
+      const passed = result.total > 0 && result.failed === 0;
+      const reason =
+        result.total === 0
+          ? `verification found no recording to replay for ${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim()
+          : `verification failed: ${result.failed}/${result.total} replayed requests did not match`;
+      runtime.issues.setStatus(input.id, passed ? 'resolved' : 'reopened', passed ? input.note : reason);
 
       return { project: runtime.name, issue: toIssue(runtime.issues.get(input.id)!), verified: passed, verification: result };
     }),
@@ -382,7 +384,7 @@ export const router = os.router({
           service: input.service,
           method: failure.method,
           path: failure.path,
-          pathTemplate: failure.path,
+          pathTemplate: failure.pathTemplate,
           sessionId: runtime.session,
           request: { method: failure.method, path: failure.path },
           diagnosis: {

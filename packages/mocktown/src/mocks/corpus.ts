@@ -256,8 +256,14 @@ export function routeTable(db: Db, service?: string) {
 }
 
 /** Recordings for one service, oldest first — the replay order the verify harness uses. */
-export function recordingsForService(db: Db, service: string, session?: string, limit = 100) {
-  const conditions = [eq(schema.recordings.service, service), ...(session ? [eq(schema.recordings.sessionId, session)] : [])];
+export function recordingsForService(db: Db, service: string, session?: string, limit = 100, pathTemplate?: string) {
+  // Narrowing has to happen in the query. Filtering the first `limit` rows afterwards asks
+  // for one route and gets whichever of it happens to fall inside an arbitrary prefix.
+  const conditions = [
+    eq(schema.recordings.service, service),
+    ...(session ? [eq(schema.recordings.sessionId, session)] : []),
+    ...(pathTemplate ? [eq(schema.recordings.pathTemplate, pathTemplate)] : []),
+  ];
   return db
     .select()
     .from(schema.recordings)
