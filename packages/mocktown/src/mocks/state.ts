@@ -16,6 +16,8 @@ export class SqliteStateStore implements StateStore {
   private readonly db: Db;
   private readonly service: string;
   private readonly profile: string;
+  /** Ids handed out but not yet written, so `nextId` can be called before `set`. */
+  private readonly issued = new Map<string, number>();
 
   constructor(db: Db, service: string, profile: string) {
     this.db = db;
@@ -76,9 +78,17 @@ export class SqliteStateStore implements StateStore {
   /**
    * Sequential rather than random, on purpose: an id an agent can predict makes a failing
    * replay readable, and the determinism contract holds without consuming a PRNG stream.
+   *
+   * It also has to be monotonic *within* a pass, not only across them. Deriving it from
+   * `count` alone meant three calls before the first `set` all returned `x_000001`, so a
+   * seed that built its rows before storing them wrote each one over the last and ended
+   * with a single entry — no error, just two thirds of the data missing, discovered when
+   * a list came back short. Ids already handed out are remembered here, and `count` still
+   * sets the floor so a store built over existing rows never reissues one.
    */
   nextId(collection: string, prefix = 'id'): string {
-    const next = this.count(collection) + 1;
+    const next = Math.max(this.count(collection), this.issued.get(collection) ?? 0) + 1;
+    this.issued.set(collection, next);
     return `${prefix}_${String(next).padStart(6, '0')}`;
   }
 }

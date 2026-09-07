@@ -4,7 +4,14 @@
  * The shape rules have their own coverage through the agent loop; this file is about the
  * request itself, where a redirect used to cost both correctness and the egress guarantee.
  */
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
+
+const root = join(import.meta.dir, '.tmp-verify');
+process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
+process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
+
 import type { Recording } from '#src/contract/schemas.ts';
 import { verifyRecordings } from '#src/mocks/verify.ts';
 import { Scrubber } from '#src/scrub/scrubber.ts';
@@ -88,3 +95,24 @@ test('a status class that genuinely differs is still a failure', async () => {
     server.stop(true);
   }
 });
+
+test('nextId is monotonic within a pass, not only across writes', async () => {
+  // Deriving it from `count` alone meant three calls before the first `set` all returned
+  // `org_000001`, so a seed that built its rows before storing them silently kept one.
+  const { openProjectDb } = await import('#src/db/client.ts');
+  const { SqliteStateStore } = await import('#src/mocks/state.ts');
+
+  const db = openProjectDb('nextid-test');
+  const state = new SqliteStateStore(db, 'api.example.test', 'default');
+
+  const ids = [state.nextId('orgs', 'org'), state.nextId('orgs', 'org'), state.nextId('orgs', 'org')];
+  expect(new Set(ids).size).toBe(3);
+  for (const id of ids) state.set('orgs', id, { id });
+  expect(state.count('orgs')).toBe(3);
+
+  // And a store built over existing rows never reissues one of them.
+  const later = new SqliteStateStore(db, 'api.example.test', 'default');
+  expect(ids).not.toContain(later.nextId('orgs', 'org'));
+});
+
+afterAll(() => rmSync(root, { recursive: true, force: true }));
