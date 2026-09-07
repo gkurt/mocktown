@@ -11,7 +11,19 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as z from 'zod/v4';
-import { buildSchemas, detectMaps, infer, merge, print, renderSchemaModule, schemaDiff, writeSchemaModule } from '#src/mocks/schema.ts';
+import {
+  buildSchemas,
+  detectMaps,
+  driftBetween,
+  infer,
+  merge,
+  print,
+  renderSchemaModule,
+  schemaDiff,
+  type TypeNode,
+  writeSchemaModule,
+} from '#src/mocks/schema.ts';
+import { Scrubber } from '#src/scrub/scrubber.ts';
 
 /** The printed source, evaluated — the only way to test what the author will actually get. */
 function compile(source: string): z.ZodType {
@@ -223,4 +235,106 @@ test('the rendered module keys schemas by method, path and status', () => {
   expect(module).toContain('"GET /v1/things"');
   expect(module).toContain('200:');
   expect(module).toContain('satisfies Record<string, Record<number, z.ZodType>>');
+});
+
+test('a redacted field is marked, so the author knows the value is a stub', () => {
+  // The corpus cannot say this for itself: after the numeric fix a scrubbed count is still
+  // a number, so nothing in the body distinguishes `totalTokens: 91234` from a real one.
+  // The field rule is a pure function of the name, so the same question answers it later.
+  const scrubber = new Scrubber();
+  const note = (field: string, type: TypeNode) => {
+    const rule = scrubber.fieldRule(field);
+    if (!rule) return undefined;
+    const kinds = type.kind === 'union' ? type.options.map((option) => option.kind) : [type.kind];
+    if (!kinds.every((kind) => kind === 'string' || kind === 'number' || kind === 'null')) return undefined;
+    return `scrubbed as \`${rule.kind}\``;
+  };
+  const [entry] = buildSchemas(
+    [
+      {
+        method: 'GET',
+        pathTemplate: '/v1/usage',
+        statusCode: 200,
+        body: '{"tokenUsage":{"totalTokens":91234},"requestCount":7}',
+      },
+    ],
+    note,
+  );
+
+  expect(entry!.source).toContain('totalTokens: z.number(), // scrubbed as `token`');
+  // A field the rules never touched carries no comment, or the marking means nothing.
+  expect(entry!.source).toContain('requestCount: z.number(),\n');
+  // And `tokenUsage` matches the rule by name but is an object the scrubber walked
+  // through, so marking it would put noise on the line above the one that matters.
+  expect(entry!.source).toContain('tokenUsage: z.object({\n');
+  // The source still compiles: a comment is a comment, not a broken expression.
+  expect(compile(entry!.source).safeParse({ tokenUsage: { totalTokens: 1 }, requestCount: 2 }).success).toBe(true);
+});
+
+test('a checked-in schema reads back as the model it was printed from', () => {
+  // `--check` diffs against what the author wrote, so the round trip has to hold or every
+  // check reports drift that is not there.
+  const [entry] = buildSchemas([
+    { method: 'GET', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a","rank":null,"tags":["x"],"meta":{"n":1}}' },
+    { method: 'GET', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"b","rank":2,"tags":[],"meta":{"n":2},"extra":true}' },
+  ]);
+  expect(driftBetween({ 'GET /v1/things': { 200: compile(entry!.source) } }, [entry!])).toEqual([]);
+});
+
+test('check reports what the corpus gained and what it no longer shows', () => {
+  const schema = z.object({ id: z.string(), retired: z.string() });
+  const drafted = buildSchemas([
+    { method: 'GET', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a","added":5}' },
+    { method: 'GET', pathTemplate: '/v1/other', statusCode: 200, body: '{"x":1}' },
+  ]);
+  const drift = driftBetween({ 'GET /v1/things': { 200: schema }, 'GET /v1/gone': { 200: schema } }, drafted);
+
+  expect(drift.map((entry) => `${entry.kind} ${entry.route} ${entry.path}`).sort()).toEqual([
+    'field-added GET /v1/things added',
+    'field-removed GET /v1/things retired',
+    'route-added GET /v1/other (root)',
+    'route-removed GET /v1/gone (root)',
+  ]);
+});
+
+test('check stays quiet about the corrections the schema exists to let you make', () => {
+  // A `z.record` where the corpus sees an object is the map fix; `z.unknown()` is an
+  // explicit abstention; optionality tracks how much traffic was captured, not the
+  // contract. Reporting any of these would nag on every run, forever.
+  const schema = z.object({
+    tools: z.record(z.string(), z.object({ enabled: z.boolean() })),
+    payload: z.unknown(),
+    sometimes: z.string(),
+  });
+  const drafted = buildSchemas([
+    {
+      method: 'GET',
+      pathTemplate: '/v1/a',
+      statusCode: 200,
+      body: '{"tools":{"slack-1":{"enabled":true}},"payload":{"deep":[1]},"sometimes":"x"}',
+    },
+    { method: 'GET', pathTemplate: '/v1/a', statusCode: 200, body: '{"tools":{"jira-2":{"enabled":false}},"payload":"a string now"}' },
+  ]);
+  expect(driftBetween({ 'GET /v1/a': { 200: schema } }, drafted)).toEqual([]);
+});
+
+test('a genuine type change is reported', () => {
+  // The guard above must not turn into "type changes never surface".
+  const drafted = buildSchemas([{ method: 'GET', pathTemplate: '/v1/a', statusCode: 200, body: '{"count":"12"}' }]);
+  const drift = driftBetween({ 'GET /v1/a': { 200: z.object({ count: z.number() }) } }, drafted);
+
+  expect(drift).toHaveLength(1);
+  expect(drift[0]!.kind).toBe('type-changed');
+  expect(drift[0]!.detail).toBe('the schema says number; the corpus now shows string');
+});
+
+test('a nullable the author widened is not drift, but narrowing it is', () => {
+  const drafted = buildSchemas([
+    { method: 'GET', pathTemplate: '/v1/a', statusCode: 200, body: '{"rank":null}' },
+    { method: 'GET', pathTemplate: '/v1/a', statusCode: 200, body: '{"rank":3}' },
+  ]);
+  // The author declared the union the corpus shows: nothing to say.
+  expect(driftBetween({ 'GET /v1/a': { 200: z.object({ rank: z.number().nullable() }) } }, drafted)).toEqual([]);
+  // The author declared only half of it: the corpus still shows the other half.
+  expect(driftBetween({ 'GET /v1/a': { 200: z.object({ rank: z.number() }) } }, drafted)).toHaveLength(1);
 });

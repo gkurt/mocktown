@@ -157,20 +157,7 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     ),
   ],
 
-  'mocks.schema': (r) => [
-    r.written ? `wrote ${r.file}` : `kept ${r.file}`,
-    ...(r.reason ? [`  ${r.reason}`] : []),
-    `drafted from ${r.recordings} recording${r.recordings === 1 ? '' : 's'}, ${r.routes.length} route/status pair${r.routes.length === 1 ? '' : 's'}`,
-    '',
-    ...r.routes.map((route: any) => `  ${pad(`${route.route} ${route.statusCode}`, 60)} ${route.observations} observed`),
-    '',
-    ...(r.written
-      ? [
-          'The schema is a draft, and yours to edit — verification checks the mock against it, not against the recordings.',
-          'Look first at anything typed z.unknown() or z.null(): those are fields the corpus never saw populated.',
-        ]
-      : []),
-  ],
+  'mocks.schema': (r) => (r.checked ? renderSchemaCheck(r) : renderSchemaWrite(r)),
 
   'mocks.scaffold': (r) => [
     `scaffolded ${r.service}`,
@@ -502,4 +489,50 @@ function renderKnobs(r: any): string[] {
         (k: any) => `  ${pad(k.key, 22)} ${pad(JSON.stringify(k.value), 14)} (default ${JSON.stringify(k.default)})  ${k.description}`,
       )
     : ['  (this mock declares no knobs)'];
+}
+
+function renderSchemaWrite(r: any): string[] {
+  return [
+    r.written ? `wrote ${r.file}` : `kept ${r.file}`,
+    ...(r.reason ? [`  ${r.reason}`] : []),
+    `drafted from ${r.recordings} recording${r.recordings === 1 ? '' : 's'}, ${r.routes.length} route/status pair${r.routes.length === 1 ? '' : 's'}`,
+    '',
+    ...r.routes.map((route: any) => `  ${pad(`${route.route} ${route.statusCode}`, 60)} ${route.observations} observed`),
+    '',
+    ...(r.written
+      ? [
+          'The schema is a draft, and yours to edit — verification checks the mock against it, not against the recordings.',
+          'Look first at anything typed z.unknown() or z.null(): those are fields the corpus never saw populated,',
+          'and at any field marked `scrubbed as ...`: its recorded value is a stub, so judge the rule yourself.',
+        ]
+      : []),
+  ];
+}
+
+/**
+ * Drift is grouped by route because that is how it is acted on — one route's worth of
+ * change is one decision about one handler, and a flat list of forty field paths is not.
+ */
+function renderSchemaCheck(r: any): string[] {
+  if (r.drift.length === 0) {
+    return [`${r.file} still agrees with the corpus`, `checked ${r.recordings} recordings across ${r.routes.length} route/status pairs`];
+  }
+
+  const byRoute = new Map<string, any[]>();
+  for (const entry of r.drift) {
+    const key = `${entry.route} ${entry.statusCode}`;
+    byRoute.set(key, [...(byRoute.get(key) ?? []), entry]);
+  }
+
+  return [
+    `${r.drift.length} difference${r.drift.length === 1 ? '' : 's'} between ${r.file} and the corpus`,
+    '',
+    ...[...byRoute].flatMap(([route, entries]) => [
+      `  ${route}`,
+      ...entries.map((entry: any) => `    ${pad(entry.kind, 14)} ${pad(entry.path, 44)} ${entry.detail}`),
+    ]),
+    '',
+    'Nothing was written. A type-changed line may be a correction you made on purpose —',
+    'a scrubbed value stays wrong in the corpus for as long as the corpus is scrubbed.',
+  ];
 }

@@ -401,6 +401,10 @@ export const contract = {
           ...ProjectInput,
           service: z.string(),
           force: z.boolean().optional().describe('Redraft over a schema that is already checked in, discarding any edits'),
+          check: z
+            .boolean()
+            .optional()
+            .describe('Write nothing: re-infer from the corpus and report where it disagrees with the checked-in schema'),
           limit: z.coerce.number().int().min(1).max(20_000).default(5000).describe('How many recordings to infer from'),
         }),
       )
@@ -409,9 +413,20 @@ export const contract = {
           service: z.string(),
           file: z.string(),
           written: z.boolean(),
+          checked: z.boolean().describe('Whether this was a --check run rather than a write'),
+          ok: z.boolean().describe('False when a --check run found drift; the CLI exits non-zero'),
           reason: z.string().optional().describe('Why nothing was written, when nothing was'),
           recordings: z.number().int().describe('Recordings read'),
           routes: z.array(z.object({ route: z.string(), statusCode: z.number().int(), observations: z.number().int() })),
+          drift: z.array(
+            z.object({
+              route: z.string(),
+              statusCode: z.number().int(),
+              kind: z.enum(['route-added', 'route-removed', 'field-added', 'field-removed', 'type-changed']),
+              path: z.string(),
+              detail: z.string(),
+            }),
+          ),
         }),
       ),
   },

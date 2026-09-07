@@ -26,7 +26,7 @@ import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { listPanels, workspacePanelDir } from '#src/gui/panels.ts';
 import { exportCorpus, inflateRecording, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
 import { scaffoldMock } from '#src/mocks/scaffold.ts';
-import { buildSchemas, loadSchemas, writeSchemaModule } from '#src/mocks/schema.ts';
+import { buildSchemas, driftBetween, loadSchemas, type TypeNode, writeSchemaModule } from '#src/mocks/schema.ts';
 import { verifyRecordings } from '#src/mocks/verify.ts';
 import { writeDevcontainer } from '#src/sandbox/devcontainer.ts';
 import { setKnobs } from '#src/scenario/knobs.ts';
@@ -418,7 +418,7 @@ export const router = os.router({
       return { project: runtime.name, service: input.service, files, brief };
     }),
 
-    schema: os.mocks.schema.handler(({ input }) => {
+    schema: os.mocks.schema.handler(async ({ input }) => {
       const runtime = runtimeFor(input.project);
       const paths = runtime.resolved.paths;
       if (!paths) {
@@ -432,6 +432,26 @@ export const router = os.router({
       const rows = recordingsForService(runtime.db, input.service, undefined, input.limit).map((row) =>
         inflateRecording(runtime.name, row),
       );
+      // The scrubber's field rules are a pure function of the field name, so the same
+      // question can be asked now: which of these fields had their values replaced before
+      // they ever reached disk. The answer goes in the file as a comment, because the rule
+      // is weak evidence — `totalTokens` matches `token` — and the call is the author's.
+      const scrubber = runtime.currentScrubber;
+      const note = (field: string, type: TypeNode) => {
+        const rule = scrubber.fieldRule(field);
+        if (!rule) return undefined;
+        // Only a primitive was ever replaced. `tokenUsage` matches the `token` rule by name
+        // but is an object the scrubber walked straight through, and marking the container
+        // as well as its leaves is noise on the line above the one that matters.
+        const kinds = type.kind === 'union' ? type.options.map((option) => option.kind) : [type.kind];
+        if (!kinds.every((kind) => kind === 'string' || kind === 'number' || kind === 'null')) return undefined;
+        // A string here is a `{{secret:…}}` placeholder, and a placeholder is not evidence
+        // of the field's type: captures taken before numeric redaction turned counts into
+        // strings, which is how a mock ends up returning `"4096"` for a token total.
+        return kinds.includes('string')
+          ? `scrubbed as \`${rule.kind}\`: a placeholder — confirm the type, older captures turned numbers into strings`
+          : `scrubbed as \`${rule.kind}\`: the value is a stub, the type is real`;
+      };
       const entries = buildSchemas(
         rows
           .filter((row) => row.kind === 'http')
@@ -439,15 +459,38 @@ export const router = os.router({
             method: row.method,
             pathTemplate: row.pathTemplate,
             statusCode: row.statusCode,
-            contentType: String(row.responseHeaders['content-type'] ?? ''),
             body: row.responseBody,
           })),
+        note,
       );
       if (entries.length === 0) {
         throw new ORPCError('CONFLICT', {
           message: `no JSON responses recorded for "${input.service}" — record some traffic first, or import a HAR file.`,
         });
       }
+      const routes = entries.map((entry) => ({ route: entry.route, statusCode: entry.statusCode, observations: entry.observations }));
+
+      if (input.check) {
+        const checkedIn = await loadSchemas(paths.mocksDir, input.service);
+        if (!checkedIn) {
+          throw new ORPCError('CONFLICT', {
+            message: `no schema is checked in for "${input.service}" — there is nothing to check against. Run \`mocktown mocks schema --service ${input.service}\` to draft one.`,
+          });
+        }
+        const drift = driftBetween(checkedIn, entries);
+        return {
+          project: runtime.name,
+          service: input.service,
+          file: join(paths.mocksDir, input.service, 'schema.ts'),
+          written: false,
+          checked: true,
+          ok: drift.length === 0,
+          recordings: rows.length,
+          routes,
+          drift,
+        };
+      }
+
       mkdirSync(join(paths.mocksDir, input.service), { recursive: true });
       const { file, written, reason } = writeSchemaModule(paths.mocksDir, input.service, entries, { force: input.force });
       return {
@@ -455,9 +498,12 @@ export const router = os.router({
         service: input.service,
         file,
         written,
+        checked: false,
+        ok: true,
         ...(reason ? { reason } : {}),
         recordings: rows.length,
-        routes: entries.map((entry) => ({ route: entry.route, statusCode: entry.statusCode, observations: entry.observations })),
+        routes,
+        drift: [],
       };
     }),
   },

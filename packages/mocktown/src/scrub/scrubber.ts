@@ -321,7 +321,17 @@ export class Scrubber {
     return out;
   }
 
-  private fieldRule(name: string): ScrubRule | undefined {
+  /**
+   * The rule that would redact a field with this name, if any.
+   *
+   * Public because it is the only honest way to annotate a generated schema. Matching is a
+   * pure function of the field name against the rule set, so schema generation can ask the
+   * same question after the fact and get the same answer the recorder got — no need to
+   * persist a per-field audit trail, and it works on a corpus recorded before this existed.
+   * The match is a substring, so `totalTokens` trips the `token` rule: weak evidence, which
+   * is exactly why the schema says so rather than deciding.
+   */
+  fieldRule(name: string): ScrubRule | undefined {
     const lower = name.toLowerCase();
     return this.rules.find((r) => r.fields?.some((f) => lower === f || lower.includes(f)));
   }

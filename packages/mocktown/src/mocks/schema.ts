@@ -219,8 +219,16 @@ export function detectMaps(node: TypeNode): TypeNode {
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const propertyKey = (name: string) => (IDENTIFIER.test(name) ? name : JSON.stringify(name));
 
+/**
+ * A trailing comment for one field of the generated schema, or nothing.
+ *
+ * Used to mark fields the scrubber redacted, so the author knows the recorded value is a
+ * stub before they reason from it.
+ */
+export type FieldNote = (field: string, type: TypeNode) => string | undefined;
+
 /** The model as Zod source. `indent` is the current depth, so nesting stays readable. */
-export function print(node: TypeNode, indent = 0): string {
+export function print(node: TypeNode, indent = 0, note?: FieldNote): string {
   const pad = '  '.repeat(indent + 1);
   const close = '  '.repeat(indent);
 
@@ -236,16 +244,16 @@ export function print(node: TypeNode, indent = 0): string {
     case 'unknown':
       return 'z.unknown()';
     case 'array':
-      return `z.array(${print(node.item, indent)})`;
+      return `z.array(${print(node.item, indent, note)})`;
     case 'record':
-      return `z.record(z.string(), ${print(node.value, indent)})`;
+      return `z.record(z.string(), ${print(node.value, indent, note)})`;
     case 'union': {
       // `T | null` prints as `.nullable()`, which is what a reviewer expects to read.
       const nullable = node.options.some((option) => option.kind === 'null');
       const rest = node.options.filter((option) => option.kind !== 'null');
       if (rest.length === 0) return 'z.null()';
-      if (rest.length === 1) return `${print(rest[0]!, indent)}${nullable ? '.nullable()' : ''}`;
-      const body = `z.union([\n${rest.map((option) => `${pad}${print(option, indent + 1)},`).join('\n')}\n${close}])`;
+      if (rest.length === 1) return `${print(rest[0]!, indent, note)}${nullable ? '.nullable()' : ''}`;
+      const body = `z.union([\n${rest.map((option) => `${pad}${print(option, indent + 1, note)},`).join('\n')}\n${close}])`;
       return nullable ? `${body}.nullable()` : body;
     }
     case 'object': {
@@ -256,7 +264,8 @@ export function print(node: TypeNode, indent = 0): string {
           // Present in some observations but not all, so the mock is free to omit it.
           // Without this, one route with a slimmer variant fails against its own corpus.
           const optional = field.seen < node.observations ? '.optional()' : '';
-          return `${pad}${propertyKey(name)}: ${print(field.type, indent + 1)}${optional},`;
+          const comment = note?.(name, field.type);
+          return `${pad}${propertyKey(name)}: ${print(field.type, indent + 1, note)}${optional},${comment ? ` // ${comment}` : ''}`;
         });
       return `z.object({\n${lines.join('\n')}\n${close}})`;
     }
@@ -296,6 +305,8 @@ export interface SchemaEntry {
   statusCode: number;
   observations: number;
   source: string;
+  /** The model behind the source, kept so `--check` can diff without re-parsing. */
+  node: TypeNode;
 }
 
 /** `GET /v1/things` — how a schema is addressed, in the generated file and at verify time. */
@@ -307,7 +318,7 @@ export const schemaKey = (method: string, pathTemplate: string) => `${method.toU
  * Status is part of the key because a 404 body is not a slim 200. Merging them would make
  * every field optional, and a schema where everything is optional checks nothing.
  */
-export function buildSchemas(observations: RouteObservation[]): SchemaEntry[] {
+export function buildSchemas(observations: RouteObservation[], note?: FieldNote): SchemaEntry[] {
   const groups = new Map<string, { route: string; statusCode: number; nodes: TypeNode[] }>();
 
   for (const observation of observations) {
@@ -321,12 +332,16 @@ export function buildSchemas(observations: RouteObservation[]): SchemaEntry[] {
   }
 
   return [...groups.values()]
-    .map((group) => ({
-      route: group.route,
-      statusCode: group.statusCode,
-      observations: group.nodes.length,
-      source: print(detectMaps(group.nodes.reduce(merge))),
-    }))
+    .map((group) => {
+      const node = detectMaps(group.nodes.reduce(merge));
+      return {
+        route: group.route,
+        statusCode: group.statusCode,
+        observations: group.nodes.length,
+        source: print(node, 0, note),
+        node,
+      };
+    })
     .sort((a, b) => a.route.localeCompare(b.route) || a.statusCode - b.statusCode);
 }
 
@@ -436,4 +451,205 @@ export function schemaDiff(schema: z.ZodType, body: unknown): string[] {
     const path = issue.path.map((segment) => (typeof segment === 'number' ? '[]' : `.${String(segment)}`)).join('');
     return `${path ? path.replace(/^\./, '') : '(root)'}: ${issue.message}`;
   });
+}
+
+// ── drift ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A checked-in Zod schema read back as the model, so a fresh corpus can be diffed against
+ * what the author actually wrote.
+ *
+ * Only structure is recovered — a `.min(1)` or a `.regex(…)` the author added is a
+ * refinement on a string and stays a string here, which is right: this exists to spot the
+ * API changing shape, not to re-litigate constraints. Anything it does not recognise
+ * becomes `unknown`, which the diff reads as "no opinion" and reports nothing about.
+ *
+ * The `observations`/`seen` counts it fabricates are only enough to round-trip optionality
+ * (required is 1-of-1, optional is 0-of-1). Do not merge one of these with an inferred
+ * node — the counts are not evidence of anything.
+ */
+export function fromZod(schema: unknown): TypeNode {
+  const def = (schema as { _zod?: { def?: Record<string, unknown> } })?._zod?.def;
+  const type = def?.type;
+  if (def === undefined || typeof type !== 'string') return { kind: 'unknown' };
+
+  switch (type) {
+    case 'string':
+    case 'enum':
+    case 'date':
+      return { kind: 'string' };
+    case 'number':
+    case 'int':
+    case 'bigint':
+      return { kind: 'number' };
+    case 'boolean':
+      return { kind: 'boolean' };
+    case 'null':
+      return { kind: 'null' };
+    case 'literal': {
+      const [value] = (def.values as unknown[] | undefined) ?? [];
+      if (value === null) return { kind: 'null' };
+      if (typeof value === 'string') return { kind: 'string' };
+      if (typeof value === 'number') return { kind: 'number' };
+      if (typeof value === 'boolean') return { kind: 'boolean' };
+      return { kind: 'unknown' };
+    }
+    case 'nullable':
+      return unionOf([fromZod(def.innerType), { kind: 'null' }]);
+    case 'optional':
+    case 'default':
+    case 'prefault':
+    case 'catch':
+    case 'readonly':
+    case 'nonoptional':
+    case 'success':
+      return fromZod(def.innerType);
+    case 'pipe':
+      return fromZod(def.out ?? def.in);
+    case 'lazy':
+      return fromZod((def.getter as (() => unknown) | undefined)?.());
+    case 'array':
+      return { kind: 'array', item: fromZod(def.element) };
+    case 'record':
+    case 'map':
+      return { kind: 'record', value: fromZod(def.valueType) };
+    case 'union':
+      return unionOf(((def.options as unknown[] | undefined) ?? []).map(fromZod));
+    case 'object':
+    case 'interface': {
+      const shape = (def.shape as Record<string, unknown> | undefined) ?? {};
+      const fields = new Map<string, FieldNode>();
+      for (const [key, child] of Object.entries(shape)) {
+        fields.set(key, { type: fromZod(child), seen: isOptionalSchema(child) ? 0 : 1 });
+      }
+      return { kind: 'object', fields, observations: 1 };
+    }
+    default:
+      return { kind: 'unknown' };
+  }
+}
+
+function isOptionalSchema(schema: unknown): boolean {
+  const def = (schema as { _zod?: { def?: Record<string, unknown> } })?._zod?.def;
+  const type = def?.type;
+  if (type === 'optional' || type === 'default' || type === 'prefault') return true;
+  if (type === 'nullable' || type === 'readonly' || type === 'catch') return isOptionalSchema(def?.innerType);
+  return false;
+}
+
+export type DriftKind = 'route-added' | 'route-removed' | 'field-added' | 'field-removed' | 'type-changed';
+
+export interface DriftEntry {
+  route: string;
+  statusCode: number;
+  kind: DriftKind;
+  /** Where in the body, `(root)` for the whole document. */
+  path: string;
+  detail: string;
+}
+
+const describe = (node: TypeNode): string => {
+  switch (node.kind) {
+    case 'array':
+      return `array of ${describe(node.item)}`;
+    case 'record':
+      return `record of ${describe(node.value)}`;
+    case 'object':
+      return 'object';
+    case 'union':
+      return node.options.map(describe).join(' | ');
+    default:
+      return node.kind;
+  }
+};
+
+const kindsOf = (node: TypeNode): Set<string> => new Set(node.kind === 'union' ? node.options.map((o) => o.kind) : [node.kind]);
+
+/**
+ * What a fresh corpus says that the checked-in schema does not, and the reverse.
+ *
+ * Three deliberate silences, all of them cases where a difference is the author doing
+ * their job rather than the API moving:
+ *
+ *   - `unknown` on either side means nobody has an opinion, so there is nothing to report.
+ *   - A `record` in the schema against an object in the corpus is the map correction the
+ *     schema exists to let you make. Flagging it would nag forever.
+ *   - Optionality is not compared. Whether a field appeared in every recording is a fact
+ *     about how much traffic was captured, not about the contract.
+ *
+ * Type changes *are* reported, and some of them will be corrections you made on purpose —
+ * a scrubbed count you retyped as a number will differ from the corpus for as long as the
+ * corpus is scrubbed. That is the cost of the diff being honest about everything else.
+ */
+function walkDrift(schema: TypeNode, corpus: TypeNode, path: string, into: (kind: DriftKind, path: string, detail: string) => void): void {
+  if (schema.kind === 'unknown' || corpus.kind === 'unknown') return;
+
+  if (schema.kind === 'object' && corpus.kind === 'object') {
+    for (const [name, field] of corpus.fields) {
+      const known = schema.fields.get(name);
+      if (known) walkDrift(known.type, field.type, path ? `${path}.${name}` : name, into);
+      else
+        into('field-added', path ? `${path}.${name}` : name, `the corpus has ${describe(field.type)} here; the schema does not mention it`);
+    }
+    for (const [name, field] of schema.fields) {
+      if (corpus.fields.has(name)) continue;
+      into('field-removed', path ? `${path}.${name}` : name, `the schema declares ${describe(field.type)} here; no recording carries it`);
+    }
+    return;
+  }
+  if (schema.kind === 'array' && corpus.kind === 'array') {
+    walkDrift(schema.item, corpus.item, `${path}[]`, into);
+    return;
+  }
+  if (schema.kind === 'record' && corpus.kind === 'record') {
+    walkDrift(schema.value, corpus.value, `${path}{}`, into);
+    return;
+  }
+  // The author's map correction, kept quiet — see above.
+  if (schema.kind === 'record' || corpus.kind === 'record') return;
+
+  const declared = kindsOf(schema);
+  const observed = [...kindsOf(corpus)].filter((kind) => !declared.has(kind));
+  if (observed.length > 0) {
+    into('type-changed', path || '(root)', `the schema says ${describe(schema)}; the corpus now shows ${describe(corpus)}`);
+  }
+}
+
+/** Every difference between the checked-in schemas and a schema drafted from the corpus. */
+export function driftBetween(checkedIn: SchemaMap, drafted: SchemaEntry[]): DriftEntry[] {
+  const drift: DriftEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of drafted) {
+    seen.add(`${entry.route} ${entry.statusCode}`);
+    const declared = checkedIn[entry.route]?.[entry.statusCode];
+    if (!declared) {
+      drift.push({
+        route: entry.route,
+        statusCode: entry.statusCode,
+        kind: 'route-added',
+        path: '(root)',
+        detail: `${entry.observations} recording${entry.observations === 1 ? '' : 's'} the schema says nothing about`,
+      });
+      continue;
+    }
+    walkDrift(fromZod(declared), entry.node, '', (kind, path, detail) =>
+      drift.push({ route: entry.route, statusCode: entry.statusCode, kind, path, detail }),
+    );
+  }
+
+  for (const [route, statuses] of Object.entries(checkedIn)) {
+    for (const status of Object.keys(statuses)) {
+      if (seen.has(`${route} ${status}`)) continue;
+      drift.push({
+        route,
+        statusCode: Number(status),
+        kind: 'route-removed',
+        path: '(root)',
+        detail: 'declared in the schema, absent from the corpus — the route may be gone, or simply untouched by this capture',
+      });
+    }
+  }
+
+  return drift;
 }
