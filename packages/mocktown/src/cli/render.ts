@@ -138,14 +138,15 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `issue ${r.issue.id} -> ${r.issue.status}`,
     ...(r.verification
       ? [
-          `replay: ${r.verification.passed}/${r.verification.total} passed`,
+          `replay: ${r.verification.passed}/${r.verification.total - (r.verification.skipped ?? 0)} passed${r.verification.skipped ? ` (${r.verification.skipped} socket recordings skipped)` : ''}`,
           ...r.verification.failures.slice(0, 10).map((f: any) => `  ${f.method} ${f.path}: ${f.reason}`),
         ]
       : ['replay: skipped']),
   ],
 
   'mocks.verify': (r) => [
-    `${r.result.passed}/${r.result.total} replayed exchanges matched`,
+    `${r.result.passed}/${r.result.total - (r.result.skipped ?? 0)} replayed exchanges matched`,
+    ...(r.result.skipped ? [`${r.result.skipped} socket recordings skipped: replay compares one request to one response`] : []),
     ...r.result.failures.map((f: any) =>
       [`  ${f.method} ${f.path}`, `    ${f.reason}`, ...f.diff.slice(0, 5).map((d: string) => `    ${d}`)].join('\n'),
     ),

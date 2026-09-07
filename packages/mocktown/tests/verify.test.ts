@@ -115,4 +115,45 @@ test('nextId is monotonic within a pass, not only across writes', async () => {
   expect(ids).not.toContain(later.nextId('orgs', 'org'));
 });
 
+test('a socket recording is skipped, not replayed as a request', async () => {
+  // Replaying it sent the recorded upgrade headers, so the mock upgraded for real and the
+  // replay client sat on a 101 until its ten-second abort — a minute of dead time for six
+  // of them, and a verdict none of them could ever have earned.
+  let requests = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      requests++;
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  try {
+    const result = await verifyRecordings(
+      [
+        recording({ path: '/v1/things', pathTemplate: '/v1/things' }),
+        recording({
+          id: 'rec_socket',
+          kind: 'websocket',
+          path: '/socket.io/',
+          pathTemplate: '/socket.io/',
+          statusCode: 101,
+          requestHeaders: { upgrade: 'websocket', connection: 'Upgrade' },
+        }),
+      ],
+      { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' },
+      new Scrubber(),
+    );
+
+    expect(requests).toBe(1);
+    expect(result.passed).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.failures).toEqual([]);
+    // `total` still counts everything the corpus held, so the skipped ones stay visible.
+    expect(result.total).toBe(2);
+  } finally {
+    server.stop(true);
+  }
+});
+
 afterAll(() => rmSync(root, { recursive: true, force: true }));

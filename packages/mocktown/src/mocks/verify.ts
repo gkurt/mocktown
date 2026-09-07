@@ -32,6 +32,8 @@ export interface VerifyResult {
   total: number;
   passed: number;
   failed: number;
+  /** Recordings replay cannot exercise — a socket session is not a request and a response. */
+  skipped: number;
   failures: VerifyFailure[];
 }
 
@@ -82,8 +84,20 @@ export interface ReplayTarget {
 export async function verifyRecordings(recordings: Recording[], target: ReplayTarget, scrubber: Scrubber): Promise<VerifyResult> {
   const failures: VerifyFailure[] = [];
   let passed = 0;
+  let skipped = 0;
 
   for (const recording of recordings) {
+    // A socket recording is a handshake plus a conversation, and this harness compares one
+    // response to one request. Sending it anyway did real damage rather than nothing: the
+    // recorded headers still say `Upgrade: websocket`, so the mock upgraded the connection
+    // for real, `fetch` sat on a 101 it had no way to read, and the exchange burned the
+    // full ten-second abort before being counted as a failure it could never have passed.
+    // Six of them in one corpus was a minute of dead time and a verify that timed out.
+    if (recording.kind !== 'http') {
+      skipped++;
+      continue;
+    }
+
     const query = new URLSearchParams(recording.query).toString();
     const url = `${target.baseUrl}${recording.path}${query ? `?${query}` : ''}`;
 
@@ -194,6 +208,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
     total: recordings.length,
     passed,
     failed: failures.length,
+    skipped,
     failures,
   };
 }
