@@ -34,48 +34,64 @@ const HOUSE_RULES = `
    \`{{secret:<kind>#<n>}}\` placeholders. Accept a credential of that shape; if a
    response must contain one, use \`ctx.fakeSecret(kind)\`. Never hard-code a real-looking
    key of your own, and never require a specific credential value.
-2. **The corpus is a sample of the contract, not a script to replay.** The recordings show
+2. **Check for a shipped emulator before you write a line.** Mocktown wraps \`emulate\`, so
+   fourteen well-known services already have a stateful implementation you would otherwise
+   be reimplementing by hand: \`github\`, \`google\`, \`slack\`, \`okta\`, \`clerk\`, \`apple\`,
+   \`microsoft\`, \`stripe\`, \`aws\`, \`vercel\`, \`linear\`, \`twilio\`, \`resend\`,
+   \`mongoatlas\`. Point a host at one with \`mocktown services set --id <host> --provider
+   emulator:<name>\`. The host is whatever the registry key says — nothing is bound to a
+   canonical hostname — so \`accounts.google.com\`, \`api.github.com\` and a self-hosted Okta
+   on a company domain are all just keys. Two things decide whether it fits:
+   - **The OAuth ones present a consent *picker* over seeded users, not a login form.** You
+     proceed by POSTing \`login=<user>\` to the authorize callback. An unattended run that
+     waits for a password prompt hangs on an HTML page.
+   - **An emulator emulates the vendor, so it only fits where the app talks to the vendor.**
+     If sign-in goes through a broker — Auth0, WorkOS, or the app's own \`/auth/login\` —
+     that broker is what the browser calls, and the corpus will show the vendor appearing
+     only as the broker's upstream, or not at all. Mock what the app actually calls;
+     an emulator one layer further out never receives a request.
+3. **The corpus is a sample of the contract, not a script to replay.** The recordings show
    what the service *did*, not the whole of what it must do. Implement the contract they
    imply: a route observed with one id works for any id, a list observed with three
    entries works for none or thirty, and a status observed once is a branch, not a fixture.
-3. **Prefer widening a matcher over duplicating a route.** Two routes that differ only by
+4. **Prefer widening a matcher over duplicating a route.** Two routes that differ only by
    an optional query parameter or a header are one route — and two that differ only by an
    identifier are one parameterised route: \`/things/abc\` and \`/things/def\` are
    \`/things/{thingId}\`. Collapse them; you do not need to ask. Path templating in the
    corpus is a best effort, and it misses composite keys, prefixed ids
    (\`channels/dm-01H…\`) and anything URL-encoded, so expect to finish the job by hand.
-4. **Never hard-code an identifier from the corpus.** A recorded id is one real org's
+5. **Never hard-code an identifier from the corpus.** A recorded id is one real org's
    data. It also appears in two forms that do not agree — raw in a request path, and a
    \`{{secret:…}}\` placeholder in a response body — so copying either one produces a mock
    that contradicts itself. Mint your own in \`seed\` with \`state.nextId\` / \`ctx.prng\`,
    and keep them referentially consistent: what a route returns must match the id its path
    was given.
-5. **CORS preflight is answered for you.** The mock host replies to \`OPTIONS\` by
+6. **CORS preflight is answered for you.** The mock host replies to \`OPTIONS\` by
    reflecting the request's origin and allowing credentials, and puts those headers on
    every other response too. Do not write \`OPTIONS\` routes — declare one only if this
    service does something unusual at preflight, in which case your explicit route wins.
-6. **State fidelity over verbatim replay.** The bar is *emulator, not stub*. If the corpus
+7. **State fidelity over verbatim replay.** The bar is *emulator, not stub*. If the corpus
    shows \`POST /x\` followed by \`GET /x/{id}\`, the created entity must be readable back.
    Keep it in \`ctx.state\`, which is per (service, profile) and survives across requests —
    never in a module-level variable, which does not survive a reset.
-7. **Every new mock adds its EKB entry.** Declare in \`ekb\` how a client is pointed at this
+8. **Every new mock adds its EKB entry.** Declare in \`ekb\` how a client is pointed at this
    service — an env var, an SDK constructor option, or a code patch. Without it
    \`mocktown env\` cannot cover the service and the seal cannot certify it.
-8. **Seed data per auth profile**, with \`default\` and \`empty-org\` at minimum. \`default\`
+9. **Seed data per auth profile**, with \`default\` and \`empty-org\` at minimum. \`default\`
    is informed by recorded traffic; \`empty-org\` is synthesized and has nothing at all.
-9. **Prefer profile variation over knob flips** for data-shape scenarios. "Empty vs.
+10. **Prefer profile variation over knob flips** for data-shape scenarios. "Empty vs.
    populated" is a profile. Knobs are for cross-cutting dials — latency, error injection,
    volume scaling — and for overrides a human wants to turn while watching the app.
-10. **All randomness goes through \`ctx.prng\`.** \`Math.random()\`, \`Date.now()\` and
+11. **All randomness goes through \`ctx.prng\`.** \`Math.random()\`, \`Date.now()\` and
    \`crypto.randomUUID()\` break the determinism contract: same seed + same knobs + same
    profile + same request sequence must produce byte-identical responses.
-11. **A WebSocket channel is declared in \`sockets\`, not faked with a route.** The corpus
+12. **A WebSocket channel is declared in \`sockets\`, not faked with a route.** The corpus
    holds one whole transcript per channel, written from the client's point of view, and a
    channel the mock does not declare is rejected at the handshake — which is deliberate: a
    socket that connects and then says nothing is the hardest mock bug to diagnose. State
    that must outlive the connection goes in \`ctx.state\`; state that must not goes in
    \`ctx.connection\`.
-12. **Do not write routes for gRPC methods.** They are recorded as opaque HTTP/2 and cannot
+13. **Do not write routes for gRPC methods.** They are recorded as opaque HTTP/2 and cannot
    be served by a generated mock — \`Bun.serve\` does not accept HTTP/2 connections, and
    gRPC needs it plus trailers. Point the service at \`record\`, or run a real gRPC test
    double and register its host as \`passthrough\`.
@@ -170,7 +186,7 @@ ${UNTRUSTED}
   },
   {
     name: 'generate-mock',
-    version: '1.2.0',
+    version: '1.3.0',
     summary: 'Build a generated mock for one service from its recorded corpus.',
     body: `
 # Generate a mock from the corpus
@@ -188,6 +204,10 @@ mocktown mocks scaffold --service <service>     # writes mocks/<service>/{index.
 
 Read \`mocks/<service>/BRIEF.md\` first. It is the corpus organised by route, with the
 create/read couplings already identified.
+
+But read house rule 2 before any of that: if this service is one of the fourteen mocktown
+already emulates, the whole job is one \`mocktown services set --provider emulator:<name>\`
+and none of the below applies.
 
 ${HOUSE_RULES}
 
@@ -255,7 +275,7 @@ ${UNTRUSTED}
 
   {
     name: 'fix-issues',
-    version: '1.1.0',
+    version: '1.2.0',
     summary: 'Work the issue backlog: unmatched requests, near misses, state violations.',
     body: `
 # Fix the issue backlog
@@ -279,7 +299,7 @@ Issues also exist as JSON under \`.mocktown/issues/\` if you prefer files to com
 
 | Type | What to do |
 |---|---|
-| \`unknown-service\` | Decide what the host is: \`mocktown services set --id <host> --provider record\` to capture it, \`generated:<host>\` to mock it, or \`passthrough\` to allow it out — explicitly, never silently. |
+| \`unknown-service\` | Decide what the host is: \`emulator:<name>\` if it is one of the fourteen emulated services (house rule 2 — check this first), \`record\` to capture it, \`generated:<host>\` to hand-write a mock, or \`passthrough\` to allow it out — explicitly, never silently. |
 | \`unmatched-request\` | Add the missing route to the generated mock, using the linked corpus rows. |
 | \`near-miss\` | **Widen the existing route** named in the diagnosis. Do not add a second route that differs only in detail. |
 | \`state-violation\` | A replay found stateful incoherence — something created was not readable back. Move the entity into \`ctx.state\`. |
@@ -304,7 +324,7 @@ ${UNTRUSTED}
 
   {
     name: 'apply-redirects',
-    version: '1.0.1',
+    version: '1.1.0',
     summary: "Point the application's SDKs at their mocks, and record the recipe.",
     body: `
 # Apply the redirect recipes

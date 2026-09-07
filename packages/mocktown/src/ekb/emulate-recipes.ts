@@ -45,13 +45,12 @@ export const EMULATE_RECIPES: Record<string, EndpointRecipe[]> = {
     { rung: 3, note: "For SDKs in other languages, set the equivalent api_base / ApiBase configuration to the emulator's base URL." },
   ],
 
+  // S3 is one of the surfaces the `aws` emulator serves, not a service of its own, so its
+  // recipes live here. Keyed under `s3` they were unreachable: the lookup is by emulate
+  // service id, and `emulator:s3` fails at spawn.
   aws: [
     { rung: 1, envVar: 'AWS_ENDPOINT_URL', note: 'The cross-service endpoint override honoured by current AWS SDKs and the CLI.' },
     { rung: 1, envVar: 'AWS_ENDPOINT_URL_S3', note: 'Per-service override; set alongside the general one when only S3 is emulated.' },
-  ],
-
-  s3: [
-    { rung: 1, envVar: 'AWS_ENDPOINT_URL_S3' },
     {
       rung: 2,
       language: 'typescript',
@@ -95,19 +94,26 @@ export const EMULATE_RECIPES: Record<string, EndpointRecipe[]> = {
 
   apple: [{ rung: 3, note: `Override the OIDC issuer for the emulator. ${CONSENT_NOTE}` }],
   microsoft: [{ rung: 3, note: `Override the OIDC authority for the emulator. ${CONSENT_NOTE}` }],
-  'mongodb-atlas': [
+  mongoatlas: [
     { rung: 3, note: 'Point the Atlas Admin API base URL at the emulator; the data-plane driver connection string is separate.' },
   ],
 };
 
-/** Well-known service hostnames, so `emulator:stripe` knows which host it is answering for. */
+/**
+ * The hostname each emulator is *usually* wanted for — a suggestion when writing a registry
+ * entry, and nothing more.
+ *
+ * It is deliberately not consulted at runtime. An emulator answers for whatever host the
+ * registry names it under, because the key is the host: `"accounts.google.com": { "provider":
+ * "emulator:google" }` serves that name, and so would a self-hosted Okta on a company
+ * domain. Binding an emulator to one canonical hostname would rule that out for no gain.
+ */
 export const EMULATE_HOSTNAMES: Record<string, string> = {
   github: 'api.github.com',
   stripe: 'api.stripe.com',
   slack: 'slack.com',
   google: 'www.googleapis.com',
   aws: 'aws.amazon.com',
-  s3: 's3.amazonaws.com',
   okta: 'okta.com',
   clerk: 'api.clerk.com',
   vercel: 'api.vercel.com',
@@ -116,5 +122,5 @@ export const EMULATE_HOSTNAMES: Record<string, string> = {
   resend: 'api.resend.com',
   apple: 'appleid.apple.com',
   microsoft: 'login.microsoftonline.com',
-  'mongodb-atlas': 'cloud.mongodb.com',
+  mongoatlas: 'cloud.mongodb.com',
 };
