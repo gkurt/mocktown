@@ -36,6 +36,8 @@ export interface MockHostDeps {
     diagnosis: unknown;
     kind: 'unmatched-request' | 'near-miss' | 'unknown-service';
     suggestedResolution: string;
+    /** Overrides the caller's per-service defaults, for an event whose subject is not a service. */
+    links?: string[];
   }) => void;
 }
 
@@ -156,6 +158,32 @@ export class MockHost {
     const rawBody = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
 
     if (!module) {
+      const served = [...this.modules.keys()].sort();
+      // A `service` that differs from the Host means we had to transform the name to look it
+      // up — a stable name through the alias map, or the `.localhost` loopback form. When
+      // that transform lands on nothing, the Host named no service of ours, and the fault is
+      // in the mapping. Advising a scaffold here would have someone build a mock named after
+      // a portless alias: a service that does not exist, from a corpus that has no rows.
+      if (service !== requested) {
+        this.deps.onUnmatched({
+          service: requested,
+          method: request.method,
+          path: url.pathname,
+          request: describeRequest(request, url, rawBody),
+          diagnosis: { reason: `nothing answers to the Host "${requested}", and it maps to no service`, serving: served },
+          kind: 'unknown-service',
+          suggestedResolution:
+            `"${requested}" is not a service. If it is a portless stable name, its alias is not registered — run ` +
+            `\`mocktown env portless sync\`. Otherwise address a mock by its own name: ${served.join(', ') || '(none loaded)'}.`,
+          links: ['mocktown env portless sync', 'mocktown services list'],
+        });
+        return json(501, {
+          error: 'mocktown_unknown_host',
+          message: `Nothing answers to ${requested}.`,
+          hint: 'Run `mocktown env portless sync` if this is a stable name, or `mocktown issues list` for the filed request.',
+        });
+      }
+
       // The front door routed here, so the registry says this service is mocked, but no
       // module answers for it. Loud, and filed, rather than a silent 404.
       this.deps.onUnmatched({

@@ -115,10 +115,12 @@ export class IssueEngine {
           status,
           updatedAt: now,
           diagnosis: input.diagnosis ?? existing.diagnosis,
-          // The diagnosis and the fix are one statement. Refreshing the reason while
-          // keeping an older resolution leaves the issue self-contradicting, and an agent
-          // that reads only the issue (07-issues-agent-loop.md) would act on the stale half.
+          // The diagnosis, the fix and the evidence it cites are one statement. Refreshing
+          // the reason while keeping an older resolution — or an older link, which is the
+          // recording the reason is about — leaves the issue self-contradicting, and an
+          // agent that reads only the issue (07-issues-agent-loop.md) acts on the stale half.
           suggestedResolution: input.suggestedResolution ?? existing.suggestedResolution,
+          links: input.links ?? existing.links,
           request: input.request ?? existing.request,
           batchId: input.batchId ?? this.batchId ?? existing.batchId,
         })

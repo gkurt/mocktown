@@ -262,3 +262,21 @@ test('a provider answers to a stable name that is not the service name', async (
   const other = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: 'unrelated.localhost' } });
   expect(other.status).toBe(501);
 });
+
+test('a Host that names no service is a mapping fault, not a missing mock', async () => {
+  // Before the alias map is populated — a failed `env portless sync`, a serve that has not
+  // synced yet — a stable name arrives, gets its `.localhost` stripped, and matches nothing.
+  // Filing that as "scaffold a mock for `good-example-com.test-project`" sends an agent to
+  // build a service that does not exist, from a corpus with no rows for it.
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const stable = `${stableName('unsynced-project', GOOD)}.localhost`;
+  const response = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: stable } });
+  expect(response.status).toBe(501);
+
+  const issue = runtime.issues.list({ type: 'unknown-service' }).find((row) => row.service === stable);
+  expect(issue).toBeDefined();
+  expect(issue!.suggestedResolution).toContain('env portless sync');
+  expect(issue!.suggestedResolution).not.toContain('mocks scaffold');
+  // The links have to be actionable for a name that is not a service.
+  expect(issue!.links).not.toContain(`mocktown corpus export --service ${stable}`);
+});

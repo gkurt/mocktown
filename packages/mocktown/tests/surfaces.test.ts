@@ -242,6 +242,31 @@ describe('issues as files', () => {
     expect(runtime.issues.file({ type: 'near-miss', service: 'b.test', method: 'GET', pathTemplate: '/y' })).toBe(issueId);
     expect(runtime.issues.get(issueId)!.status).toBe('reopened');
   });
+
+  test('a recurrence refreshes the evidence it cites, not just the reason', () => {
+    // The reason names a recording and the link fetches one. Updating one without the other
+    // leaves an issue that cites evidence for a failure it is no longer describing.
+    const issueId = runtime.issues.file({
+      type: 'state-violation',
+      service: 'c.test',
+      method: 'GET',
+      pathTemplate: '/z',
+      suggestedResolution: 'Replay of recording rec_first did not match.',
+      links: ['mocktown recordings get --id rec_first'],
+    });
+    runtime.issues.file({
+      type: 'state-violation',
+      service: 'c.test',
+      method: 'GET',
+      pathTemplate: '/z',
+      suggestedResolution: 'Replay of recording rec_second did not match.',
+      links: ['mocktown recordings get --id rec_second'],
+    });
+
+    const issue = runtime.issues.get(issueId)!;
+    expect(issue.suggestedResolution).toContain('rec_second');
+    expect(issue.links).toEqual(['mocktown recordings get --id rec_second']);
+  });
 });
 
 describe("the contract's house rules are structural", () => {

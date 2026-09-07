@@ -716,10 +716,13 @@ export class ProjectRuntime {
     diagnosis: unknown;
     kind: 'unmatched-request' | 'near-miss' | 'unknown-service';
     suggestedResolution: string;
+    links?: string[];
   }): void {
     const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
     const moduleFile = generated?.moduleFile(event.service);
-    const links = [
+    // The per-service defaults only make sense when the subject is a service: `corpus export`
+    // for a name that never appeared in a recording returns nothing and reads as a dead end.
+    const links = event.links ?? [
       ...(moduleFile ? [moduleFile] : []),
       `mocktown corpus export --service ${event.service}`,
       `mocktown recordings routes --service ${event.service}`,
