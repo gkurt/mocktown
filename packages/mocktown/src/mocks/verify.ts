@@ -105,6 +105,13 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
         headers,
         body: recording.method === 'GET' || recording.method === 'HEAD' ? undefined : body,
         signal: AbortSignal.timeout(10_000),
+        // A redirect is a response to verify, not a step to follow. Following it made a 3xx
+        // unverifiable — the comparison saw wherever the chain ended, so a mock that
+        // correctly answered 302 was reported as returning 200 — and did something worse
+        // than that: `Location` on a recorded redirect names a real hostname, so the
+        // harness left the front door and fetched the live site, which is the one thing
+        // 02-architecture.md says must never happen silently.
+        redirect: 'manual',
       });
     } catch (error) {
       failures.push({
