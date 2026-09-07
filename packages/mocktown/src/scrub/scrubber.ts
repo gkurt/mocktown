@@ -57,25 +57,37 @@ export function looksHighEntropy(value: string): boolean {
  *
  * This is the second guard, applied after the pattern's own lookarounds (see
  * `card-number` in rules.ts, which refuses a run that is part of a longer number — a
- * float's fractional digits are exactly that). It refuses a *bare* 13-digit integer in the
- * epoch-millisecond range, which is what the rest of that corpus was: `"timestamp":
- * 1788789099537`. Nothing real is lost, because a 13-digit card is legacy Visa and starts
- * with `4`; separators or any other length still go to Luhn as before.
+ * float's fractional digits are exactly that). It refuses a *bare* epoch timestamp, which
+ * is what the rest of that corpus was: `"timestamp":1788789099537`, and later
+ * `"time_unix_nano":1788789099537123456` in OTel trace data.
  *
- * Under-redacting is the dangerous direction, so the exception is deliberately narrow:
- * one length, one leading digit, no separators.
+ * Every precision has to be here, not just milliseconds. A timestamp is 13 digits in
+ * milliseconds, 16 in microseconds and 19 in nanoseconds, and all three sit inside the
+ * card rule's 13-to-19 range — 16 being the commonest card length of all. At each of those
+ * lengths the epoch window for 2001 to 2033 is exactly "that many digits, leading 1", so
+ * the test needs no arithmetic, which also keeps 19 digits away from
+ * `Number.MAX_SAFE_INTEGER`.
+ *
+ * Nothing real is lost: no card issuer's IIN begins with 1 at these lengths — 13-digit
+ * cards are legacy Visa (4), 16-digit are Visa, Mastercard, Discover and JCB (4, 5, 6, 3),
+ * 19-digit are extended Visa and Discover (4, 6). The one card family that does begin with
+ * 1, UATP, is 15 digits and therefore untouched here.
+ *
+ * Under-redacting is the dangerous direction, so the exception stays narrow: three exact
+ * lengths, one leading digit, no separators.
  */
-function isEpochMillis(value: string): boolean {
-  if (!/^\d{13}$/.test(value)) return false;
-  const n = Number(value);
-  // 2001-09-09 to 2033-05-18 — wide enough for recorded data, narrow enough to stay a rule.
-  return n >= 1_000_000_000_000 && n < 2_000_000_000_000;
+const EPOCH_DIGIT_LENGTHS = new Set([13, 16, 19]); // milli, micro, nano
+
+function isEpochTimestamp(value: string): boolean {
+  if (!/^\d+$/.test(value)) return false;
+  if (!EPOCH_DIGIT_LENGTHS.has(value.length)) return false;
+  return value[0] === '1';
 }
 
 /** The card rule's full test: shape guards first, then the checksum. */
 export function isLikelyCardNumber(value: string): boolean {
   const trimmed = value.trim();
-  if (isEpochMillis(trimmed)) return false;
+  if (isEpochTimestamp(trimmed)) return false;
   // A run of one repeated digit is padding, never a card. `0000000000000` sums to zero and
   // so passes Luhn perfectly.
   if (/^(\d)\1*$/.test(trimmed)) return false;

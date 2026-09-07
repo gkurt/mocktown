@@ -112,6 +112,13 @@ export const DEFAULT_RULES: ScrubRule[] = [
  *   - The lookbehind refuses a start mid-token, a second `@` (`a@b@c.d`), and a start
  *     immediately after a backslash — without which the `n` of an escaped newline becomes
  *     a local part, and the facet list `…\n@event.type` reads as mail for `event.type`.
+ *     Its second arm then puts back the one case that guard was too broad for: a completed
+ *     `\uXXXX` escape *is* a delimiter, so an address may begin right after one. JSON
+ *     escapes the `<` of a git trailer, so a commit message inside a GitHub API response
+ *     arrives as `Co-authored-by: Name <name@example.com>`. Without this arm the
+ *     run `u003cname` is unbreakable — every position inside it follows an alphanumeric,
+ *     and the `u` follows the backslash — so nothing matches and the address survives in
+ *     the clear. It cost three real addresses on a recorded corpus.
  *   - The local part must begin and end alphanumeric, inside the RFC's 64 characters.
  *     Without that, the faceted field paths `-@identity.arn` and
  *     `-@message.httpRequest.country` are addresses with a local part of `-`.
@@ -137,7 +144,7 @@ export const DEFAULT_RULES: ScrubRule[] = [
 export const EMAIL_RULE: ScrubRule = {
   kind: 'email',
   pattern:
-    /(?<![A-Za-z0-9._%+@\\-])[A-Za-z0-9](?:[A-Za-z0-9._%+-]{0,62}[A-Za-z0-9])?@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,24}(?![A-Za-z0-9@-])/g,
+    /(?:(?<![A-Za-z0-9._%+@\\-])|(?<=\\u[0-9a-fA-F]{4}))[A-Za-z0-9](?:[A-Za-z0-9._%+-]{0,62}[A-Za-z0-9])?@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,24}(?![A-Za-z0-9@-])/g,
   fake: (n) => `person${n}@mocktown.test`,
 };
 

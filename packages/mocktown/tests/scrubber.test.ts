@@ -168,6 +168,8 @@ describe('defence in depth is a property, not luck', () => {
       '{"r":0.515021887150724}',
       '{"uid":"6b932522-6836-460d-be23-1075e247664e"}', // a digit-and-dash slice of a UUID
       '{"padding":"0000000000000"}', // sums to zero, so Luhn loves it
+      '{"time_unix_micro":1788789099537123}', // 16 digits — the commonest card length
+      '{"time_unix_nano":1788789099537123456}', // 19 digits, past MAX_SAFE_INTEGER
     ])
       expect(body(ordinary)).toBe(ordinary);
 
@@ -205,6 +207,9 @@ describe('defence in depth is a property, not luck', () => {
       '{"creator":"alex+rbactest@example.com"}', // plus-addressing
       '{"creator":"bot@users.noreply.github.com"}', // multi-label domain
       '{"prose":"write to support@example.com."}', // trailing sentence period
+      // A git trailer inside a GitHub API response: JSON escapes the angle brackets, so
+      // the address abuts `\\u003c` with no ordinary delimiter in front of it.
+      String.raw`{"msg":"Co-authored-by: A Name \u003cbot@example.com\u003e"}`,
     ])
       expect(body(address)).toContain('{{secret:email#');
 
