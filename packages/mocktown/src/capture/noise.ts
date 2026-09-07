@@ -79,6 +79,16 @@ export const DEFAULT_NOISE: NoisePattern[] = [
     paths: ['/ListAccounts'],
     why: "Chrome's sign-in probe — a real OAuth flow on this host is still recorded",
   },
+  // The credential-entry UI, which is a different thing from the OAuth protocol beside it:
+  // `/o/oauth2/auth`, `/signin/oauth/…` and `/CheckCookie` are the flow and stay recorded,
+  // while `/v3/signin/` is the page you type into. It is dropped because of what its RPCs
+  // carry. The password goes up inside `f.req`, a URL-encoded positional array with no
+  // field name anywhere near it — so no field rule can find it, and a password has no shape
+  // for a pattern to recognise either. It is the one secret the scrubber cannot catch after
+  // the fact, which makes not recording it the only defence. Nothing is lost: this is
+  // Google's own web UI, it cannot be replayed, and `emulator:google` is what serves a
+  // login flow instead.
+  { host: 'accounts.google.com', paths: ['/v3/signin/'], why: "Google's sign-in UI — carries a typed password no scrubber can find" },
   { host: 'www.gstatic.com', paths: ['/og/', '/chrome/', '/ohttp_gateway/', '/images/branding/'], why: 'Chrome UI assets' },
   // The two hosts the captive-portal probe shares with real content, scoped to its own path.
   { host: 'www.gstatic.com', paths: ['/generate_204'], why: "Chrome's captive-portal probe" },
