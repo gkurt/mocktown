@@ -11,7 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_RULES, rulesFromConfig } from '#src/scrub/rules.ts';
-import { type Exchange, looksHighEntropy, Scrubber } from '#src/scrub/scrubber.ts';
+import { type Exchange, looksHighEntropy, passesLuhn, Scrubber } from '#src/scrub/scrubber.ts';
 
 const fixture = (name: string) => JSON.parse(readFileSync(join(import.meta.dir, 'fixtures', name), 'utf8'));
 const corpus: Exchange[] = fixture('corpus.raw.json');
@@ -105,7 +105,14 @@ describe('the corpus stays agent-legible', () => {
     // Ordinary numbers stay numbers, so the field rules still see one where the document
     // had one rather than a wrapper object.
     expect(body('{"count":3,"ratio":0.5}')).toBe('{"count":3,"ratio":0.5}');
-    expect(body('{"card_number":4242424242424242}')).toContain('{{secret:card-number#');
+    // And a numeric field the rules do hit stays numeric. This asserted a
+    // `{{secret:card-number#…}}` string until the redaction stopped changing the type —
+    // which was the whole point of preserving the literal two lines up, then thrown away
+    // at the moment the value was replaced.
+    const card = body('{"card_number":4242424242424242}');
+    expect(card).not.toContain('{{secret:');
+    expect(card).not.toContain('4242424242424242');
+    expect(typeof JSON.parse(card).card_number).toBe('number');
   });
 
   test('auth scheme kept, credential replaced', () => {
@@ -290,6 +297,80 @@ describe('defence in depth is a property, not luck', () => {
     // A body that only looks like it might be JSON still goes through the shape rules
     // rather than being dropped on the floor by a failed parse.
     expect(scrub('{not json at all sk_test_abcdefghij', 'text/plain')).toContain('{{secret:stripe-secret-key#');
+  });
+
+  test('a redacted number is still a number', () => {
+    // The regression: redaction returned a string, so a numeric field came back as
+    // `"{{secret:token#1}}"`. Scrubbing runs before disk, so the corpus then asserted a
+    // type the API never had, and the shape inferred from it was wrong for good. It cost
+    // one real mock: `totalTokens` is a counter the client adds up, and the mock built
+    // from the recording served strings.
+    const s = new Scrubber();
+    const out = JSON.parse(s.scrubBody('{"tokenUsage":{"totalTokens":48211,"inputTokens":2000}}', 'application/json'));
+
+    expect(typeof out.tokenUsage.totalTokens).toBe('number');
+    expect(typeof out.tokenUsage.inputTokens).toBe('number');
+    // Redacted all the same — the value is gone, only the type and the size remain.
+    expect(out.tokenUsage.totalTokens).not.toBe(48211);
+    expect(String(out.tokenUsage.totalTokens)).toHaveLength(5);
+  });
+
+  test('a number past 2^53 keeps its digits through redaction', () => {
+    // The stub goes back as rawJSON for the same reason the literal arrives as one: written
+    // as a JS number it would lose its tail, which is the corruption being guarded against.
+    const s = new Scrubber();
+    const out = s.scrubBody('{"totalTokens":48211234567890123}', 'application/json');
+    const digits = /:(\d+)}/.exec(out)![1]!;
+
+    expect(digits).toHaveLength(17);
+    expect(digits).not.toBe('48211234567890123');
+    expect(out).not.toContain('{{secret:');
+  });
+
+  test('redacting a card-shaped number never emits a usable card', () => {
+    const s = new Scrubber();
+    const out = s.scrubBody('{"cardNumber":4242424242424242}', 'application/json');
+    const digits = /:(\d+)}/.exec(out)![1]!;
+
+    expect(digits).toHaveLength(16);
+    expect(digits).not.toBe('4242424242424242');
+    expect(passesLuhn(digits)).toBe(false);
+  });
+
+  test('the same number redacts to the same stub within a session', () => {
+    // The property placeholders already have: a value that recurs is recognisably the same
+    // value, so a generated mock can correlate it across requests.
+    const s = new Scrubber();
+    const first = s.scrubBody('{"totalTokens":48211}', 'application/json');
+    const second = s.scrubBody('{"other":{"totalTokens":48211}}', 'application/json');
+
+    expect(/:(\d+)}/.exec(first)![1]).toBe(/:(\d+)}/.exec(second)![1]);
+  });
+
+  test('numeric redactions are reported for the mock author to overrule', () => {
+    // A field name is weak evidence: `totalTokens` matches the `token` rule and is a
+    // counter, `discardCount` matches `card` and is a counter too. The scrubber redacts,
+    // says which fields it touched, and leaves the call to whoever can read the client.
+    const s = new Scrubber();
+    s.scrubBody('{"totalTokens":48211,"discardCount":3}', 'application/json');
+
+    expect(s.numericRedactions()).toEqual([
+      { field: 'totalTokens', kind: 'token', digits: 5 },
+      { field: 'discardCount', kind: 'card', digits: 1 },
+    ]);
+    // Names and counts, never values.
+    expect(JSON.stringify(s.numericRedactions())).not.toContain('48211');
+  });
+
+  test('strings are still redacted as placeholders', () => {
+    // The numeric path must not have loosened the case it was carved out of.
+    const s = new Scrubber();
+    const out = s.scrubBody('{"cardNumber":"4242424242424242","password":"hunter2"}', 'application/json');
+
+    expect(out).toContain('{{secret:card-number#');
+    expect(out).toContain('{{secret:password#');
+    expect(out).not.toContain('4242424242424242');
+    expect(out).not.toContain('hunter2');
   });
 
   test('summary records kinds and counts, never values', () => {

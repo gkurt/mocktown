@@ -111,6 +111,49 @@ export function passesLuhn(value: string): boolean {
   return sum % 10 === 0;
 }
 
+/**
+ * A redacted number, still a number.
+ *
+ * Redaction used to be `placeholderFor`, which returns a string, so a JSON number that
+ * tripped a rule came back as `"{{secret:token#1}}"`. Scrubbing runs before disk, so the
+ * original is gone and the corpus is left asserting a type the API never had — and
+ * everything downstream believes it. `totalTokens` reached one corpus that way, the shape
+ * inferred from it said `string`, and the mock built to match handed the client strings to
+ * add up.
+ *
+ * The value is still redacted, because a PIN or a card can be written as a number and
+ * under-redacting is the dangerous direction. What changes is that the redaction keeps the
+ * type, the sign, the digit count either side of the point, and — through the registry —
+ * its identity within the session. The result is deliberately never Luhn-valid, so
+ * redacting a card can never emit a usable one.
+ */
+export function numberStub(literal: string, ordinal: number): string {
+  const negative = literal.startsWith('-');
+  const [whole = '', fraction] = literal.replace(/^-/, '').split('.');
+
+  const run = (length: number, seed: number): string => {
+    if (length <= 0) return '';
+    const tail = String(seed);
+    return tail.length >= length ? tail.slice(-length) : tail.padStart(length, '0');
+  };
+
+  // A stub that starts with 0 is a shorter number than the one it replaced, and the digit
+  // count is the part a mock author reads to judge what the field was.
+  let out = run(whole.length, ordinal);
+  out = out.length === 0 ? '' : `9${out.slice(1)}`;
+  if (passesLuhn(out)) out = `${out.slice(0, -1)}${(Number(out.at(-1)) + 1) % 10}`;
+
+  const digits = fraction === undefined ? out : `${out}.${run(fraction.length, ordinal)}`;
+  return negative ? `-${digits}` : digits;
+}
+
+/** One numeric field the scrubber redacted, for the mock author to rule on. */
+export interface NumericRedaction {
+  field: string;
+  kind: string;
+  digits: number;
+}
+
 export interface Exchange {
   id: string;
   method: string;
@@ -169,6 +212,8 @@ function parsePreservingNumbers(text: string): unknown {
 
 export class Scrubber {
   private readonly registry = new Map<string, string>(); // secret value -> placeholder
+  private readonly numbers = new Map<string, string>(); // numeric literal -> numeric stub
+  private readonly numeric: NumericRedaction[] = [];
   private readonly kindCounts = new Map<string, number>();
   readonly rules: ScrubRule[];
   private readonly entropyBackstop: boolean;
@@ -208,6 +253,26 @@ export class Scrubber {
     const placeholder = `{{secret:${kind}#${ordinal}}}`;
     this.registry.set(value, placeholder);
     return placeholder;
+  }
+
+  /**
+   * Redact a numeric literal without changing its type.
+   *
+   * The kind comes from the field name alone — no `classify`. Shape classification exists
+   * to say "this string is a Stripe key wherever it turned up", and on a bare integer it
+   * has almost nothing to go on: `48211234567890123` passes Luhn and lands on
+   * `card-number`, which is how a token count became a credit card. A number's only honest
+   * evidence is the name of the field holding it.
+   */
+  private redactNumber(literal: string, kind: string, field: string): string {
+    const existing = this.numbers.get(literal);
+    if (existing) return existing;
+    const ordinal = (this.kindCounts.get(kind) ?? 0) + 1;
+    this.kindCounts.set(kind, ordinal);
+    const stub = numberStub(literal, ordinal);
+    this.numbers.set(literal, stub);
+    this.numeric.push({ field, kind, digits: literal.replace(/[^0-9]/g, '').length });
+    return stub;
   }
 
   /** Pass 2: redact by shape, anywhere in a string. */
@@ -276,11 +341,13 @@ export class Scrubber {
     if (JSON.isRawJSON(node)) {
       const literal = (node as { rawJSON: string }).rawJSON;
       const rule = this.fieldRule(keyName);
-      return rule ? this.placeholderFor(literal, this.classify(literal, rule.kind)) : node;
+      // Back out as rawJSON too: a 19-digit stub written as a JS number would lose the
+      // last digits, which is the corruption `parsePreservingNumbers` exists to prevent.
+      return rule ? JSON.rawJSON(this.redactNumber(literal, rule.kind, keyName)) : node;
     }
     if (typeof node === 'number') {
       const rule = this.fieldRule(keyName);
-      if (rule) return this.placeholderFor(String(node), this.classify(String(node), rule.kind));
+      if (rule) return JSON.rawJSON(this.redactNumber(String(node), rule.kind, keyName));
     }
     if (Array.isArray(node)) return node.map((item) => this.scrubJson(item, keyName));
     if (node && typeof node === 'object') {
@@ -385,6 +452,17 @@ export class Scrubber {
   /** What was found, for the recording's metadata. Values are never included. */
   summary(): { kind: string; count: number }[] {
     return [...this.kindCounts].map(([kind, count]) => ({ kind, count })).sort((a, b) => a.kind.localeCompare(b.kind));
+  }
+
+  /**
+   * Numeric fields this session redacted, for a mock author to overrule.
+   *
+   * A field name is weak evidence — `totalTokens` matches the `token` rule and is a
+   * counter — so the scrubber redacts, says so, and leaves the call to whoever can read
+   * the client. Names, never values.
+   */
+  numericRedactions(): NumericRedaction[] {
+    return [...this.numeric];
   }
 }
 
