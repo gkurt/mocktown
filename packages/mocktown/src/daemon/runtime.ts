@@ -76,6 +76,11 @@ export class ProjectRuntime {
   private frontDoor?: FrontDoor;
   private recorder?: Recorder;
   private providers: Provider[] = [];
+
+  /** The running providers, for callers that need to address one directly. */
+  provider(kind: string): Provider | undefined {
+    return this.providers.find((p) => p.kind === kind);
+  }
   private sessionId: string | null = null;
   private sessionSeed = 'mocktown-default-seed';
   private recordedCount = 0;
@@ -1016,6 +1021,13 @@ export class ProjectRuntime {
     } catch (error) {
       this.portless = unavailable(enabled, `portless sync failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+    // A generated mock is chosen by its Host header, and portless fronts it under a
+    // slugged name that is not the service. Telling the provider about those names is what
+    // stops "stable names: …" from being followed by a 501 on every request.
+    const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
+    const tld = this.portlessSettings().tld;
+    generated?.setAliases(new Map(this.portless.names.map((entry) => [`${entry.name}.${tld}`, entry.service])));
+
     if (enabled)
       this.note(
         'provider',

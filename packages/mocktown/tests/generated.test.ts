@@ -17,6 +17,7 @@ process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 
 const { ProjectRuntime } = await import('#src/daemon/runtime.ts');
 const { resolveProject } = await import('#src/config/project.ts');
+const { stableName } = await import('#src/redirect/portless.ts');
 
 const workspace = join(root, 'app');
 const GOOD = 'good.example.com';
@@ -238,4 +239,26 @@ test('a `.localhost` alias reaches the mock the Host names', async () => {
   // The suffix is not a wildcard: an unknown service is still an unknown service.
   const unknown = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: 'nobody.example.com.localhost' } });
   expect(unknown.status).toBe(501);
+});
+
+test('a provider answers to a stable name that is not the service name', async () => {
+  // portless fronts each provider under a slugged name — `good.example.com` becomes
+  // `good-example-com.<project>.localhost` — which no suffix-stripping turns back into the
+  // service. Before this, switching stable names on made every generated mock 501: the
+  // feature reported itself as configured and nothing worked.
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const provider = runtime.provider('generated') as unknown as { setAliases(a: Map<string, string>): void };
+  const stable = `${stableName('test-project', GOOD)}.localhost`;
+
+  const before = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: stable } });
+  expect(before.status).toBe(501);
+
+  provider.setAliases(new Map([[stable, GOOD]]));
+  const after = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: stable } });
+  expect(after.status).toBe(200);
+  expect(await after.json()).toEqual({ ok: true });
+
+  // An alias names one service; it is not a wildcard for the rest.
+  const other = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: 'unrelated.localhost' } });
+  expect(other.status).toBe(501);
 });

@@ -77,6 +77,16 @@ export function loopbackAlias(host: string): string {
 export class MockHost {
   private server?: Bun.Server<SocketBinding>;
   private modules = new Map<string, MockModule>();
+  /**
+   * Extra hostnames that mean a service, beyond its own name.
+   *
+   * portless fronts each provider under a slugged name — `api.example.com` becomes
+   * `api-example-com.<project>.localhost` — which no amount of suffix-stripping turns back
+   * into the service. Without this, enabling stable names made every generated mock 501:
+   * the feature reads as configured and nothing works, the same failure the `.localhost`
+   * fallback above exists to prevent.
+   */
+  private aliases = new Map<string, string>();
   port = 0;
 
   private readonly deps: MockHostDeps;
@@ -87,6 +97,11 @@ export class MockHost {
 
   setModules(modules: MockModule[]): void {
     this.modules = new Map(modules.map((m) => [m.service, m]));
+  }
+
+  /** Hostname -> service, for names the provider is reachable by but is not called. */
+  setAliases(aliases: Map<string, string>): void {
+    this.aliases = new Map(aliases);
   }
 
   get services(): string[] {
@@ -134,7 +149,9 @@ export class MockHost {
     const url = new URL(request.url);
     // The Host header is the service identity; the URL's host is our loopback address.
     const requested = (request.headers.get('host') ?? url.host).split(':')[0]!;
-    const service = this.modules.has(requested) ? requested : loopbackAlias(requested);
+    // Own name first, then a registered alias, then the `.localhost` fallback: an exact
+    // match must always win so a service really called `x.localhost` keeps working.
+    const service = this.modules.has(requested) ? requested : (this.aliases.get(requested) ?? loopbackAlias(requested));
     const module = this.modules.get(service);
     const rawBody = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
 

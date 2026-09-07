@@ -47,6 +47,14 @@ export class GeneratedProvider implements Provider {
   }
 
   /** Where each service's mock listens. One port serves all of them, routed by Host. */
+  /**
+   * Extra hostnames this provider answers to. Set after a portless sync, because a stable
+   * name is only known once portless has proven it and claimed it.
+   */
+  setAliases(aliases: Map<string, string>): void {
+    this.host?.setAliases(aliases);
+  }
+
   baseUrls(): Map<string, string> {
     if (!this.host) return new Map();
     return new Map(this.services.map((service) => [service, `http://127.0.0.1:${this.host!.port}`]));
