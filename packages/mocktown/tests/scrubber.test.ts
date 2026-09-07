@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_RULES } from '#src/scrub/rules.ts';
+import { DEFAULT_RULES, rulesFromConfig } from '#src/scrub/rules.ts';
 import { type Exchange, looksHighEntropy, Scrubber } from '#src/scrub/scrubber.ts';
 
 const fixture = (name: string) => JSON.parse(readFileSync(join(import.meta.dir, 'fixtures', name), 'utf8'));
@@ -143,6 +143,85 @@ describe('defence in depth is a property, not luck', () => {
       'xapi_live_9f8e7d6c5b4a3928170612345678',
     ])
       expect(looksHighEntropy(secret)).toBe(true);
+  });
+
+  test('the card rule is conservative', () => {
+    // Luhn passes one bare integer in ten, so on a real corpus the rule flagged 284 values
+    // and every one was ordinary numeric data: epoch-millisecond timestamps, and the
+    // fractional digits of similarity scores, which `\b` matched happily after the `.`.
+    // Both directions matter — a redacted score corrupts the mock, a missed card leaks.
+    const body = (text: string) =>
+      new Scrubber().scrub({
+        id: 'e1',
+        method: 'GET',
+        url: 'https://example.test/x',
+        statusCode: 200,
+        requestHeaders: {},
+        requestBody: '',
+        responseHeaders: {},
+        responseBody: text,
+      }).responseBody;
+
+    for (const ordinary of [
+      '{"timestamp":1788789099537}',
+      '{"score":0.5904425485364132}', // a float's fractional digits
+      '{"r":0.515021887150724}',
+      '{"uid":"6b932522-6836-460d-be23-1075e247664e"}', // a digit-and-dash slice of a UUID
+      '{"padding":"0000000000000"}', // sums to zero, so Luhn loves it
+    ])
+      expect(body(ordinary)).toBe(ordinary);
+
+    for (const card of [
+      '{"pan":"4242424242424242"}', // Visa, 16
+      '{"pan":"378282246310005"}', // Amex, 15
+      '{"pan":"4222222222222"}', // legacy Visa, 13 — the length the epoch guard covers
+      '{"pan":"4111 1111 1111 1111"}', // separators still match
+      '{"pan":"4111-1111-1111-1111"}',
+    ])
+      expect(body(card)).toContain('{{secret:card-number#');
+  });
+
+  test('the email rule matches addresses, not strings containing an @', () => {
+    // Off by default, so the rule has to be asked for. Every negative below is a real
+    // string from a recorded corpus: an `@` is ordinary in metric queries, facet paths,
+    // image digests and package specs, and the card rule is the standing lesson in what a
+    // pattern that is merely `@`-shaped costs.
+    const rules = rulesFromConfig({ redactEmails: true });
+    const body = (text: string, r = rules) =>
+      new Scrubber(r).scrub({
+        id: 'e1',
+        method: 'GET',
+        url: 'https://example.test/x',
+        statusCode: 200,
+        requestHeaders: {},
+        requestBody: '',
+        responseHeaders: {},
+        responseBody: text,
+      }).responseBody;
+
+    for (const address of [
+      '{"creator":"dana@example.com"}',
+      '{"creator":"sam.rivera@example.com"}',
+      '{"creator":"alex+rbactest@example.com"}', // plus-addressing
+      '{"creator":"bot@users.noreply.github.com"}', // multi-label domain
+      '{"prose":"write to support@example.com."}', // trailing sentence period
+    ])
+      expect(body(address)).toContain('{{secret:email#');
+
+    for (const ordinary of [
+      '{"q":"sum:app.assistant.memories.created{*} by {@ai.agent.id}"}', // no local part
+      '{"path":"@ai.thread.state"}',
+      '{"keys":"RELEVANT_KEYS\\n@event.type\\n@item.type"}', // the `n` of an escape
+      '{"facet":"-@message.httpRequest.country"}', // a lone `-` is not a local part
+      '{"image":"registry.io/app@sha256:abc123def456"}',
+      '{"spec":"example.com/mod@v1.2.3"}', // a numeric TLD is not a TLD
+      '{"version":"@scope/pkg@1.2.3"}',
+      '{"malformed":"user@example.com2"}', // must not match a prefix of itself
+    ])
+      expect(body(ordinary), ordinary).toBe(ordinary);
+
+    // And none of it happens unless the project asks.
+    expect(body('{"creator":"dana@example.com"}', DEFAULT_RULES)).toContain('dana@example.com');
   });
 
   test('summary records kinds and counts, never values', () => {

@@ -52,8 +52,21 @@ export const DEFAULT_RULES: ScrubRule[] = [
   // ── JWTs anywhere, per 10-security.md. Three base64url segments.
   { kind: 'jwt', pattern: /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g, fake: fakeJwt },
 
-  // ── PII with recognisable shapes. Luhn, not length, decides a card (spike 05).
-  { kind: 'card-number', pattern: /\b(?:\d[ -]?){13,19}\b/g, fake: () => '4242424242424242' },
+  // ── PII with recognisable shapes. Luhn, not length, decides a card (spike 05) — and
+  // Luhn alone is not enough, so the shape is guarded here and the value in
+  // `isLikelyCardNumber`.
+  //
+  // The lookarounds refuse a run that is part of a longer token. `\b` does not, and both
+  // ways it fails were live on a real corpus: it sits between the `.` and the `5` of
+  // `"score":0.5904425485364132`, so a float's fractional digits matched, and it sits
+  // between the hex letters of `6b932522-6836-460d-…`, so a slice of a UUID matched. Each
+  // then passed Luhn one time in ten. Rejecting an adjacent word character, `.` or `-`
+  // costs nothing: a card is never written flush against another token.
+  {
+    kind: 'card-number',
+    pattern: /(?<![\w.-])\d(?:[ -]?\d){12,18}(?![\w.-])/g,
+    fake: () => '4242424242424242',
+  },
   { kind: 'ssn', pattern: /\b\d{3}-\d{2}-\d{4}\b/g, fake: (n) => `900-00-${String(1000 + (n % 9000))}` },
 
   // ── Location-based: whole-value auth headers.
@@ -90,10 +103,41 @@ export const DEFAULT_RULES: ScrubRule[] = [
 /**
  * Emails are load-bearing for mock fidelity — they are the identity most APIs key on —
  * so redacting them is a project decision rather than a default (spike 05's open item).
+ *
+ * An `@` is common in API data, and this has to match an address rather than merely a
+ * string containing one — the mistake the card rule made, where a loose `\b` turned a
+ * float and a slice of a UUID into credit cards. Measured against a 37MB recorded corpus,
+ * every clause below is here because something real needed it:
+ *
+ *   - The lookbehind refuses a start mid-token, a second `@` (`a@b@c.d`), and a start
+ *     immediately after a backslash — without which the `n` of an escaped newline becomes
+ *     a local part, and the facet list `…\n@event.type` reads as mail for `event.type`.
+ *   - The local part must begin and end alphanumeric, inside the RFC's 64 characters.
+ *     Without that, the faceted field paths `-@identity.arn` and
+ *     `-@message.httpRequest.country` are addresses with a local part of `-`.
+ *   - Each domain label must begin and end alphanumeric, rejecting the empty label of
+ *     `user@.com`, a leading hyphen, and `..`.
+ *   - The TLD is letters only, so version specs (`pkg@1.2.3`, `mod@v1.2.3`) are not
+ *     addresses.
+ *   - The lookahead refuses stopping mid-domain, so `user@example.com2` matches nothing
+ *     rather than a prefix of itself. A trailing `.` still passes: an address at the end
+ *     of a sentence is an address.
+ *
+ * Metric queries (`by {@ai.agent.id}`), facet paths (`@ai.thread.state`) and image digests
+ * (`img@sha256:…`) never had a local part to begin with, so they never matched.
+ *
+ * Two shapes are knowingly still caught, and both are left caught on purpose. A patch spec
+ * (`jose@5.1.0.patch`) has an all-numeric domain and a letters-only suffix; excluding it
+ * would mean demanding a letter in the domain, which would then miss a real address at
+ * `123.com`. And `event.type@ai.user.id` reads as a mailbox at a `.id` domain — no pattern
+ * can say otherwise. Redacting a lockfile string costs a little fidelity; missing an
+ * address costs a person's data, so the rule errs toward redaction. On a 37MB corpus that
+ * trade cost two strings out of 126 matches.
  */
 export const EMAIL_RULE: ScrubRule = {
   kind: 'email',
-  pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+  pattern:
+    /(?<![A-Za-z0-9._%+@\\-])[A-Za-z0-9](?:[A-Za-z0-9._%+-]{0,62}[A-Za-z0-9])?@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,24}(?![A-Za-z0-9@-])/g,
   fake: (n) => `person${n}@mocktown.test`,
 };
 

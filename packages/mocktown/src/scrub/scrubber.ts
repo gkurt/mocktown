@@ -50,6 +50,38 @@ export function looksHighEntropy(value: string): boolean {
   return entropy(value) >= HIGH_ENTROPY_MIN_BITS;
 }
 
+/**
+ * Luhn is a checksum, not a classifier: roughly one bare integer in ten passes it by
+ * chance, so on its own it turns the card rule into a generator of false positives. On one
+ * recorded corpus it flagged 284 values and every single one was ordinary numeric data.
+ *
+ * This is the second guard, applied after the pattern's own lookarounds (see
+ * `card-number` in rules.ts, which refuses a run that is part of a longer number — a
+ * float's fractional digits are exactly that). It refuses a *bare* 13-digit integer in the
+ * epoch-millisecond range, which is what the rest of that corpus was: `"timestamp":
+ * 1788789099537`. Nothing real is lost, because a 13-digit card is legacy Visa and starts
+ * with `4`; separators or any other length still go to Luhn as before.
+ *
+ * Under-redacting is the dangerous direction, so the exception is deliberately narrow:
+ * one length, one leading digit, no separators.
+ */
+function isEpochMillis(value: string): boolean {
+  if (!/^\d{13}$/.test(value)) return false;
+  const n = Number(value);
+  // 2001-09-09 to 2033-05-18 — wide enough for recorded data, narrow enough to stay a rule.
+  return n >= 1_000_000_000_000 && n < 2_000_000_000_000;
+}
+
+/** The card rule's full test: shape guards first, then the checksum. */
+export function isLikelyCardNumber(value: string): boolean {
+  const trimmed = value.trim();
+  if (isEpochMillis(trimmed)) return false;
+  // A run of one repeated digit is padding, never a card. `0000000000000` sums to zero and
+  // so passes Luhn perfectly.
+  if (/^(\d)\1*$/.test(trimmed)) return false;
+  return passesLuhn(trimmed);
+}
+
 export function passesLuhn(value: string): boolean {
   const digits = value.replace(/\D/g, '');
   if (digits.length < 13 || digits.length > 19) return false;
@@ -117,7 +149,7 @@ export class Scrubber {
     for (const rule of this.rules) {
       if (!rule.pattern) continue;
       if (new RegExp(`^(?:${rule.pattern.source})$`).test(trimmed)) {
-        if (rule.kind === 'card-number' && !passesLuhn(trimmed)) continue;
+        if (rule.kind === 'card-number' && !isLikelyCardNumber(trimmed)) continue;
         return rule.kind;
       }
     }
@@ -141,7 +173,7 @@ export class Scrubber {
       if (!rule.pattern) continue;
       out = out.replace(rule.pattern, (match) => {
         if (match.startsWith('{{secret:')) return match;
-        if (rule.kind === 'card-number' && !passesLuhn(match)) return match;
+        if (rule.kind === 'card-number' && !isLikelyCardNumber(match)) return match;
         return this.placeholderFor(match, rule.kind);
       });
     }
@@ -275,7 +307,7 @@ export class Scrubber {
         for (const rule of this.rules) {
           if (!rule.pattern) continue;
           for (const match of text.matchAll(rule.pattern)) {
-            if (rule.kind === 'card-number' && !passesLuhn(match[0])) continue;
+            if (rule.kind === 'card-number' && !isLikelyCardNumber(match[0])) continue;
             findings.push({ exchangeId: exchange.id, where, kind: rule.kind, sample: match[0].slice(0, 24) });
           }
         }
