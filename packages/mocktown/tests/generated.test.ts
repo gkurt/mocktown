@@ -223,3 +223,19 @@ test('a session cookie resolves the profile, not just a bearer token', async () 
   const forged = await fetch(`${baseUrl}/whoami`, { headers: { host: SESSION, cookie: 'app-session=mtk_nope' } });
   expect(await forged.json()).toEqual({ profile: 'anonymous' });
 });
+
+test('a `.localhost` alias reaches the mock the Host names', async () => {
+  // One provider serves every mock on one port and tells them apart by Host, so a client
+  // pointed straight at `http://127.0.0.1:<port>` arrives as `127.0.0.1` and matches
+  // nothing — which made the rung-1 EKB recipe, one env var pointing at that URL,
+  // unusable from a browser. `<service>.localhost` resolves to loopback with nothing
+  // installed and carries the identity in the Host.
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const aliased = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: `${GOOD}.localhost` } });
+  expect(aliased.status).toBe(200);
+  expect(await aliased.json()).toEqual({ ok: true });
+
+  // The suffix is not a wildcard: an unknown service is still an unknown service.
+  const unknown = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: 'nobody.example.com.localhost' } });
+  expect(unknown.status).toBe(501);
+});

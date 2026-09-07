@@ -53,6 +53,19 @@ export interface Observation {
 /** A window is evidence, not a log: past this many hits the flows have already failed. */
 const MAX_OBSERVED_WALL_HITS = 200;
 
+/** `http://127.0.0.1:4610` + `api.example.com` -> `http://api.example.com.localhost:4610`. */
+function loopbackUrl(baseUrl: string, service: string): string {
+  try {
+    const url = new URL(baseUrl);
+    // Only loopback is rewritten: a provider on a real host is already addressable.
+    if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost' && url.hostname !== '::1') return baseUrl;
+    url.hostname = `${service}.localhost`;
+    return url.origin;
+  } catch {
+    return baseUrl;
+  }
+}
+
 export class ProjectRuntime {
   readonly db: Db;
   readonly issues: IssueEngine;
@@ -943,6 +956,12 @@ export class ProjectRuntime {
     // bundle covering the portless issuer as well as the project's. Its TLD reaches
     // NO_PROXY through `noProxyPlan`, which owns that decision for every surface.
     const baseUrls = this.allBaseUrls();
+    // Without a stable name, a rung-1 variable pointing at `http://127.0.0.1:<port>` sends
+    // a Host of `127.0.0.1`, which identifies no service on a shared provider port — so
+    // the recipe reads as covered and 501s in a browser. `<service>.localhost` carries the
+    // identity in the Host and still resolves to loopback with nothing installed; the
+    // provider strips the suffix back off (`loopbackAlias` in mocks/host.ts).
+    for (const [service, url] of baseUrls) baseUrls.set(service, loopbackUrl(url, service));
     for (const entry of stable?.names ?? []) baseUrls.set(entry.service, entry.url);
     return generateEnv({
       project: this.name,

@@ -53,6 +53,27 @@ interface SocketBinding {
   live: Bun.ServerWebSocket<SocketBinding> | null;
 }
 
+/**
+ * `api.example.com.localhost` -> `api.example.com`, so a client can reach one mock on a
+ * shared port without a proxy.
+ *
+ * One provider serves every generated mock on a single port and tells them apart by the
+ * Host header. That is right for the front door, which forwards the real hostname, and
+ * useless for a client pointed straight at the port: `http://127.0.0.1:4610` arrives with
+ * a Host of `127.0.0.1`, matches no module, and 501s. So the rung-1 EKB recipe — set one
+ * env var to the provider's URL, the simplest redirect there is — could not actually be
+ * used from a browser, which is most of what rung 1 is for.
+ *
+ * Appending the service name to `.localhost` fixes it with nothing installed: RFC 6761
+ * reserves the name for loopback, and browsers, curl and Bun all resolve it without
+ * touching DNS or /etc/hosts. Stripping the suffix here is what lets the Host still say
+ * which service was meant. An exact match always wins, so a service genuinely named
+ * `something.localhost` is unaffected.
+ */
+export function loopbackAlias(host: string): string {
+  return host.endsWith('.localhost') ? host.slice(0, -'.localhost'.length) : host;
+}
+
 export class MockHost {
   private server?: Bun.Server<SocketBinding>;
   private modules = new Map<string, MockModule>();
@@ -112,7 +133,8 @@ export class MockHost {
   private async handle(request: Request, server: Bun.Server<SocketBinding>): Promise<Response | undefined> {
     const url = new URL(request.url);
     // The Host header is the service identity; the URL's host is our loopback address.
-    const service = (request.headers.get('host') ?? url.host).split(':')[0]!;
+    const requested = (request.headers.get('host') ?? url.host).split(':')[0]!;
+    const service = this.modules.has(requested) ? requested : loopbackAlias(requested);
     const module = this.modules.get(service);
     const rawBody = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
 
