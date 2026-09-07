@@ -235,6 +235,15 @@ export class FrontDoor {
     this.proxy = mockttp.getRemote({
       adminServerUrl: `http://127.0.0.1:${this.adminPort}`,
       https: { cert: this.options.ca.cert, key: this.options.ca.key },
+      // `getRemote` defaults this to `true` ("for other clients, it doesn't hurt"), which
+      // is written for a Mockttp that is the *target* of browser requests. The front door
+      // is a transparent proxy, so it hurts: the `cors` middleware sits in front of the
+      // rules and answers every OPTIONS preflight itself with `Access-Control-Allow-Origin:
+      // *`. The request never reaches the upstream, so it never reaches the corpus either —
+      // and a browser sending credentials rejects the wildcard outright, which is how this
+      // surfaces: every credentialed cross-origin call fails while GETs look fine.
+      // A preflight is a real exchange a mock has to reproduce; it must be recorded.
+      cors: false,
     });
     await this.proxy.start(this.port);
     await this.subscribe();
