@@ -10,7 +10,7 @@
  * and a real request rather than a mock of our own code.
  */
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dir, '.tmp-portless');
@@ -36,15 +36,43 @@ const [command, ...rest] = process.argv.slice(2);
 const dir = process.env.PORTLESS_STATE_DIR;
 const file = \`\${dir}/routes.json\`;
 const tld = process.env.PORTLESS_STUB_TLD || 'localhost';
-if (command !== 'alias') {
-  console.error('stub portless implements only \`alias\`');
+const read = () => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : []);
+
+if (command === 'alias') {
+  const routes = read();
+  const hostname = \`\${rest[0] === '--remove' ? rest[1] : rest[0]}.\${tld}\`;
+  const kept = routes.filter((route) => route.hostname !== hostname);
+  if (rest[0] !== '--remove') kept.push({ hostname, port: Number(rest[1]), pid: 0 });
+  writeFileSync(file, JSON.stringify(kept));
+} else if (command === 'proxy' && rest[0] === 'start') {
+  // Records the invocation so a test can assert what mocktown asked for, then backgrounds a
+  // real router — \`portless proxy start\` returns before the proxy is up, and mocktown has
+  // to wait for it rather than trust the exit code.
+  const port = Number(rest[rest.indexOf('-p') + 1]);
+  writeFileSync(\`\${dir}/started.json\`, JSON.stringify(rest));
+  const child = Bun.spawn([process.execPath, import.meta.path, '__serve', String(port)], {
+    stdio: ['ignore', 'ignore', 'ignore'],
+    env: process.env,
+  });
+  child.unref();
+  writeFileSync(\`\${dir}/proxy.port\`, String(port));
+  writeFileSync(\`\${dir}/proxy.pid\`, String(child.pid));
+} else if (command === '__serve') {
+  await Bun.sleep(150);
+  Bun.serve({
+    port: Number(rest[0]),
+    hostname: '127.0.0.1',
+    fetch: (request) => {
+      const target = read().find((route) => route.hostname === new URL(request.url).hostname);
+      if (!target) return new Response('no route', { status: 404 });
+      return fetch(\`http://127.0.0.1:\${target.port}\${new URL(request.url).pathname}\`);
+    },
+  });
+  await new Promise(() => {});
+} else {
+  console.error('stub portless implements only \`alias\` and \`proxy start\`');
   process.exit(2);
 }
-const routes = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
-const hostname = \`\${rest[0] === '--remove' ? rest[1] : rest[0]}.\${tld}\`;
-const kept = routes.filter((route) => route.hostname !== hostname);
-if (rest[0] !== '--remove') kept.push({ hostname, port: Number(rest[1]), pid: 0 });
-writeFileSync(file, JSON.stringify(kept));
 `;
 
 const FAILING_STUB = `#!/usr/bin/env bun
@@ -223,6 +251,41 @@ test('the running proxy decides the tld and port, not the config that has drifte
   } finally {
     delete process.env.PORTLESS_STUB_TLD;
     rmSync(join(stateDir, 'proxy.port'), { force: true });
+  }
+});
+
+test('an unprivileged proxy is started for you; a privileged one is only ever reported', async () => {
+  // The whole point of the split: no sudo, no prompt, so mocktown may as well do it. Port 80
+  // or 443 is a root daemon on someone's machine and stays their call.
+  const privileged = await syncPortless(input({ settings: { ...settings(), port: 443 } }));
+  expect(privileged.available).toBe(false);
+  expect(privileged.reason).toContain('binding it needs root');
+  expect(privileged.reason).toContain('portless proxy start');
+  expect(existsSync(join(stateDir, 'started.json'))).toBe(false);
+
+  const port = proxyPort + 1;
+  const status = await syncPortless(input({ settings: { ...settings(), port, tls: false } }));
+  try {
+    expect(JSON.parse(readFileSync(join(stateDir, 'started.json'), 'utf8'))).toEqual([
+      'start',
+      '-p',
+      String(port),
+      '--tld',
+      'localhost',
+      '--no-tls',
+    ]);
+    expect(status.available).toBe(true);
+    expect(status.resolved?.port).toBe(port);
+    expect(status.names[0]!.url).toBe(`http://api-stripe-com.names.localhost:${port}`);
+    await releasePortless(status, settings(), binDir);
+  } finally {
+    const pid = Number(readFileSync(join(stateDir, 'proxy.pid'), 'utf8'));
+    try {
+      process.kill(pid);
+    } catch {}
+    rmSync(join(stateDir, 'started.json'), { force: true });
+    rmSync(join(stateDir, 'proxy.port'), { force: true });
+    rmSync(join(stateDir, 'proxy.pid'), { force: true });
   }
 });
 

@@ -38,6 +38,9 @@ const ALIAS_TIMEOUT_MS = 15_000;
 const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_ATTEMPT_MS = 1_500;
 const PROBE_POLL_MS = 150;
+const PROXY_START_TIMEOUT_MS = 10_000;
+/** Below this, binding needs root on every platform mocktown runs on. */
+const PRIVILEGED_PORT_CEILING = 1024;
 
 export interface PortlessSettings {
   tld: string;
@@ -209,6 +212,53 @@ function discoverPort(settings: PortlessSettings): number | null {
   return Number.isInteger(port) && port > 0 ? port : null;
 }
 
+async function listening(port: number): Promise<boolean> {
+  try {
+    const socket = await Bun.connect({ hostname: '127.0.0.1', port, socket: { data() {}, error() {} } });
+    socket.end();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Start the proxy, but only where starting it is free. An unprivileged port needs no sudo,
+ * and someone who turned stable names on did not mean "and also run a second command every
+ * morning" — mocktown can just do it.
+ *
+ * A privileged port is a different question, not a harder one: it is a root-owned daemon on
+ * a person's machine, and a mocking tool does not get to decide that quietly. So that case
+ * is reported with the command, never taken. The proxy is shared by every project on the
+ * machine, so one that is already up is used as-is and one mocktown starts is left running.
+ */
+async function ensureProxy(binary: string, settings: PortlessSettings): Promise<{ ok: boolean; reason: string }> {
+  const port = discoverPort(settings) ?? settings.port;
+  if (await listening(port)) return { ok: true, reason: `a portless proxy is already listening on :${port}` };
+
+  if (port < PRIVILEGED_PORT_CEILING) {
+    const start = `portless proxy start${settings.tls ? '' : ' --no-tls'}`;
+    return {
+      ok: false,
+      reason:
+        `nothing is listening on :${port}, and binding it needs root — run \`${start}\` yourself, or set ` +
+        `\`portless.port\` above ${PRIVILEGED_PORT_CEILING} in mocktown.json and mocktown will start the proxy without sudo`,
+    };
+  }
+
+  const args = ['proxy', 'start', '-p', String(port), '--tld', settings.tld, ...(settings.tls ? [] : ['--no-tls'])];
+  const started = await portless(binary, args, settings);
+  if (!started.ok) return { ok: false, reason: `\`portless ${args.join(' ')}\` failed: ${started.output}` };
+
+  // The command backgrounds the proxy, so its exit says it was asked, not that it is up.
+  const deadline = Date.now() + PROXY_START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await listening(port)) return { ok: true, reason: `started a portless proxy on :${port}` };
+    await Bun.sleep(PROBE_POLL_MS);
+  }
+  return { ok: false, reason: `\`portless ${args.join(' ')}\` reported success but nothing is listening on :${port}` };
+}
+
 /**
  * The empirical check. Returns the reason either way, because "portless is unavailable" is
  * useless to someone who has it installed — the fix is always in the detail (proxy not
@@ -304,6 +354,9 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
   // Carry portless's certificates whether or not the project declared TLS: the probe settles
   // which scheme is live, and an https proxy with no bundle to check would fail as "did not
   // answer" — true, but not the reason anyone needs.
+  const proxy = await ensureProxy(binary, input.settings);
+  if (!proxy.ok) return unavailable(true, proxy.reason, binary);
+
   const caBundle = writeCaBundle(input.project, [input.projectCaPath, ...portlessCaCerts(input.settings)]);
   const proof = await proveUsable(binary, input.project, caBundle, input.settings);
   if (!proof.ok || !proof.resolved) return { ...unavailable(true, proof.reason, binary), caBundle };
