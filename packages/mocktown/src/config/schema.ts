@@ -88,9 +88,9 @@ export const ProjectFile = z.object({
   portless: z
     .object({
       enabled: z.boolean().default(false).describe('Give each service a stable `<service>.<project>.<tld>` name'),
-      tld: z.string().default('localhost').describe('portless TLD; must match the running proxy'),
-      port: z.number().int().default(443).describe('Port the portless proxy listens on'),
-      tls: z.boolean().default(true).describe('Whether that proxy terminates TLS — false only if it was started with --no-tls'),
+      tld: z.string().default('localhost').describe('Preferred TLD; the running proxy overrides it'),
+      port: z.number().int().default(443).describe('Preferred proxy port; the running proxy overrides it'),
+      tls: z.boolean().default(true).describe('Preferred scheme; whichever the running proxy answers on wins'),
     })
     .default({ enabled: false, tld: 'localhost', port: 443, tls: true }),
   scrub: z

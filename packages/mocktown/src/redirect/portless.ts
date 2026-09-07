@@ -36,6 +36,7 @@ import { findFreePort } from '#src/util/ports.ts';
 /** A command that prompts in a TTY exits with a descriptive error here instead — we want the error. */
 const ALIAS_TIMEOUT_MS = 15_000;
 const PROBE_TIMEOUT_MS = 5_000;
+const PROBE_ATTEMPT_MS = 1_500;
 const PROBE_POLL_MS = 150;
 
 export interface PortlessSettings {
@@ -63,11 +64,17 @@ export interface PortlessStatus {
    * one file, and an app behind stable names has to trust both issuers.
    */
   caBundle: string | null;
+  /**
+   * What the running proxy turned out to be serving, discovered rather than declared. Null
+   * until something is proven. Callers building URLs or matching a `Host` header must use
+   * this, not the configured settings, or they will disagree with the proxy.
+   */
+  resolved: PortlessSettings | null;
   names: PortlessName[];
 }
 
 export function unavailable(enabled: boolean, reason: string, binary: string | null = null): PortlessStatus {
-  return { enabled, available: false, reason, binary, caBundle: null, names: [] };
+  return { enabled, available: false, reason, binary, caBundle: null, resolved: null, names: [] };
 }
 
 /** PATH first, then the workspace's own `node_modules/.bin` — portless is often a devDependency. */
@@ -162,6 +169,47 @@ const alias = (binary: string, name: string, port: number, settings: PortlessSet
 const unalias = (binary: string, name: string, settings: PortlessSettings) => portless(binary, ['alias', '--remove', name], settings);
 
 /**
+ * portless writes the hostname it actually created and the port it actually bound. Reading
+ * those is the difference between a person keeping `mocktown.json` in step with however
+ * they last started the proxy — and getting a 404 that says nothing when they do not — and
+ * mocktown simply asking. This reads state files, not command output: the same seam
+ * `portlessCaCerts` already uses, and unlike `portless list` it is structured data.
+ *
+ * Both shapes portless has shipped are accepted, and an unrecognised one degrades to the
+ * configured value rather than failing, because a guess here is recoverable and a crash is not.
+ */
+function routeHostnames(settings: PortlessSettings): string[] {
+  const file = join(stateDirOf(settings), 'routes.json');
+  if (!existsSync(file)) return [];
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((row) => (typeof row === 'object' && row !== null ? (row as { hostname?: unknown }).hostname : undefined))
+        .filter((hostname): hostname is string => typeof hostname === 'string' && hostname.length > 0);
+    }
+    if (typeof parsed === 'object' && parsed !== null) return Object.keys(parsed);
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/** The suffix portless appended to a name we chose is the TLD its proxy is serving. */
+function discoverTld(settings: PortlessSettings, name: string): string | null {
+  const prefix = `${name}.`;
+  for (const hostname of routeHostnames(settings)) if (hostname.startsWith(prefix)) return hostname.slice(prefix.length) || null;
+  return null;
+}
+
+function discoverPort(settings: PortlessSettings): number | null {
+  const file = join(stateDirOf(settings), 'proxy.port');
+  if (!existsSync(file)) return null;
+  const port = Number(readFileSync(file, 'utf8').trim());
+  return Number.isInteger(port) && port > 0 ? port : null;
+}
+
+/**
  * The empirical check. Returns the reason either way, because "portless is unavailable" is
  * useless to someone who has it installed — the fix is always in the detail (proxy not
  * started, CA not trusted, name not in `/etc/hosts`).
@@ -171,16 +219,24 @@ async function proveUsable(
   project: string,
   caBundle: string,
   settings: PortlessSettings,
-): Promise<{ ok: boolean; reason: string }> {
+): Promise<{ ok: boolean; reason: string; resolved: PortlessSettings | null }> {
   const nonce = id('probe');
   const name = stableName(project, `mocktown-probe-${nonce.slice(-8)}`);
-  const url = stableUrl(name, settings);
   const port = await findFreePort();
   const server = Bun.serve({ port, hostname: '127.0.0.1', fetch: () => new Response(nonce) });
 
   try {
     const registered = await alias(binary, name, port, settings);
-    if (!registered.ok) return { ok: false, reason: `\`portless alias\` failed: ${registered.output}` };
+    if (!registered.ok) return { ok: false, reason: `\`portless alias\` failed: ${registered.output}`, resolved: null };
+
+    const discovered = {
+      tld: discoverTld(settings, name) ?? settings.tld,
+      port: discoverPort(settings) ?? settings.port,
+      stateDir: settings.stateDir,
+    };
+    // Verifying against the bundle we assembled is the point: if the app would not trust
+    // this certificate, neither should this probe, and a pass here means the bundle is right.
+    const ca = existsSync(caBundle) ? readFileSync(caBundle, 'utf8') : undefined;
 
     // `portless alias` exits once the route is written, which is a moment before the running
     // proxy reloads it — fetching immediately gets the proxy's own 404 for an unknown name.
@@ -188,26 +244,30 @@ async function proveUsable(
     const deadline = Date.now() + PROBE_TIMEOUT_MS;
     let last = 'no attempt made';
     while (Date.now() < deadline) {
-      try {
-        const response = await fetch(url, {
-          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-          // Verifying against the bundle we assembled is the point: if the app would not trust
-          // this certificate, neither should this probe, and a pass here means the bundle is right.
-          tls: settings.tls ? { ca: readFileSync(caBundle, 'utf8') } : undefined,
-        });
-        const body = await response.text();
-        if (body.trim() === nonce)
-          return { ok: true, reason: `proven: ${url} reached a mocktown listener on :${port} through the portless proxy` };
-        last = `${url} answered ${response.status} but not from our listener, so something else owns that name`;
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        last =
-          `${url} did not answer (${detail}). The proxy may not be running (\`portless proxy start\`), the CA may not be trusted ` +
-          `(\`portless trust\`), or the name may not resolve (\`portless hosts sync\`).`;
+      // The scheme is the one thing portless does not write down, so it is settled the same
+      // way as everything else here: by asking, starting with what the project configured.
+      for (const tls of [settings.tls, !settings.tls]) {
+        const resolved: PortlessSettings = { ...discovered, tls };
+        const url = stableUrl(name, resolved);
+        try {
+          const response = await fetch(url, {
+            signal: AbortSignal.timeout(PROBE_ATTEMPT_MS),
+            tls: tls && ca ? { ca } : undefined,
+          });
+          const body = await response.text();
+          if (body.trim() === nonce)
+            return { ok: true, reason: `proven: ${url} reached a mocktown listener on :${port} through the portless proxy`, resolved };
+          last = `${url} answered ${response.status} but not from our listener, so something else owns that name`;
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          last =
+            `${url} did not answer (${detail}). The proxy may not be running (\`portless proxy start\`), the CA may not be trusted ` +
+            `(\`portless trust\`), or the name may not resolve (\`portless hosts sync\`).`;
+        }
       }
       await Bun.sleep(PROBE_POLL_MS);
     }
-    return { ok: false, reason: last };
+    return { ok: false, reason: last, resolved: null };
   } finally {
     await unalias(binary, name, settings).catch(() => {});
     server.stop(true);
@@ -241,19 +301,13 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
   }
   if (input.baseUrls.size === 0) return unavailable(true, 'no provider is listening, so there is nothing to give a stable name to', binary);
 
-  const certs = input.settings.tls ? portlessCaCerts(input.settings) : [];
-  if (input.settings.tls && certs.length === 0) {
-    return unavailable(
-      true,
-      `no certificate was found under ${stateDirOf(input.settings)}, so an app could not be told to trust the proxy. ` +
-        'Run `portless proxy start` once to generate the local CA, or set `portless.tls: false`.',
-      binary,
-    );
-  }
-
-  const caBundle = writeCaBundle(input.project, [input.projectCaPath, ...certs]);
+  // Carry portless's certificates whether or not the project declared TLS: the probe settles
+  // which scheme is live, and an https proxy with no bundle to check would fail as "did not
+  // answer" — true, but not the reason anyone needs.
+  const caBundle = writeCaBundle(input.project, [input.projectCaPath, ...portlessCaCerts(input.settings)]);
   const proof = await proveUsable(binary, input.project, caBundle, input.settings);
-  if (!proof.ok) return { ...unavailable(true, proof.reason, binary), caBundle };
+  if (!proof.ok || !proof.resolved) return { ...unavailable(true, proof.reason, binary), caBundle };
+  const settings = proof.resolved;
 
   const names: PortlessName[] = [];
   const failures: string[] = [];
@@ -264,12 +318,12 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
       continue;
     }
     const name = stableName(input.project, service);
-    const registered = await alias(binary, name, port, input.settings);
+    const registered = await alias(binary, name, port, settings);
     if (!registered.ok) {
       failures.push(`${service}: ${registered.output}`);
       continue;
     }
-    names.push({ service, name, url: stableUrl(name, input.settings) });
+    names.push({ service, name, url: stableUrl(name, settings) });
   }
 
   // Partial success is still success for the services that got a name, but the ones that
@@ -281,6 +335,7 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
     reason: failures.length ? `${proof.reason}; ${failures.length} service(s) could not be aliased: ${failures.join('; ')}` : proof.reason,
     binary,
     caBundle,
+    resolved: settings,
     names,
   };
 }
@@ -290,5 +345,6 @@ export async function releasePortless(status: PortlessStatus, settings: Portless
   if (!status.available || !status.names.length) return;
   const binary = status.binary ?? portlessBinary(workspace);
   if (!binary) return;
-  for (const entry of status.names) await unalias(binary, entry.name, settings).catch(() => {});
+  const proven = status.resolved ?? settings;
+  for (const entry of status.names) await unalias(binary, entry.name, proven).catch(() => {});
 }

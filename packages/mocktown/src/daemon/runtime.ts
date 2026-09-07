@@ -426,7 +426,7 @@ export class ProjectRuntime {
       services: this.services().map((service) => service.id),
       // A stable name must bypass: the app has to reach its own mock directly, or the
       // request for it would enter the front door and be denied as an unknown host.
-      required: stable ? [`.${this.portlessSettings().tld}`] : undefined,
+      required: stable ? [`.${stable.resolved?.tld ?? this.portlessSettings().tld}`] : undefined,
     });
   }
 
@@ -1025,7 +1025,8 @@ export class ProjectRuntime {
     // slugged name that is not the service. Telling the provider about those names is what
     // stops "stable names: …" from being followed by a 501 on every request.
     const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
-    const tld = this.portlessSettings().tld;
+    // What the proxy is actually serving, which is not necessarily what the project declared.
+    const tld = this.portless.resolved?.tld ?? this.portlessSettings().tld;
     generated?.setAliases(new Map(this.portless.names.map((entry) => [`${entry.name}.${tld}`, entry.service])));
 
     if (enabled)
