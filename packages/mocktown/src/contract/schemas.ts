@@ -132,6 +132,8 @@ export const VerifyResult = z.object({
   total: z.number().int(),
   passed: z.number().int(),
   failed: z.number().int(),
+  skipped: z.number().int().describe('Recordings replay cannot exercise — a socket session is not a request and a response'),
+  schemaChecked: z.number().int().describe('Exchanges checked against the checked-in Zod schema rather than a single recorded body'),
   failures: z.array(
     z.object({
       recordingId: z.string(),

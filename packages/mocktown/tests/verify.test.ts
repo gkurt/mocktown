@@ -12,6 +12,7 @@ const root = join(import.meta.dir, '.tmp-verify');
 process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
 process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 
+import * as z from 'zod/v4';
 import type { Recording } from '#src/contract/schemas.ts';
 import { verifyRecordings } from '#src/mocks/verify.ts';
 import { Scrubber } from '#src/scrub/scrubber.ts';
@@ -151,6 +152,85 @@ test('a socket recording is skipped, not replayed as a request', async () => {
     expect(result.failures).toEqual([]);
     // `total` still counts everything the corpus held, so the skipped ones stay visible.
     expect(result.total).toBe(2);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test('a checked-in schema overrules the recording it was drafted from', async () => {
+  // The escape hatch, and the reason schemas exist at all. Scrubbing runs before anything
+  // reaches disk, so this corpus records `totalTokens` as a placeholder string — the API
+  // returns a number and the mock is right to. Comparing against the recording made the
+  // correct mock fail, and the only way to pass was to build the mock wrong.
+  const server = Bun.serve({
+    port: 0,
+    fetch: () =>
+      new Response(JSON.stringify({ usage: { totalTokens: 4096 } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+  });
+
+  const recordings = [
+    recording({
+      path: '/v1/usage',
+      pathTemplate: '/v1/usage',
+      responseBody: JSON.stringify({ usage: { totalTokens: '{{secret:token#1}}' } }),
+      responseHeaders: { 'content-type': 'application/json' },
+    }),
+  ];
+  const target = { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' };
+
+  try {
+    const withoutSchema = await verifyRecordings(recordings, target, new Scrubber());
+    expect(withoutSchema.failed).toBe(1);
+    expect(withoutSchema.schemaChecked).toBe(0);
+
+    const withSchema = await verifyRecordings(
+      recordings,
+      { ...target, schemas: { 'GET /v1/usage': { 200: z.object({ usage: z.object({ totalTokens: z.number() }) }) } } },
+      new Scrubber(),
+    );
+    expect(withSchema.failures).toEqual([]);
+    expect(withSchema.passed).toBe(1);
+    expect(withSchema.schemaChecked).toBe(1);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test('a schema catches what sampling one array element cannot', async () => {
+  // `shapeOf` reads element 0 and stops, so a list whose later entries are wrong replayed
+  // clean. The schema checks every element.
+  const server = Bun.serve({
+    port: 0,
+    fetch: () =>
+      new Response(JSON.stringify({ items: [{ id: 'a' }, { id: 7 }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+  });
+
+  const recordings = [
+    recording({
+      path: '/v1/items',
+      pathTemplate: '/v1/items',
+      responseBody: JSON.stringify({ items: [{ id: 'a' }, { id: 'b' }] }),
+      responseHeaders: { 'content-type': 'application/json' },
+    }),
+  ];
+  const target = { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' };
+
+  try {
+    expect((await verifyRecordings(recordings, target, new Scrubber())).failed).toBe(0);
+
+    const withSchema = await verifyRecordings(
+      recordings,
+      { ...target, schemas: { 'GET /v1/items': { 200: z.object({ items: z.array(z.object({ id: z.string() })) }) } } },
+      new Scrubber(),
+    );
+    expect(withSchema.failed).toBe(1);
+    expect(withSchema.failures[0]!.diff[0]).toContain('items[].id');
   } finally {
     server.stop(true);
   }

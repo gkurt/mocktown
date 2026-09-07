@@ -147,9 +147,29 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
   'mocks.verify': (r) => [
     `${r.result.passed}/${r.result.total - (r.result.skipped ?? 0)} replayed exchanges matched`,
     ...(r.result.skipped ? [`${r.result.skipped} socket recordings skipped: replay compares one request to one response`] : []),
+    // Which oracle ran is the difference between "matches a schema you reviewed" and
+    // "matches whatever one recording happened to contain", so it has to be on screen.
+    r.result.schemaChecked
+      ? `${r.result.schemaChecked} checked against the schema you own, the rest against a single recorded body`
+      : 'checked against a single recorded body per exchange — run `mocktown mocks schema` to draft a schema you can correct',
     ...r.result.failures.map((f: any) =>
       [`  ${f.method} ${f.path}`, `    ${f.reason}`, ...f.diff.slice(0, 5).map((d: string) => `    ${d}`)].join('\n'),
     ),
+  ],
+
+  'mocks.schema': (r) => [
+    r.written ? `wrote ${r.file}` : `kept ${r.file}`,
+    ...(r.reason ? [`  ${r.reason}`] : []),
+    `drafted from ${r.recordings} recording${r.recordings === 1 ? '' : 's'}, ${r.routes.length} route/status pair${r.routes.length === 1 ? '' : 's'}`,
+    '',
+    ...r.routes.map((route: any) => `  ${pad(`${route.route} ${route.statusCode}`, 60)} ${route.observations} observed`),
+    '',
+    ...(r.written
+      ? [
+          'The schema is a draft, and yours to edit — verification checks the mock against it, not against the recordings.',
+          'Look first at anything typed z.unknown() or z.null(): those are fields the corpus never saw populated.',
+        ]
+      : []),
   ],
 
   'mocks.scaffold': (r) => [

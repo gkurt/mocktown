@@ -389,6 +389,31 @@ export const contract = {
       })
       .input(z.object({ ...ProjectInput, service: z.string(), force: z.boolean().optional() }))
       .output(withProject({ service: z.string(), files: z.array(z.string()), brief: z.string() })),
+
+    schema: oc
+      .route({
+        method: 'POST',
+        path: '/mocks/{service}/schema',
+        summary: "Draft the service's response schemas from every recording, for the author to own and edit",
+      })
+      .input(
+        z.object({
+          ...ProjectInput,
+          service: z.string(),
+          force: z.boolean().optional().describe('Redraft over a schema that is already checked in, discarding any edits'),
+          limit: z.coerce.number().int().min(1).max(20_000).default(5000).describe('How many recordings to infer from'),
+        }),
+      )
+      .output(
+        withProject({
+          service: z.string(),
+          file: z.string(),
+          written: z.boolean(),
+          reason: z.string().optional().describe('Why nothing was written, when nothing was'),
+          recordings: z.number().int().describe('Recordings read'),
+          routes: z.array(z.object({ route: z.string(), statusCode: z.number().int(), observations: z.number().int() })),
+        }),
+      ),
   },
 
   env: {

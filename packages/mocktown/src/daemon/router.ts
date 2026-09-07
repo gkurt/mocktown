@@ -8,6 +8,7 @@
  * exist for any of them.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ORPCError } from '@orpc/client';
 import { implement } from '@orpc/server';
 import { and, desc, eq } from 'drizzle-orm';
@@ -25,6 +26,7 @@ import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { listPanels, workspacePanelDir } from '#src/gui/panels.ts';
 import { exportCorpus, inflateRecording, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
 import { scaffoldMock } from '#src/mocks/scaffold.ts';
+import { buildSchemas, loadSchemas, writeSchemaModule } from '#src/mocks/schema.ts';
 import { verifyRecordings } from '#src/mocks/verify.ts';
 import { writeDevcontainer } from '#src/sandbox/devcontainer.ts';
 import { setKnobs } from '#src/scenario/knobs.ts';
@@ -357,7 +359,21 @@ export const router = os.router({
       const recordings = recordingsForService(runtime.db, input.service, input.session, input.limit).map((row) =>
         inflateRecording(runtime.name, row),
       );
-      const result = await verifyRecordings(recordings, { baseUrl, service: input.service }, runtime.currentScrubber);
+      // A schema the author checked in outranks the corpus. A broken one must not be
+      // swallowed into "no schema", though — that would silently demote every route back
+      // to single-recording comparison and look like a passing run.
+      const mocksDir = runtime.resolved.paths?.mocksDir;
+      let schemas = null;
+      if (mocksDir) {
+        try {
+          schemas = await loadSchemas(mocksDir, input.service);
+        } catch (error) {
+          throw new ORPCError('CONFLICT', {
+            message: `the checked-in schema for "${input.service}" could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
+      const result = await verifyRecordings(recordings, { baseUrl, service: input.service, schemas }, runtime.currentScrubber);
 
       // A failing replay is evidence, so it becomes work rather than console output.
       for (const failure of result.failures) {
@@ -400,6 +416,49 @@ export const router = os.router({
       mkdirSync(paths.mocksDir, { recursive: true });
       const { files, brief } = scaffoldMock(paths.mocksDir, corpus, { force: input.force });
       return { project: runtime.name, service: input.service, files, brief };
+    }),
+
+    schema: os.mocks.schema.handler(({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const paths = runtime.resolved.paths;
+      if (!paths) {
+        throw new ORPCError('CONFLICT', {
+          message: 'the schema is checked into the repo, so it needs a workspace. Run `mocktown init` in the repo first.',
+        });
+      }
+      // Inference reads whole bodies, so it has to come through `inflateRecording`: a
+      // large response is content-addressed in `blobs/` and the stored row's body is null.
+      // Reading the rows raw would infer a schema from the small responses only.
+      const rows = recordingsForService(runtime.db, input.service, undefined, input.limit).map((row) =>
+        inflateRecording(runtime.name, row),
+      );
+      const entries = buildSchemas(
+        rows
+          .filter((row) => row.kind === 'http')
+          .map((row) => ({
+            method: row.method,
+            pathTemplate: row.pathTemplate,
+            statusCode: row.statusCode,
+            contentType: String(row.responseHeaders['content-type'] ?? ''),
+            body: row.responseBody,
+          })),
+      );
+      if (entries.length === 0) {
+        throw new ORPCError('CONFLICT', {
+          message: `no JSON responses recorded for "${input.service}" — record some traffic first, or import a HAR file.`,
+        });
+      }
+      mkdirSync(join(paths.mocksDir, input.service), { recursive: true });
+      const { file, written, reason } = writeSchemaModule(paths.mocksDir, input.service, entries, { force: input.force });
+      return {
+        project: runtime.name,
+        service: input.service,
+        file,
+        written,
+        ...(reason ? { reason } : {}),
+        recordings: rows.length,
+        routes: entries.map((entry) => ({ route: entry.route, statusCode: entry.statusCode, observations: entry.observations })),
+      };
     }),
   },
 

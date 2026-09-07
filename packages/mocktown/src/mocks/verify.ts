@@ -15,6 +15,7 @@
  * a correctly-shaped secret and no real one exists anywhere (10-security.md).
  */
 import type { Recording } from '#src/contract/schemas.ts';
+import { parseJsonBody, type SchemaMap, schemaDiff, schemaKey } from '#src/mocks/schema.ts';
 import type { Scrubber } from '#src/scrub/scrubber.ts';
 
 export interface VerifyFailure {
@@ -34,6 +35,8 @@ export interface VerifyResult {
   failed: number;
   /** Recordings replay cannot exercise — a socket session is not a request and a response. */
   skipped: number;
+  /** Exchanges checked against the checked-in schema rather than against one recorded body. */
+  schemaChecked: number;
   failures: VerifyFailure[];
 }
 
@@ -58,6 +61,11 @@ export function shapeOf(value: unknown, path = ''): string[] {
  * What the recording had that the mock did not produce. Extra fields in the mock's
  * response are not failures — a mock may legitimately return more than the corpus
  * happened to capture; missing ones break the client.
+ *
+ * This is the fallback, used only where no schema is checked in. It compares against a
+ * *single* recorded body, so it cannot express a union, cannot tell a record from a
+ * data-keyed map, and cannot be overruled when the recording is wrong. `mocktown mocks
+ * schema` writes the file that replaces it.
  */
 export function shapeDiff(expected: unknown, actual: unknown): string[] {
   const expectedShape = new Set(shapeOf(expected));
@@ -79,12 +87,19 @@ export interface ReplayTarget {
   baseUrl: string;
   /** The hostname the mock answers for; sent as the Host header. */
   service: string;
+  /**
+   * The service's checked-in response schemas, when it has any. A route and status found
+   * here is checked against the author's schema; everything else falls back to comparing
+   * shapes with the one body the corpus happened to record.
+   */
+  schemas?: SchemaMap | null;
 }
 
 export async function verifyRecordings(recordings: Recording[], target: ReplayTarget, scrubber: Scrubber): Promise<VerifyResult> {
   const failures: VerifyFailure[] = [];
   let passed = 0;
   let skipped = 0;
+  let schemaChecked = 0;
 
   for (const recording of recordings) {
     // A socket recording is a handshake plus a conversation, and this harness compares one
@@ -157,22 +172,12 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
       continue;
     }
 
-    const recordedBody = recording.responseBody;
-    const isJson = String(recording.responseHeaders['content-type'] ?? '').includes('json');
-    if (recordedBody && isJson) {
-      let expected: unknown, actual: unknown;
-      try {
-        expected = JSON.parse(recordedBody);
-      } catch {
-        expected = null;
-      }
-      try {
-        actual = JSON.parse(text);
-      } catch {
-        actual = null;
-      }
-
-      if (expected !== null && actual === null) {
+    // Whether the recording is JSON is decided by parsing it, not by its `content-type`:
+    // an API that serves JSON as `text/plain` used to skip body comparison altogether.
+    const expected = parseJsonBody(recording.responseBody);
+    if (expected !== undefined) {
+      const actual = parseJsonBody(text);
+      if (actual === undefined) {
         failures.push({
           recordingId: recording.id,
           method: recording.method,
@@ -185,13 +190,21 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
         continue;
       }
 
-      const diff = expected === null ? [] : shapeDiff(expected, actual);
+      // The author's schema wins wherever there is one. It was drafted from every
+      // recording of this route rather than this one, and — more to the point — the author
+      // has had a chance to correct it, which no single recorded body can be.
+      const schema = target.schemas?.[schemaKey(recording.method, recording.pathTemplate)]?.[recording.statusCode];
+      const diff = schema ? schemaDiff(schema, actual) : shapeDiff(expected, actual);
+      if (schema) schemaChecked++;
+
       if (diff.length > 0) {
         failures.push({
           recordingId: recording.id,
           method: recording.method,
           path: recording.path,
-          reason: 'response shape does not cover what the recording contained',
+          reason: schema
+            ? `response does not satisfy the schema for ${schemaKey(recording.method, recording.pathTemplate)} ${recording.statusCode}`
+            : 'response shape does not cover what the recording contained',
           expectedStatus: recording.statusCode,
           actualStatus: response.status,
           diff: diff.slice(0, 20),
@@ -209,6 +222,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
     passed,
     failed: failures.length,
     skipped,
+    schemaChecked,
     failures,
   };
 }
