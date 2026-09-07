@@ -63,6 +63,9 @@ export const DEFAULT_NOISE: NoisePattern[] = [
   { host: 'sb-ssl.google.com', why: 'Safe Browsing' },
   { host: 'optimizationguide-pa.googleapis.com', why: "Chrome's optimization hints and on-device models" },
   { host: 'content-autofill.googleapis.com', why: "Chrome's autofill server" },
+  // Fires when someone types a password into a recorded login form, so it shows up in
+  // exactly the attended sessions that matter, looking like an app dependency.
+  { host: 'passwordsleakcheck-pa.googleapis.com', why: "Chrome's password leak check" },
   { host: 'android.clients.google.com', paths: ['/c2dm/', '/checkin'], why: 'Chrome push registration (GCM)' },
   // The captive-portal probe, observed on a headless Chromium driven by agent-browser — where
   // it was the only thing the session recorded. It rotates across hosts; the two it shares
