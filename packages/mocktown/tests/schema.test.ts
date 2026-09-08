@@ -338,3 +338,28 @@ test('a nullable the author widened is not drift, but narrowing it is', () => {
   // The author declared only half of it: the corpus still shows the other half.
   expect(driftBetween({ 'GET /v1/a': { 200: z.object({ rank: z.number() }) } }, drafted)).toHaveLength(1);
 });
+
+test('the rendered module asks formatters to leave it alone', () => {
+  // This file is thousands of lines of generated literal in someone else's repo, where
+  // `bun check --write` runs over everything. One such run rewrote two of these files by
+  // ~2000 lines each, which is a diff nobody can review and a file that then flips style
+  // depending on who ran what last.
+  const module = renderSchemaModule(
+    'api.example.test',
+    buildSchemas([{ method: 'get', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a"}' }]),
+    '2026-01-01',
+  );
+
+  expect(module).toContain('// biome-ignore-all format:');
+
+  // Prettier has no file-level opt-out: `// prettier-ignore` covers the next node only. It
+  // works here because the entire schema *is* one node, so the directive has to sit
+  // immediately before `export default` — anywhere else and it protects nothing.
+  expect(module).toContain('// prettier-ignore\nexport default {');
+  // Two of them, because Prettier's directive is per-node and the file has two nodes: the
+  // import and the export. Without the first, every run flips one line's quote style.
+  expect(module).toContain("// prettier-ignore\nimport { z } from 'mocktown/mock';");
+
+  // A formatter that has neither needs a path, so the header has to name one.
+  expect(module).toContain('mocks/api.example.test/schema.ts');
+});

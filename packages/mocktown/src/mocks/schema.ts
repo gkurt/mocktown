@@ -373,7 +373,18 @@ const header = (service: string, generatedAt: string, total: number) => `/**
  *
  * Unknown keys are allowed by design — no \`.strict()\` — since a mock may legitimately
  * return more than the corpus happened to capture.
+ *
+ * **Formatters are asked to leave this file alone.** It is thousands of lines of generated
+ * literal, and a formatter with different defaults rewrites every one of them — which buries
+ * the single line you actually corrected in a diff nobody can review, and flips the file
+ * back and forth depending on who ran what last. The directives below cover Biome and
+ * Prettier. If your formatter has no in-file opt-out, add this path to its ignore list:
+ *
+ *   mocks/${service}/schema.ts
  */
+// biome-ignore-all format: generated — see the header
+/* eslint-disable */
+// prettier-ignore
 import { z } from 'mocktown/mock';
 `;
 
@@ -395,7 +406,11 @@ export function renderSchemaModule(service: string, entries: SchemaEntry[], gene
     return `  ${JSON.stringify(route)}: {\n${lines.join('\n')}\n  },`;
   });
 
+  // Prettier has no file-level opt-out — `// prettier-ignore` applies to the next node
+  // only. That is enough here precisely because the whole schema is one node: everything
+  // below is a single `export default`, so one directive covers the entire body.
   return `${header(service, generatedAt, total)}
+// prettier-ignore
 export default {
 ${blocks.join('\n')}
 } satisfies Record<string, Record<number, z.ZodType>>;
