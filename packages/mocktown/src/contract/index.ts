@@ -76,6 +76,26 @@ export const contract = {
       ),
   },
 
+  project: {
+    list: oc
+      .route({ method: 'GET', path: '/projects', summary: 'Every registered project, and which one is the global default' })
+      .input(z.object({ ...ProjectInput }))
+      .output(
+        withProject({
+          default: z.string().describe('The global default, which is not necessarily the resolved project'),
+          projects: z.array(
+            z.object({
+              name: z.string(),
+              dataDir: z.string(),
+              workspace: z.string().nullable(),
+              /** A registry entry outlives the checkout it names; a switcher should say so. */
+              workspaceExists: z.boolean(),
+            }),
+          ),
+        }),
+      ),
+  },
+
   feed: {
     tail: oc
       .route({

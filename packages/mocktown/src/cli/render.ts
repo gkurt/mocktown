@@ -50,6 +50,15 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     ...(r.warnings.length ? ['', 'warnings', ...r.warnings.map((w: string) => `  ! ${w}`)] : []),
   ],
 
+  'project.list': (r) => [
+    `default: ${r.default}`,
+    ...r.projects.map(
+      (entry: any) =>
+        `  ${pad(entry.name, 24)} ${entry.dataDir}` +
+        (entry.workspace ? `  <- ${entry.workspace}${entry.workspaceExists ? '' : ' (gone)'}` : ''),
+    ),
+  ],
+
   'feed.tail': (r) => [
     ...(r.gap ? ['! the feed is a bounded window and events were dropped before this point'] : []),
     ...(r.events.length ? r.events.map(feedLine) : ['  (nothing yet)']),

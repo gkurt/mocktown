@@ -16,6 +16,7 @@ import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
+import { loadGlobalConfig } from '#src/config/project.ts';
 import { writeService } from '#src/config/services.ts';
 import { settingsOf, writeSetting } from '#src/config/settings.ts';
 import { contract } from '#src/contract/index.ts';
@@ -99,6 +100,22 @@ export const router = os.router({
    * it last saw; a quiet project returns an empty list after `waitMs` and the caller asks
    * again with the same cursor.
    */
+  project: {
+    list: os.project.list.handler(({ input }) => {
+      const config = loadGlobalConfig();
+      return {
+        project: input.project,
+        default: config.defaultProject,
+        projects: Object.entries(config.projects).map(([name, entry]) => ({
+          name,
+          dataDir: entry.dataDir,
+          workspace: entry.workspace,
+          workspaceExists: entry.workspace !== null && existsSync(entry.workspace),
+        })),
+      };
+    }),
+  },
+
   feed: {
     tail: os.feed.tail.handler(async ({ input }) => {
       const runtime = runtimeFor(input.project);

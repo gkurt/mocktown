@@ -92,6 +92,7 @@ const GROUP_DESCRIPTIONS: Record<string, string> = {
   scrub: 'Secrets scrubbing and its audit',
   issues: "The agent loop's work queue",
   providers: 'Provider processes behind the front door',
+  project: 'Projects: what is registered, and which one is the global default',
   mocks: 'Generated mocks: scaffold them, verify them',
   skills: 'Prompt packs for the recurring agent jobs',
   ekb: 'Endpoint knowledge base: how clients get pointed at each service',
@@ -215,18 +216,9 @@ program
     if (missing.length) console.log(`  gitignored ${missing.join(', ')}`);
   });
 
-const projectCommand = program.command('project').description('Manage the global default project');
-
-projectCommand
-  .command('list')
-  .description('Registered projects and their data directories')
-  .action(() => {
-    const config = loadGlobalConfig();
-    console.log(`default: ${config.defaultProject}`);
-    for (const [name, entry] of Object.entries(config.projects)) {
-      console.log(`  ${name.padEnd(24)} ${entry.dataDir}${entry.workspace ? `  <- ${entry.workspace}` : ''}`);
-    }
-  });
+// `project list` is generated from the contract, so the group already exists by the time
+// this runs; `use` writes a global preference and has no daemon procedure behind it.
+const projectCommand = program.commands.find((command) => command.name() === 'project') ?? program.command('project');
 
 projectCommand
   .command('use')

@@ -12,6 +12,7 @@ import { createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvide
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { boot, useStranded } from './api.ts';
+import { useProjects } from './hooks.ts';
 import { Corpus } from './pages/corpus.tsx';
 import { Dashboard } from './pages/dashboard.tsx';
 import { Feed } from './pages/feed.tsx';
@@ -74,6 +75,41 @@ function Stranded() {
   );
 }
 
+/**
+ * The registry, not a text field. Typing a name here used to *create* the project it named:
+ * every surface registers a project on first use, so a typo minted a registry entry, a data
+ * directory and a migrated database, and then showed an empty dashboard that looked like
+ * data loss. There is nothing a free-text switcher could reach that the registry does not
+ * already hold, because reaching a project is what puts it there.
+ *
+ * The resolved project is listed even when the registry has not caught up — it is what the
+ * reader is looking at, and a switcher that cannot show the current value is worse than no
+ * switcher.
+ */
+function Switcher({ project, onPick }: { project: string; onPick: (project: string) => void }) {
+  const projects = useProjects(project);
+  const known = projects.data?.projects.map((entry) => entry.name) ?? [];
+  const names = known.includes(project) ? known : [project, ...known];
+
+  return (
+    <label className="ml-auto flex items-center gap-2">
+      <span className="text-muted">project</span>
+      <select
+        className="w-56 rounded border border-line bg-raised px-1 py-0.5 font-mono"
+        value={project}
+        onChange={(event) => onPick(event.target.value)}
+      >
+        {names.map((name) => (
+          <option key={name} value={name}>
+            {name}
+            {name === projects.data?.default ? '  (default)' : ''}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function Chrome() {
   const project = useProject();
   const navigate = useNavigate();
@@ -96,18 +132,7 @@ function Chrome() {
             </Link>
           ))}
         </nav>
-        <label className="ml-auto flex items-center gap-2">
-          <span className="text-muted">project</span>
-          <input
-            className="w-40 rounded border border-line bg-raised px-1 py-0.5 font-mono"
-            defaultValue={project}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter') return;
-              const next = (event.target as HTMLInputElement).value.trim();
-              if (next) navigate({ to: '.', search: { project: next } });
-            }}
-          />
-        </label>
+        <Switcher project={project} onPick={(next) => navigate({ to: '.', search: { project: next } })} />
       </header>
       <main className="p-4">
         <Outlet />
