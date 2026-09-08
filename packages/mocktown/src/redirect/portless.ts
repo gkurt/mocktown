@@ -43,7 +43,13 @@ const PROXY_START_TIMEOUT_MS = 10_000;
 const PRIVILEGED_PORT_CEILING = 1024;
 
 export interface PortlessSettings {
-  tld: string;
+  /**
+   * Most preferred first. `tlds[0]` is the one URLs are built from — an env var takes a
+   * single value — and every entry is served by the proxy, accepted as a `Host`, and
+   * excluded from NO_PROXY. A second spelling is the point: `.mocktown` needs the hosts
+   * entry portless writes, and `.mocktown.localhost` resolves to loopback without one.
+   */
+  tlds: string[];
   port: number;
   tls: boolean;
   /** `PORTLESS_STATE_DIR`; defaults to portless's own `~/.portless`. */
@@ -73,11 +79,17 @@ export interface PortlessStatus {
    * this, not the configured settings, or they will disagree with the proxy.
    */
   resolved: PortlessSettings | null;
+  /**
+   * What the proxy serves, flattened out of `resolved` for clients — the contract does not
+   * carry the whole settings object, and "are both my TLDs actually live" is the question
+   * this feature exists to answer.
+   */
+  tlds: string[];
   names: PortlessName[];
 }
 
-export function unavailable(enabled: boolean, reason: string, binary: string | null = null): PortlessStatus {
-  return { enabled, available: false, reason, binary, caBundle: null, resolved: null, names: [] };
+export function unavailable(enabled: boolean, reason: string, binary: string | null = null, tlds: string[] = []): PortlessStatus {
+  return { enabled, available: false, reason, binary, caBundle: null, resolved: null, tlds, names: [] };
 }
 
 /** PATH first, then the workspace's own `node_modules/.bin` — portless is often a devDependency. */
@@ -106,12 +118,16 @@ export function stableName(project: string, service: string): string {
   return `${slug(service)}.${slug(project)}`;
 }
 
+/** The address to hand out. One value, because everything downstream of it takes one. */
 export function stableUrl(name: string, settings: PortlessSettings): string {
   const scheme = settings.tls ? 'https' : 'http';
   const defaultPort = settings.tls ? 443 : 80;
   const port = settings.port === defaultPort ? '' : `:${settings.port}`;
-  return `${scheme}://${name}.${settings.tld}${port}`;
+  return `${scheme}://${name}.${primaryTld(settings)}${port}`;
 }
+
+/** The first entry, or `localhost` if a caller managed to pass an empty list. */
+export const primaryTld = (settings: PortlessSettings): string => settings.tlds[0] ?? 'localhost';
 
 export const stateDirOf = (settings: PortlessSettings) =>
   settings.stateDir ?? process.env.PORTLESS_STATE_DIR ?? join(homedir(), '.portless');
@@ -198,11 +214,20 @@ function routeHostnames(settings: PortlessSettings): string[] {
   }
 }
 
-/** The suffix portless appended to a name we chose is the TLD its proxy is serving. */
-function discoverTld(settings: PortlessSettings, name: string): string | null {
+/**
+ * The suffixes portless appended to a name we chose are the TLDs its proxy is serving.
+ *
+ * Every match, not the first: a proxy started with two TLDs answers a name under both, and
+ * taking only one would leave the other arriving at a front door that has never heard of
+ * it. Empty when the routes file has nothing to say, and the caller falls back to config.
+ */
+function discoverTlds(settings: PortlessSettings, name: string): string[] {
   const prefix = `${name}.`;
-  for (const hostname of routeHostnames(settings)) if (hostname.startsWith(prefix)) return hostname.slice(prefix.length) || null;
-  return null;
+  const found = routeHostnames(settings)
+    .filter((hostname) => hostname.startsWith(prefix))
+    .map((hostname) => hostname.slice(prefix.length))
+    .filter(Boolean);
+  return [...new Set(found)];
 }
 
 function discoverPort(settings: PortlessSettings): number | null {
@@ -246,7 +271,9 @@ async function ensureProxy(binary: string, settings: PortlessSettings): Promise<
     };
   }
 
-  const args = ['proxy', 'start', '-p', String(port), '--tld', settings.tld, ...(settings.tls ? [] : ['--no-tls'])];
+  // `--tld` repeats; portless serves every one it is given.
+  const tldArgs = settings.tlds.flatMap((tld) => ['--tld', tld]);
+  const args = ['proxy', 'start', '-p', String(port), ...tldArgs, ...(settings.tls ? [] : ['--no-tls'])];
   const started = await portless(binary, args, settings);
   if (!started.ok) return { ok: false, reason: `\`portless ${args.join(' ')}\` failed: ${started.output}` };
 
@@ -279,8 +306,15 @@ async function proveUsable(
     const registered = await alias(binary, name, port, settings);
     if (!registered.ok) return { ok: false, reason: `\`portless alias\` failed: ${registered.output}`, resolved: null };
 
+    // Discovered first, then anything configured it did not mention. Replacing outright
+    // would be wrong in a way that is invisible: a proxy serving two TLDs may only record
+    // a route under one of them, and dropping the other from the alias table and NO_PROXY
+    // breaks the fallback exactly when the primary is the one that failed. A configured
+    // TLD the proxy is not serving costs nothing — it is a Host that never arrives — while
+    // the discovered one still leads, so URLs follow the proxy rather than a stale config.
+    const found = discoverTlds(settings, name);
     const discovered = {
-      tld: discoverTld(settings, name) ?? settings.tld,
+      tlds: [...found, ...settings.tlds.filter((tld) => !found.includes(tld))],
       port: discoverPort(settings) ?? settings.port,
       stateDir: settings.stateDir,
     };
@@ -349,17 +383,18 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
       "the `portless` binary is not on PATH or in the workspace's node_modules/.bin — `npm i -D portless` or install it globally",
     );
   }
-  if (input.baseUrls.size === 0) return unavailable(true, 'no provider is listening, so there is nothing to give a stable name to', binary);
+  if (input.baseUrls.size === 0)
+    return unavailable(true, 'no provider is listening, so there is nothing to give a stable name to', binary, input.settings.tlds);
 
   // Carry portless's certificates whether or not the project declared TLS: the probe settles
   // which scheme is live, and an https proxy with no bundle to check would fail as "did not
   // answer" — true, but not the reason anyone needs.
   const proxy = await ensureProxy(binary, input.settings);
-  if (!proxy.ok) return unavailable(true, proxy.reason, binary);
+  if (!proxy.ok) return unavailable(true, proxy.reason, binary, input.settings.tlds);
 
   const caBundle = writeCaBundle(input.project, [input.projectCaPath, ...portlessCaCerts(input.settings)]);
   const proof = await proveUsable(binary, input.project, caBundle, input.settings);
-  if (!proof.ok || !proof.resolved) return { ...unavailable(true, proof.reason, binary), caBundle };
+  if (!proof.ok || !proof.resolved) return { ...unavailable(true, proof.reason, binary, input.settings.tlds), caBundle };
   const settings = proof.resolved;
 
   const names: PortlessName[] = [];
@@ -389,6 +424,7 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
     binary,
     caBundle,
     resolved: settings,
+    tlds: settings.tlds,
     names,
   };
 }

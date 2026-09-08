@@ -169,11 +169,26 @@ export const ProjectFile = z.object({
   portless: z
     .object({
       enabled: z.boolean().default(false).describe('Give each service a stable `<service>.<project>.<tld>` name'),
-      tld: z.string().default('localhost').describe('Preferred TLD; the running proxy overrides it'),
+      /**
+       * Ordered, and the order carries meaning: the first is the one URLs are built from
+       * — `.env.mocktown` and every printed address take a single value — and all of them
+       * are served, accepted as a `Host`, and excluded from the proxy.
+       *
+       * The default pairs a short name with a `.localhost` spelling of it. `.mocktown` is
+       * not a reserved TLD, so it needs an `/etc/hosts` entry portless writes and could in
+       * principle be delegated one day — that is how Google's purchase of `.dev` broke
+       * local setups everywhere. `.mocktown.localhost` resolves to loopback with no hosts
+       * entry at all (RFC 6761), so it keeps working when the first cannot.
+       */
+      tlds: z
+        .array(z.string().min(1))
+        .min(1)
+        .default(['mocktown', 'mocktown.localhost'])
+        .describe('Preferred TLDs, most preferred first; the running proxy overrides them'),
       port: z.number().int().default(443).describe('Preferred proxy port; the running proxy overrides it'),
       tls: z.boolean().default(true).describe('Preferred scheme; whichever the running proxy answers on wins'),
     })
-    .default({ enabled: false, tld: 'localhost', port: 443, tls: true })
+    .default({ enabled: false, tlds: ['mocktown', 'mocktown.localhost'], port: 443, tls: true })
     .describe(
       'Stable `<service>.<project>.<tld>` names via portless (05-redirection.md). Off by default: portless binds 443 with sudo, edits /etc/hosts and puts a CA in the system trust store',
     ),

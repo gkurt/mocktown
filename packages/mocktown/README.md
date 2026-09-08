@@ -283,10 +283,16 @@ authenticate. It spends real quota, so the schedule is off until `mocktown.json`
 
 With [portless](https://github.com/vercel-labs/portless) installed and
 `portless.enabled` in `mocktown.json`, each service gets a stable
-`https://<service>.<project>.localhost` name instead of a fresh loopback port on every
+`https://<service>.<project>.<tld>` name instead of a fresh loopback port on every
 daemon restart, and `.env.mocktown` uses it. Mocktown proves the whole path works — it
 registers a throwaway name and fetches it back through the proxy — before it claims a name,
 and reports the reason if it cannot. `mocktown env portless get` shows the verdict.
+
+`portless.tlds` is an ordered list, `["mocktown", "mocktown.localhost"]` by default. URLs are
+built from the first; the rest are served alongside it as fallbacks. The second one earns its
+place: `.mocktown` resolves only because portless writes `/etc/hosts`, and `.localhost`
+resolves to loopback whether or not that succeeded. Whatever the running proxy turns out to
+be serving is discovered and takes precedence over the config.
 
 ## Layout
 

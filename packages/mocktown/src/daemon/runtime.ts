@@ -476,9 +476,10 @@ export class ProjectRuntime {
     return planNoProxy({
       declared: this.project.file?.noProxy,
       services: this.services().map((service) => service.id),
-      // A stable name must bypass: the app has to reach its own mock directly, or the
-      // request for it would enter the front door and be denied as an unknown host.
-      required: stable ? [`.${stable.resolved?.tld ?? this.portlessSettings().tld}`] : undefined,
+      // Every stable name must bypass: the app has to reach its own mock directly, or the
+      // request for it would enter the front door and be denied as an unknown host. One
+      // suffix per served TLD — a fallback TLD nobody excluded is a fallback that fails.
+      required: stable ? (stable.resolved?.tlds ?? this.portlessSettings().tlds).map((tld) => `.${tld}`) : undefined,
     });
   }
 
@@ -790,23 +791,19 @@ export class ProjectRuntime {
     const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
     if (!generated) return;
     // What the proxy is actually serving, which is not necessarily what the project declared.
-    const tld = this.portless?.resolved?.tld ?? this.portlessSettings().tld;
+    // Every TLD, not just the one URLs are built from: a request that arrives on the
+    // fallback spelling is the case the fallback exists for, and a 501 there defeats it.
+    const tlds = this.portless?.resolved?.tlds ?? this.portlessSettings().tlds;
     const aliases = new Map<string, string>();
+    const claim = (name: string, service: string) => {
+      aliases.set(name, service);
+      for (const tld of tlds) aliases.set(`${name}.${tld}`, service);
+    };
     // Declared first, so a stable name minted for the same service still wins below — the
     // portless names are ours and unambiguous, a declared alias is a claim about the world.
-    for (const [alias, service] of this.aliasMap().aliases) {
-      aliases.set(alias, service);
-      aliases.set(`${alias}.${tld}`, service);
-    }
-    for (const service of generated.services) {
-      const name = stableName(this.project.name, service);
-      aliases.set(name, service);
-      aliases.set(`${name}.${tld}`, service);
-    }
-    for (const entry of this.portless?.names ?? []) {
-      aliases.set(entry.name, entry.service);
-      aliases.set(`${entry.name}.${tld}`, entry.service);
-    }
+    for (const [alias, service] of this.aliasMap().aliases) claim(alias, service);
+    for (const service of generated.services) claim(stableName(this.project.name, service), service);
+    for (const entry of this.portless?.names ?? []) claim(entry.name, entry.service);
     generated.setAliases(aliases);
   }
 
@@ -1122,7 +1119,7 @@ export class ProjectRuntime {
 
   private portlessSettings(): PortlessSettings {
     const config = this.project.file?.portless;
-    return { tld: config?.tld ?? 'localhost', port: config?.port ?? 443, tls: config?.tls ?? true };
+    return { tlds: config?.tlds ?? ['mocktown', 'mocktown.localhost'], port: config?.port ?? 443, tls: config?.tls ?? true };
   }
 
   /** The last proven status, never a guess: an unsynced project says so rather than reading as broken. */
@@ -1133,6 +1130,8 @@ export class ProjectRuntime {
       unavailable(
         enabled,
         enabled ? 'no serve session has synced stable names yet — `mocktown env portless sync`' : 'portless is off for this project',
+        null,
+        this.portlessSettings().tlds,
       )
     );
   }
@@ -1154,7 +1153,12 @@ export class ProjectRuntime {
         projectCaPath: projectPaths(this.project.name).caCert,
       });
     } catch (error) {
-      this.portless = unavailable(enabled, `portless sync failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.portless = unavailable(
+        enabled,
+        `portless sync failed: ${error instanceof Error ? error.message : String(error)}`,
+        null,
+        this.portlessSettings().tlds,
+      );
     }
     this.applyStableAliases();
 

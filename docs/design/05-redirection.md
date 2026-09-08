@@ -112,7 +112,7 @@ Two further consequences, both deliberate:
   was free, so `.env.mocktown` changes on every daemon restart, and anything that remembers
   a URL — an OAuth redirect URI, a committed fixture, a teammate's shell history — is wrong
   by the next morning. With portless a service is always
-  `https://<service>.<project>.localhost`. Five decisions:
+  `https://<service>.<project>.<tld>`. Six decisions:
 
   - **`portless alias` is the only verb used.** Our listeners already exist and are ours to
     supervise, which is the case portless documents as "a static route (e.g. for Docker)".
@@ -132,6 +132,19 @@ Two further consequences, both deliberate:
     those variables, so the same bundle is also emitted as a list of SPKI fingerprints
     (`MOCKTOWN_CA_SPKI`) — every certificate in it, because a list naming one issuer leaves
     the other throwing certificate errors in a window that looks correctly configured.
+  - **`portless.tlds` is a list, not a name.** The default is
+    `["mocktown", "mocktown.localhost"]`. `.mocktown` is the one worth typing, and it only
+    resolves because portless writes `/etc/hosts` — which is exactly the step that fails on a
+    locked-down machine, in a devcontainer, or when someone declines the prompt. `.localhost`
+    resolves to loopback with no hosts entry at all (RFC 6761), so the second spelling is the
+    same proxy reachable when the first cannot be arranged. portless takes a repeated `--tld`
+    and serves them all, so the fallback costs one flag rather than a second proxy. The head
+    of the list is the one URLs are built from, because `.env.mocktown` holds one value per
+    service; the rest are accepted as `Host`, aliased, and kept out of `NO_PROXY`. What the
+    running proxy is serving is read back from its routes file and leads the list, so a
+    config that has drifted is a preference rather than a duty — but a configured TLD the
+    proxy never mentions is kept behind it rather than dropped, since a `Host` that never
+    arrives costs nothing and a missing fallback costs the feature.
   - **Off by default and never load-bearing.** portless binds 443 with sudo, edits
     `/etc/hosts` and installs a CA in the system trust store; that is a person's decision,
     not a config default's. Every failure degrades to loopback URLs with the reason attached.
@@ -139,7 +152,7 @@ Two further consequences, both deliberate:
   One defect fell out of this work: `.env.mocktown` set `HTTP_PROXY` with no `NO_PROXY`, so a
   client pointed at its mock's loopback URL would have had that request proxied into the
   front door, which would deny it as an unknown host — the redirection breaking the
-  redirection. Loopback literals are now never proxied, and the portless TLD is added when
+  redirection. Loopback literals are now never proxied, and every portless TLD is added when
   stable names are live — both through the one bypass plan described in
   [03-capture.md](03-capture.md), so the launch wrapper, `.env.mocktown` and the
   empty-recording diagnostic cannot disagree about what reaches the front door.

@@ -251,15 +251,20 @@ test('a name mocktown mints is served without waiting for a sync to prove it', a
   // into `.env.mocktown`. portless keeps those routes across runs and goes on delivering
   // them, so the request arrives either way. A name we mint is ours to answer.
   const baseUrl = runtime.allBaseUrls().get(GOOD);
-  const minted = `${stableName('generated-test', GOOD)}.localhost`;
+  const name = stableName('generated-test', GOOD);
 
-  const response = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: minted } });
-  expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ ok: true });
+  // Every configured TLD, not just the one URLs are built from: the fallback exists for the
+  // machine where the preferred name could not be arranged, so a request arriving under it
+  // has to be answered by the same provider or the fallback is decorative.
+  for (const tld of ['mocktown', 'mocktown.localhost']) {
+    const response = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: `${name}.${tld}` } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  }
 
   // And after `loopbackAlias` has taken the suffix off, which is the form that reached the
   // lookup when the tld was `.localhost`.
-  const stripped = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: stableName('generated-test', GOOD) } });
+  const stripped = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: name } });
   expect(stripped.status).toBe(200);
 });
 

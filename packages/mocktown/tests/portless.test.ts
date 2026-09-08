@@ -27,22 +27,24 @@ const routesFile = join(stateDir, 'routes.json');
 /**
  * The stub's whole surface: `alias <name> <port> --force` and `alias --remove <name>`.
  *
- * It appends its own TLD to the name and records the full hostname, because that is what
- * portless does — and mocktown now reads it back to learn which TLD the proxy is serving.
+ * It appends its own TLDs to the name and records one hostname per TLD, because that is
+ * what portless does with a repeated `--tld` — and mocktown reads those suffixes back to
+ * learn which TLDs the proxy is serving.
  */
 const STUB = `#!/usr/bin/env bun
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 const [command, ...rest] = process.argv.slice(2);
 const dir = process.env.PORTLESS_STATE_DIR;
 const file = \`\${dir}/routes.json\`;
-const tld = process.env.PORTLESS_STUB_TLD || 'localhost';
+const tlds = (process.env.PORTLESS_STUB_TLD || 'localhost').split(',');
 const read = () => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : []);
 
 if (command === 'alias') {
-  const routes = read();
-  const hostname = \`\${rest[0] === '--remove' ? rest[1] : rest[0]}.\${tld}\`;
-  const kept = routes.filter((route) => route.hostname !== hostname);
-  if (rest[0] !== '--remove') kept.push({ hostname, port: Number(rest[1]), pid: 0 });
+  const removing = rest[0] === '--remove';
+  const name = removing ? rest[1] : rest[0];
+  const hostnames = tlds.map((tld) => \`\${name}.\${tld}\`);
+  const kept = read().filter((route) => !hostnames.includes(route.hostname));
+  if (!removing) for (const hostname of hostnames) kept.push({ hostname, port: Number(rest[1]), pid: 0 });
   writeFileSync(file, JSON.stringify(kept));
 } else if (command === 'proxy' && rest[0] === 'start') {
   // Records the invocation so a test can assert what mocktown asked for, then backgrounds a
@@ -143,7 +145,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const settings = () => ({ tld: 'localhost', port: proxyPort, tls: false, stateDir });
+const settings = () => ({ tlds: ['localhost'], port: proxyPort, tls: false, stateDir });
 
 const input = (overrides: Partial<Parameters<typeof syncPortless>[0]> = {}) => ({
   project: 'names',
@@ -159,9 +161,11 @@ test('a service name becomes one DNS label under the project', () => {
   expect(stableName('checkout', 'api.stripe.com')).toBe('api-stripe-com.checkout');
   expect(stableName('My App', 'S3.us-east-1.amazonaws.com')).toBe('s3-us-east-1-amazonaws-com.my-app');
   // The default ports are the ones a URL is not supposed to carry.
-  expect(stableUrl('a.b', { tld: 'localhost', port: 443, tls: true })).toBe('https://a.b.localhost');
-  expect(stableUrl('a.b', { tld: 'test', port: 8443, tls: true })).toBe('https://a.b.test:8443');
-  expect(stableUrl('a.b', { tld: 'localhost', port: 80, tls: false })).toBe('http://a.b.localhost');
+  expect(stableUrl('a.b', { tlds: ['localhost'], port: 443, tls: true })).toBe('https://a.b.localhost');
+  expect(stableUrl('a.b', { tlds: ['test'], port: 8443, tls: true })).toBe('https://a.b.test:8443');
+  expect(stableUrl('a.b', { tlds: ['localhost'], port: 80, tls: false })).toBe('http://a.b.localhost');
+  // A second TLD is a fallback the proxy also serves, not a second address to hand out.
+  expect(stableUrl('a.b', { tlds: ['mocktown', 'mocktown.localhost'], port: 443, tls: true })).toBe('https://a.b.mocktown');
 });
 
 test('off is off, and says which key turns it on', async () => {
@@ -241,9 +245,13 @@ test('the running proxy decides the tld and port, not the config that has drifte
   process.env.PORTLESS_STUB_TLD = 'mocktown.localhost';
   writeFileSync(join(stateDir, 'proxy.port'), String(proxyPort));
   try {
-    const status = await syncPortless(input({ settings: { ...settings(), tld: 'stale', port: 9 } }));
+    const status = await syncPortless(input({ settings: { ...settings(), tlds: ['stale'], port: 9 } }));
     expect(status.available).toBe(true);
-    expect(status.resolved).toMatchObject({ tld: 'mocktown.localhost', port: proxyPort, tls: false });
+    expect(status.resolved).toMatchObject({ port: proxyPort, tls: false });
+    // Discovered leads, so URLs follow the proxy; the configured one is kept behind it
+    // rather than dropped, because a Host that never arrives costs nothing and a missing
+    // fallback costs the feature.
+    expect(status.resolved?.tlds).toEqual(['mocktown.localhost', 'stale']);
     expect(status.names[0]!.url).toBe(`http://api-stripe-com.names.mocktown.localhost:${proxyPort}`);
     expect(Object.keys(routes())).toEqual(['api-stripe-com.names.mocktown.localhost']);
     await releasePortless(status, settings(), binDir);
@@ -263,22 +271,36 @@ test('an unprivileged proxy is started for you; a privileged one is only ever re
   expect(privileged.reason).toContain('portless proxy start');
   expect(existsSync(join(stateDir, 'started.json'))).toBe(false);
 
+  // Two TLDs, because that is the shipped default's shape: a preferred name and a fallback
+  // the proxy serves alongside it. Both spellings here end in `.localhost` so they resolve
+  // to loopback on their own — the real default's `.mocktown` needs the `/etc/hosts` entry
+  // portless writes, which is not something a test suite gets to do to a machine.
+  const tlds = ['mocktown.localhost', 'fallback.localhost'];
+  process.env.PORTLESS_STUB_TLD = tlds.join(',');
   const port = proxyPort + 1;
-  const status = await syncPortless(input({ settings: { ...settings(), port, tls: false } }));
+  const status = await syncPortless(input({ settings: { ...settings(), tlds, port, tls: false } }));
   try {
     expect(JSON.parse(readFileSync(join(stateDir, 'started.json'), 'utf8'))).toEqual([
       'start',
       '-p',
       String(port),
       '--tld',
-      'localhost',
+      'mocktown.localhost',
+      '--tld',
+      'fallback.localhost',
       '--no-tls',
     ]);
     expect(status.available).toBe(true);
     expect(status.resolved?.port).toBe(port);
-    expect(status.names[0]!.url).toBe(`http://api-stripe-com.names.localhost:${port}`);
-    await releasePortless(status, settings(), binDir);
+    // Both suffixes come back from the routes file, so the fallback is in the alias table
+    // and in NO_PROXY — and the URL handed out is the head of the list, not both.
+    expect(status.tlds).toEqual(tlds);
+    expect(status.names[0]!.url).toBe(`http://api-stripe-com.names.mocktown.localhost:${port}`);
+    expect(Object.keys(routes()).sort()).toEqual(['api-stripe-com.names.fallback.localhost', 'api-stripe-com.names.mocktown.localhost']);
+    await releasePortless(status, { ...settings(), tlds }, binDir);
+    expect(routes()).toEqual({});
   } finally {
+    delete process.env.PORTLESS_STUB_TLD;
     const pid = Number(readFileSync(join(stateDir, 'proxy.pid'), 'utf8'));
     try {
       process.kill(pid);
@@ -303,7 +325,7 @@ test('a certificate hunt takes certificates and nothing else', () => {
   writeFileSync(join(dir, 'proxy.key.pem'), '-----BEGIN PRIVATE KEY-----\nz\n-----END PRIVATE KEY-----\n');
   writeFileSync(join(dir, 'notes.txt'), 'not a certificate');
 
-  expect(portlessCaCerts({ tld: 'localhost', port: 443, tls: true, stateDir: dir })).toEqual([
+  expect(portlessCaCerts({ tlds: ['localhost'], port: 443, tls: true, stateDir: dir })).toEqual([
     join(dir, 'ca.pem'),
     join(dir, 'nested', 'leaf.crt'),
   ]);
