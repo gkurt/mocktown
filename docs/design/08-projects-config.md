@@ -45,9 +45,18 @@ a teammate or agent clones and `mocktown up` just works.
 }
 ```
 
-Committed alongside: `mocks/` (generated mock modules), `seeds/`, curated fixtures.
+Committed alongside: `.mocktown/mocks/` (generated mock modules) and curated fixtures.
 **Never committed:** recordings DB, CA private key, `.env.mocktown` if it embeds
-ports (regenerate instead). `mocktown init` writes the `.gitignore` entries.
+ports (regenerate instead).
+
+`.mocktown/` decides for itself what of it is committed, via a `.mocktown/.gitignore`
+that `mocktown init` writes — so mocktown adds exactly one line (`.env.mocktown`) to a
+`.gitignore` that belongs to the project. That file is also the only form that works:
+git does not descend into an ignored directory, so a repo-level `.mocktown/` would make
+any later `!.mocktown/mocks/` unreachable, and the mocks would silently stop being
+tracked. `dirs` in `mocktown.json` moves any of the three directories; `mocktown.json`
+and `.env.mocktown` stay at the root, being the project's identity and a file loaded by
+name from a shell.
 
 ## Config layers (lowest to highest precedence)
 
@@ -68,8 +77,14 @@ ports (regenerate instead). `mocktown init` writes the `.gitignore` entries.
   ├─ blobs/                             # content-addressed large bodies
   └─ ca/                                # project root CA (key: 0600)
 <repo>/mocktown.json                    # committed identity + service registry
-<repo>/mocks/ · seeds/                  # committed artifacts
-<repo>/.mocktown/                       # local: issues/*.json, config.local.json (gitignored)
+<repo>/.env.mocktown                    # generated, gitignored
+<repo>/.mocktown/                       # one directory, `dirs`-configurable
+  ├─ .gitignore                         # generated: ignores all of the below but mocks/
+  ├─ mocks/                             # committed — the agent loop's output
+  ├─ panels/                            # workspace GUI panels
+  ├─ issues/*.json                       # mirrored from the database each session
+  ├─ config.local.json                  # machine-specific
+  └─ mocktown.schema.json               # generated, for the editor
 ```
 
 (macOS/Windows: platform-appropriate XDG equivalents; paths resolved by one module.)

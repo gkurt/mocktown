@@ -149,7 +149,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
       const panel = /^\/panels\/(workspace|builtin)\/(.+)$/.exec(url.pathname);
       if (panel) {
         const boot = bootFor(url.searchParams.get('project') ?? undefined);
-        const file = panelFile(runtimeFor(boot.project).resolved.workspace, panel[1]!, decodeURIComponent(panel[2]!));
+        const resolved = runtimeFor(boot.project).resolved;
+        const file = panelFile(resolved.workspace, panel[1]!, decodeURIComponent(panel[2]!), resolved.file?.dirs);
         if (!file) return Response.json({ error: 'not_found', path: url.pathname }, { status: 404 });
         if (!file.endsWith('.html')) return new Response(Bun.file(file), { headers: { 'content-security-policy': PANEL_CSP } });
         return htmlResponse(file, boot, PANEL_CSP);

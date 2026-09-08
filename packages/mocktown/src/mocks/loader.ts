@@ -2,7 +2,7 @@
  * Loading generated mock modules from the workspace.
  *
  * Generated mocks are committed to the repo (06-emulation.md) and live at
- * `mocks/<service>/index.ts`. They are plain Bun modules, so loading one is an import —
+ * `<dirs.mocks>/<service>/index.ts`. They are plain Bun modules, so loading one is an import —
  * with a cache-busting query so an agent's edit takes effect on the next
  * `mocktown serve` without restarting the daemon.
  */

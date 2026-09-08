@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { workspacePaths } from '#src/config/paths.ts';
 
 const root = join(import.meta.dir, '.tmp-generated');
 process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
@@ -28,7 +29,7 @@ let runtime: InstanceType<typeof ProjectRuntime>;
 const typesModule = join(import.meta.dir, '..', 'src', 'mocks', 'types.ts');
 
 function writeMock(service: string, body: string): void {
-  const dir = join(workspace, 'mocks', service);
+  const dir = join(workspacePaths(workspace).mocksDir, service);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, 'index.ts'),

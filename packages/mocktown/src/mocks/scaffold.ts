@@ -81,7 +81,8 @@ function renderBrief(corpus: CorpusExport): string {
     '',
     '## Your job',
     '',
-    `Fill in \`mocks/${corpus.service}/index.ts\` so the mock behaves like the real service —`,
+    // Next to this file by construction, so it survives `dirs.mocks` moving.
+    'Fill in the `index.ts` beside this file so the mock behaves like the real service —',
     'an emulator, not a stub. Then run:',
     '',
     '```bash',

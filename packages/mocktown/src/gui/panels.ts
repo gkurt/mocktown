@@ -11,6 +11,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import * as z from 'zod/v4';
+import { type WorkspaceDirs, workspacePaths } from '#src/config/paths.ts';
 import type { Panel } from '#src/contract/schemas.ts';
 
 /** The whole manifest format. Adding a field here is adding a field to every panel ever written. */
@@ -23,7 +24,8 @@ const PanelManifest = z.object({
 /** Panels that ship with the product: the worked examples an agent copies. */
 export const builtinPanelDir = () => join(import.meta.dir, 'panels');
 
-export const workspacePanelDir = (workspace: string | null) => (workspace ? join(workspace, '.mocktown', 'panels') : null);
+export const workspacePanelDir = (workspace: string | null, dirs?: Partial<WorkspaceDirs>) =>
+  workspace ? workspacePaths(workspace, dirs).panelsDir : null;
 
 export interface PanelListing {
   panels: Panel[];
@@ -70,8 +72,8 @@ function readDir(dir: string, source: Panel['source']): PanelListing {
   return { panels, problems };
 }
 
-export function listPanels(workspace: string | null): PanelListing {
-  const dir = workspacePanelDir(workspace);
+export function listPanels(workspace: string | null, dirs?: Partial<WorkspaceDirs>): PanelListing {
+  const dir = workspacePanelDir(workspace, dirs);
   const workspacePanels = dir ? readDir(dir, 'workspace') : { panels: [], problems: [] };
   const builtin = readDir(builtinPanelDir(), 'builtin');
   // A workspace panel with the same name wins: the point of the built-ins is to be replaced.
@@ -94,9 +96,9 @@ function contained(dir: string, path: string): boolean {
  * boundary here: a panel URL is a path from an untrusted document, so `..` must not reach
  * the rest of the repo, and only the two panel directories are ever served.
  */
-export function panelFile(workspace: string | null, source: string, entry: string): string | null {
+export function panelFile(workspace: string | null, source: string, entry: string, dirs?: Partial<WorkspaceDirs>): string | null {
   if (source !== 'builtin' && source !== 'workspace') return null;
-  const dir = source === 'builtin' ? builtinPanelDir() : workspacePanelDir(workspace);
+  const dir = source === 'builtin' ? builtinPanelDir() : workspacePanelDir(workspace, dirs);
   if (!dir) return null;
   const path = join(dir, entry);
   if (!contained(dir, path) || !existsSync(path)) return null;

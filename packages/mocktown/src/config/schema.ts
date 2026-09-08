@@ -142,6 +142,26 @@ export const ProjectFile = z.object({
     .default({ agentsFile: false })
     .describe("What `env write` is allowed to touch. `.env.mocktown` is mocktown's own and gitignored; AGENTS.md is committed and yours"),
   /**
+   * Where mocktown's directories live, relative to the repo root.
+   *
+   * All three default under `.mocktown/`, so a project gets one directory rather than
+   * three scattered across its root, and `.mocktown/.gitignore` decides what of it is
+   * committed. `mocktown.json` and `.env.mocktown` stay at the root: one is the project's
+   * identity and the other is loaded by name from a shell.
+   *
+   * Paths are resolved against the repo root and must stay inside it — `mocktown.json`
+   * arrives with a clone, and a mock module is *executed*, so a path that could climb out
+   * of the workspace is a path worth refusing.
+   */
+  dirs: z
+    .object({
+      mocks: z.string().default('.mocktown/mocks').describe("Generated mock modules — committed; this is the agent loop's output"),
+      issues: z.string().default('.mocktown/issues').describe('Issue files, mirrored from the database each session'),
+      panels: z.string().default('.mocktown/panels').describe('Workspace GUI panels (09-gui-plugins.md)'),
+    })
+    .default({ mocks: '.mocktown/mocks', issues: '.mocktown/issues', panels: '.mocktown/panels' })
+    .describe('Where mocktown keeps its directories, relative to the repo root'),
+  /**
    * portless stable names (05-redirection.md). Off by default like drift, for a different
    * reason: portless binds 443 with sudo, edits `/etc/hosts` and puts a CA in the system
    * trust store. Opting into that is a person's decision, not a config default's.

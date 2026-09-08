@@ -1,6 +1,6 @@
 /**
  * The generated-mock provider: one supervisor for every long-tail service the project's
- * committed `mocks/` directory declares (06-emulation.md, "this is the moat").
+ * committed mocks directory declares (06-emulation.md, "this is the moat").
  *
  * Unlike the emulate provider, this one has no child process — generated mocks are plain
  * Bun modules, so the whole set is served from a single in-daemon listener. That is also

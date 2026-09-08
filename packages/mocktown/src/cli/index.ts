@@ -22,6 +22,7 @@ import { launch } from '#src/capture/launch.ts';
 import { coerceInput, kebab } from '#src/cli/coerce.ts';
 import { clientFor, ensureDaemon } from '#src/cli/daemon-client.ts';
 import { feedLine, renderResult, tilde } from '#src/cli/render.ts';
+import { writeLocalIgnore } from '#src/config/ignore.ts';
 import { SCHEMA_REF, writeProjectFileJsonSchema } from '#src/config/jsonschema.ts';
 import { projectPaths, workspacePaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
@@ -197,22 +198,27 @@ program
     // `$schema` first, so an editor picks it up and the rest of the file gets completion
     // and hover text as it is typed rather than validation after the fact.
     writeFileSync(file, `${JSON.stringify({ $schema: SCHEMA_REF, ...ProjectFile.parse({ project }) }, null, 2)}\n`);
-    mkdirSync(join(cwd, '.mocktown', 'issues'), { recursive: true });
-    writeProjectFileJsonSchema(workspacePaths(cwd).schemaFile);
+    const paths = workspacePaths(cwd);
+    mkdirSync(paths.issuesDir, { recursive: true });
+    mkdirSync(paths.mocksDir, { recursive: true });
+    writeProjectFileJsonSchema(paths.schemaFile);
+    // `.mocktown/` says for itself what of it is committed, so the repo's own .gitignore
+    // only has to carry the one file that lives outside it.
+    writeLocalIgnore(paths.localIgnore, paths.localDir, paths.mocksDir);
 
-    // Never committed: the recordings DB, the CA key, and .env.mocktown (it embeds local
-    // ports — regenerate it rather than sharing it). 08-projects-config.md.
+    // `.env.mocktown` embeds local ports — regenerate it rather than sharing it
+    // (08-projects-config.md).
     const gitignore = join(cwd, '.gitignore');
-    const entries = ['.mocktown/', '.env.mocktown'];
     const existing = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : '';
-    const missing = entries.filter((entry) => !existing.split('\n').includes(entry));
+    const missing = ['.env.mocktown'].filter((entry) => !existing.split('\n').includes(entry));
     if (missing.length) writeFileSync(gitignore, `${existing.trimEnd()}\n${missing.join('\n')}\n`.trimStart());
 
     ensureRegistered(resolveProject({ cwd }));
     console.log(`project: ${project}`);
     console.log(tilde(`  wrote ${file}`));
     console.log(tilde(`  data dir ${projectPaths(project).root}`));
-    console.log(tilde(`  wrote ${workspacePaths(cwd).schemaFile}`));
+    console.log(tilde(`  wrote ${paths.schemaFile}`));
+    console.log(tilde(`  wrote ${paths.localIgnore}`));
     if (missing.length) console.log(`  gitignored ${missing.join(', ')}`);
   });
 

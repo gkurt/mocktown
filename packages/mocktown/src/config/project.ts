@@ -84,7 +84,9 @@ export function resolveProject(opts: { project?: string; cwd?: string } = {}): R
   // without this every workspace-dependent capability (issues, mocks, panels, `env write`)
   // would be silently missing for those projects rather than reported.
   const resolved = here ?? fromRegistry(name);
-  const paths = resolved ? workspacePaths(resolved.workspace) : null;
+  // The directory layout is a committed decision, so it comes from the resolved file
+  // rather than from whichever config happens to be nearest the cwd.
+  const paths = resolved ? workspacePaths(resolved.workspace, resolved.file.dirs) : null;
   const local = paths ? readJson(paths.localConfig, LocalConfig, LocalConfig.parse({})) : LocalConfig.parse({});
 
   return { name, source, workspace: resolved?.workspace ?? null, file: resolved?.file ?? null, local, paths };

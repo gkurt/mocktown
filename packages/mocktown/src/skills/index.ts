@@ -100,7 +100,7 @@ const HOUSE_RULES = `
 export const SKILLS: Skill[] = [
   {
     name: 'record-flow',
-    version: '1.0.0',
+    version: '1.1.0',
     summary: 'Drive the app through a flow so the corpus has the traffic to mock.',
     body: `
 # Record a flow
@@ -139,6 +139,11 @@ mocktown record stop
 
 \`record stop\` reports what was kept and what was dropped as browser noise. Read it — it is
 the only place a missing dependency announces itself.
+
+Issues land while the flow runs, not when it ends: \`mocktown feed --follow --kind issue
+--json\` in the background prints one line each time the front door files one, so a host you
+forgot to register announces itself while you can still drive the flow. The \`fix-issues\`
+skill covers working them.
 
 ## Attaching to a launched window
 
@@ -199,10 +204,10 @@ service well enough that the application under test cannot tell the difference.
 \`\`\`bash
 mocktown corpus export --service <service>      # routes, examples, stateful couplings
 mocktown recordings routes --service <service>  # the full route surface, one line each
-mocktown mocks scaffold --service <service>     # writes mocks/<service>/{index.ts,BRIEF.md}
+mocktown mocks scaffold --service <service>     # writes .mocktown/mocks/<service>/{index.ts,BRIEF.md}
 \`\`\`
 
-Read \`mocks/<service>/BRIEF.md\` first. It is the corpus organised by route, with the
+Read \`.mocktown/mocks/<service>/BRIEF.md\` first. It is the corpus organised by route, with the
 create/read couplings already identified.
 
 But read house rule 2 before any of that: if this service is one of the fourteen mocktown
@@ -276,7 +281,7 @@ ${UNTRUSTED}
 
   {
     name: 'fix-issues',
-    version: '1.2.0',
+    version: '1.3.0',
     summary: 'Work the issue backlog: unmatched requests, near misses, state violations.',
     body: `
 # Fix the issue backlog
@@ -295,6 +300,25 @@ mocktown issues resolve --id <issue>          # replays the trigger; only a pass
 \`\`\`
 
 Issues also exist as JSON under \`.mocktown/issues/\` if you prefer files to commands.
+
+## Watching for new issues
+
+Issues land while something is driving the app — your test run, a recorded flow, a seal run
+— not in a batch at the end. The feed parks until one is filed, so there is nothing to poll:
+
+\`\`\`bash
+mocktown feed --follow --kind issue --json
+\`\`\`
+
+One JSON line per event, and \`ref\` is the issue id — \`issues get --id <ref>\` is the next
+step. Run it in the background and fix issues as they arrive rather than waiting for the run
+to finish.
+
+- **The feed is a bounded window, not a log.** A watcher that falls behind is told so with
+  \`gap: true\`, having missed events in between. \`issues list --status open\` stays the queue
+  of record; the feed only tells you when to look.
+- **Resolutions arrive on the same kind.** Closing an issue publishes an \`issue\` event too,
+  so a watcher sees its own fixes come back. Key off \`ref\`, not off an event arriving.
 
 ## What each type asks for
 

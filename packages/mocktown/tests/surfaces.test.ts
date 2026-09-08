@@ -255,9 +255,13 @@ describe("mocktown.json's JSON Schema", () => {
     expect(schemaPath).toBe(join(fresh, SCHEMA_REF));
     expect(JSON.parse(readFileSync(schemaPath, 'utf8')).title).toBe('mocktown.json');
 
-    // Gitignored, because it describes the installed version — so it must come back on its
-    // own, or a fresh clone keeps a `$schema` pointing at nothing.
-    expect(readFileSync(join(fresh, '.gitignore'), 'utf8')).toContain('.mocktown/');
+    // `.mocktown/` says for itself what of it is committed, so the repo's own .gitignore
+    // carries only the file that lives outside it.
+    expect(readFileSync(join(fresh, '.gitignore'), 'utf8')).toContain('.env.mocktown');
+    const localIgnore = readFileSync(workspacePaths(fresh).localIgnore, 'utf8');
+    // Anchored, or `*` matches at every depth and re-ignores the files inside `mocks/`.
+    expect(localIgnore).toContain('/*');
+    expect(localIgnore).toContain('!/mocks/');
     rmSync(schemaPath);
     new ProjectRuntime(resolveProject({ cwd: fresh })).ensureDirs();
     expect(existsSync(schemaPath)).toBe(true);

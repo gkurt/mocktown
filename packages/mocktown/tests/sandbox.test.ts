@@ -29,6 +29,7 @@ const { configHash, stalenessOf } = await import('#src/seal/stamp.ts');
 const { ContainerEngine } = await import('#src/sandbox/engine.ts');
 const { ProjectRuntime } = await import('#src/daemon/runtime.ts');
 const { resolveProject } = await import('#src/config/project.ts');
+const { workspacePaths } = await import('#src/config/paths.ts');
 const { certifySeal } = await import('#src/seal/certify.ts');
 const { ensureProjectCa } = await import('#src/frontdoor/ca.ts');
 
@@ -296,7 +297,7 @@ let runtime: InstanceType<typeof ProjectRuntime>;
 describe.skipIf(!engine)('the seal holds, end to end', () => {
   beforeAll(async () => {
     rmSync(root, { recursive: true, force: true });
-    mkdirSync(join(workspace, 'mocks', SERVICE), { recursive: true });
+    mkdirSync(join(workspacePaths(workspace).mocksDir, SERVICE), { recursive: true });
     writeFileSync(
       join(workspace, 'mocktown.json'),
       JSON.stringify({
@@ -308,7 +309,7 @@ describe.skipIf(!engine)('the seal holds, end to end', () => {
       }),
     );
     writeFileSync(
-      join(workspace, 'mocks', SERVICE, 'index.ts'),
+      join(workspacePaths(workspace).mocksDir, SERVICE, 'index.ts'),
       `export default {
   service: '${SERVICE}',
   routes: [{ method: 'GET', path: '/v1/orders', handler: () => ({ status: 200, body: { data: [{ id: 'ord_1' }] } }) }],

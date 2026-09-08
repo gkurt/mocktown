@@ -16,6 +16,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { workspacePaths } from '#src/config/paths.ts';
 
 const root = join(import.meta.dir, '.tmp-sockets');
 process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
@@ -38,7 +39,7 @@ let baseUrl: string;
 
 /** A mock with one channel and no routes at all — sockets are not an add-on to HTTP. */
 function writeMock(): void {
-  const dir = join(workspace, 'mocks', SERVICE);
+  const dir = join(workspacePaths(workspace).mocksDir, SERVICE);
   mkdirSync(dir, { recursive: true });
   const types = join(import.meta.dir, '..', 'src', 'mocks', 'types.ts');
 

@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
+import { workspacePaths } from '#src/config/paths.ts';
 
 const root = join(import.meta.dir, '.tmp-loop');
 process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
@@ -272,7 +273,7 @@ describe('phase 2 — the loop closes on a real project', () => {
   });
 
   test('scaffolding writes a brief carrying the house rules and the routes', () => {
-    const mocksDir = join(workspace, 'mocks');
+    const mocksDir = workspacePaths(workspace).mocksDir;
     mkdirSync(mocksDir, { recursive: true });
     const { brief, files } = scaffoldMock(mocksDir, exportCorpus(runtime.db, SERVICE));
     expect(files.some((f) => f.endsWith('BRIEF.md'))).toBe(true);
@@ -423,7 +424,7 @@ function switchToGeneratedMock(): void {
 
 /** The module a generating agent would write, with one route withheld the first time. */
 function writeMock({ withList }: { withList: boolean }): void {
-  const dir = join(workspace, 'mocks', SERVICE);
+  const dir = join(workspacePaths(workspace).mocksDir, SERVICE);
   mkdirSync(dir, { recursive: true });
   const mocktownSrc = join(import.meta.dir, '..', 'src', 'mocks', 'types.ts');
 

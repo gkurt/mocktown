@@ -8,13 +8,14 @@
  * exist for any of them.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { ORPCError } from '@orpc/client';
 import { implement } from '@orpc/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
+import { localIgnoreCovers, writeLocalIgnore } from '#src/config/ignore.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import { loadGlobalConfig } from '#src/config/project.ts';
 import { writeService } from '#src/config/services.ts';
@@ -72,6 +73,16 @@ export const router = os.router({
       // Provider failures only. Anything a reader cannot put right from here is not a
       // warning: the registry is `services`, and a decision someone owes is an issue.
       const warnings = runtime.providerStatuses().flatMap((p) => p.warnings);
+
+      // The exception that earns its place: mocks git cannot see are mocks the next clone
+      // will not have, and the symptom shows up far from the cause. One line fixes it.
+      const paths = runtime.resolved.paths;
+      if (paths && !localIgnoreCovers(paths.localIgnore, paths.localDir, paths.mocksDir)) {
+        warnings.push(
+          `${paths.localIgnore} does not un-ignore ${relative(paths.localDir, paths.mocksDir)}/, so the mocks are not tracked by git. ` +
+            `Add \`!/${relative(paths.localDir, paths.mocksDir)}/\` to it.`,
+        );
+      }
 
       return {
         project: runtime.name,
@@ -508,6 +519,9 @@ export const router = os.router({
         });
       }
       mkdirSync(paths.mocksDir, { recursive: true });
+      // A project that predates `.mocktown/.gitignore` gets it the first time it scaffolds,
+      // rather than only on an `init` it will never run again.
+      writeLocalIgnore(paths.localIgnore, paths.localDir, paths.mocksDir);
       const { files, brief } = scaffoldMock(paths.mocksDir, corpus, { force: input.force });
       return { project: runtime.name, service: input.service, files, brief };
     }),
@@ -954,7 +968,12 @@ export const router = os.router({
   panels: {
     list: os.panels.list.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      return { project: runtime.name, dir: workspacePanelDir(runtime.resolved.workspace), ...listPanels(runtime.resolved.workspace) };
+      const dirs = runtime.resolved.file?.dirs;
+      return {
+        project: runtime.name,
+        dir: workspacePanelDir(runtime.resolved.workspace, dirs),
+        ...listPanels(runtime.resolved.workspace, dirs),
+      };
     }),
   },
 

@@ -425,7 +425,7 @@ export interface WriteSchemaResult {
 }
 
 /**
- * Write `mocks/<service>/schema.ts`, once.
+ * Write `<dirs.mocks>/<service>/schema.ts`, once.
  *
  * The same rule the module scaffold follows for `index.ts`: never overwrite something an
  * author has already edited. A schema that regenerated itself would silently undo every

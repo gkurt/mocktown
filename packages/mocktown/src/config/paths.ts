@@ -11,7 +11,7 @@
  *     └─ ca/                              project root CA (key: 0600)
  */
 import { homedir, platform } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 function configHome(): string {
   if (process.env.MOCKTOWN_CONFIG_HOME) return process.env.MOCKTOWN_CONFIG_HOME;
@@ -57,16 +57,47 @@ export const projectPaths = (project: string) => {
   };
 };
 
+/** What `mocktown.json`'s `dirs` block can move. Repo-root-relative, one level of naming. */
+export interface WorkspaceDirs {
+  mocks: string;
+  issues: string;
+  panels: string;
+}
+
+export const DEFAULT_DIRS: WorkspaceDirs = { mocks: '.mocktown/mocks', issues: '.mocktown/issues', panels: '.mocktown/panels' };
+
+/**
+ * A configured directory, resolved and confined to the workspace.
+ *
+ * `mocktown.json` is committed, so it arrives with a clone, and the mocks directory holds
+ * modules the provider *imports* — a `dirs.mocks` of `../../.ssh` would be a path traversal
+ * with an execution primitive on the end of it. Refusing beats sanitising: a path that
+ * leaves the repo is a mistake or an attack, and neither has a sensible repair.
+ */
+function confine(repoRoot: string, key: string, value: string): string {
+  const resolved = resolve(repoRoot, value);
+  const root = resolve(repoRoot);
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error(`dirs.${key} must stay inside the workspace: "${value}" resolves to ${resolved}, outside ${root}`);
+  }
+  return resolved;
+}
+
 /** Workspace-relative paths: the committed half of a project (08-projects-config.md). */
-export const workspacePaths = (repoRoot: string) => ({
-  root: repoRoot,
-  projectFile: join(repoRoot, 'mocktown.json'),
-  localDir: join(repoRoot, '.mocktown'),
-  localConfig: join(repoRoot, '.mocktown', 'config.local.json'),
-  issuesDir: join(repoRoot, '.mocktown', 'issues'),
-  /** Generated, gitignored: `mocktown.json`'s JSON Schema, for the editor. */
-  schemaFile: join(repoRoot, '.mocktown', 'mocktown.schema.json'),
-  mocksDir: join(repoRoot, 'mocks'),
-  seedsDir: join(repoRoot, 'seeds'),
-  envFile: join(repoRoot, '.env.mocktown'),
-});
+export const workspacePaths = (repoRoot: string, dirs: Partial<WorkspaceDirs> = {}) => {
+  const where = { ...DEFAULT_DIRS, ...dirs };
+  return {
+    root: repoRoot,
+    projectFile: join(repoRoot, 'mocktown.json'),
+    localDir: join(repoRoot, '.mocktown'),
+    localConfig: join(repoRoot, '.mocktown', 'config.local.json'),
+    /** Generated, gitignored: `mocktown.json`'s JSON Schema, for the editor. */
+    schemaFile: join(repoRoot, '.mocktown', 'mocktown.schema.json'),
+    /** Written on init so `.mocktown/` decides for itself what of it is committed. */
+    localIgnore: join(repoRoot, '.mocktown', '.gitignore'),
+    issuesDir: confine(repoRoot, 'issues', where.issues),
+    mocksDir: confine(repoRoot, 'mocks', where.mocks),
+    panelsDir: confine(repoRoot, 'panels', where.panels),
+    envFile: join(repoRoot, '.env.mocktown'),
+  };
+};

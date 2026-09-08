@@ -55,6 +55,12 @@ threshold, because it reads as a finding rather than a guess.
   the issue. Failed verification reopens with the diff attached.
 - **Batching**: issues from one run are grouped into a batch so an agent fixes a
   coherent set, then one verification pass runs the whole batch.
+- **Watching is the feed, not a second command.** An agent fixing issues as they land
+  follows `mocktown feed --follow --kind issue`, whose long poll returns the moment one is
+  filed ([09-gui-plugins.md](09-gui-plugins.md)). There is no `issues watch`: following is a
+  loop, the feed already is one, and a per-subsystem watch command would reimplement it on
+  the CLI alone. The feed is a bounded window, so it wakes an agent — `issues list` stays
+  the queue of record.
 - **Human review boundary**: agent-proposed changes to *committed* artifacts
   (generated mocks, `.env.mocktown`, code patches in the user's app) go through
   normal VCS review. Mocktown never auto-commits. Runtime-only changes (widened
