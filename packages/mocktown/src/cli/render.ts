@@ -63,6 +63,9 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
 
   'services.set': (r) => [`  ${r.service.id} -> ${r.service.provider}`],
 
+  'config.get': (r) => renderSettings(r),
+  'config.set': (r) => renderSettings(r),
+
   'recordings.list': (r) => [
     `${r.total} recording${r.total === 1 ? '' : 's'}${r.recordings.length < r.total ? ` (showing ${r.recordings.length})` : ''}`,
     ...r.recordings.map((rec: any) => `  ${pad(rec.method, 7)} ${pad(rec.statusCode, 4)} ${pad(rec.service, 26)} ${rec.pathTemplate}`),
@@ -431,6 +434,23 @@ function renderGeneric(result: unknown): string[] {
   return JSON.stringify(rest, null, 2).split('\n');
 }
 
+/**
+ * Changed values are marked, because "what has this project actually decided" is the
+ * question someone opens the config for — and it is invisible in a list where a value
+ * sitting at its default looks exactly like one someone chose.
+ */
+function renderSettings(r: any): string[] {
+  return [
+    ...(r.file ? [r.file, ''] : ['(no workspace — nothing to edit)', '']),
+    ...r.settings.map((s: any) => {
+      const changed = s.value !== s.default;
+      return `  ${changed ? '*' : ' '} ${pad(s.key, 24)} ${pad(s.value, 18)} ${changed ? `(default ${s.default})` : ''}`.trimEnd();
+    }),
+    '',
+    '  * differs from the default. `mocktown config set --key <key> --value <json>` changes one.',
+  ];
+}
+
 /** The read and the write report the same thing; only the write has files to list. */
 function renderEnv(r: any): string[] {
   return [
@@ -442,6 +462,7 @@ function renderEnv(r: any): string[] {
       ? ['', 'agent tasks', ...r.agentTasks.map((t: any) => `  [rung ${t.rung}] ${t.service}: ${t.instruction}`)]
       : []),
     ...(r.written.length ? ['', 'written', ...r.written.map((f: string) => `  ${f}`)] : []),
+    ...(r.notes?.length ? ['', 'not written', ...r.notes.map((n: string) => `  - ${n}`)] : []),
   ];
 }
 

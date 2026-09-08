@@ -126,6 +126,16 @@ export const KnobDescriptor = z.object({
   value: z.unknown().describe('Current effective value, including any profile override'),
 });
 
+/** One editable `mocktown.json` knob. Derived from the schema, so this list maintains itself. */
+export const Setting = z.object({
+  key: z.string().describe('Dotted path into mocktown.json'),
+  type: z.enum(['boolean', 'number', 'string', 'string[]']),
+  description: z.string(),
+  value: z.string().describe('Current value as JSON text'),
+  default: z.string().describe('Schema default as JSON text'),
+  choices: z.array(z.string()).describe('The literal forms a union accepts; empty when the value is free'),
+});
+
 export const ProviderStatus = z.object({
   name: z.string(),
   kind: z.enum(['emulator', 'generated', 'passthrough']),

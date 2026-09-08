@@ -27,6 +27,9 @@ export const useDrift = (project: string) => useProjectQuery(['drift'], project,
 export const usePortless = (project: string) => useProjectQuery(['portless'], project, () => api.env.portless.get({ project }));
 export const useProfiles = (project: string) => useProjectQuery(['profiles'], project, () => api.profiles.list({ project }));
 export const useEnv = (project: string) => useProjectQuery(['env'], project, () => api.env.get({ project }));
+export const useConfig = (project: string) => useProjectQuery(['config'], project, () => api.config.get({ project }));
+export const useKnobs = (project: string, service: string) =>
+  useProjectQuery(['knobs', service], project, () => api.knobs.get({ project, service }));
 
 export type FeedEvent = Awaited<ReturnType<typeof api.feed.tail>>['events'][number];
 

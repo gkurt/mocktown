@@ -16,6 +16,7 @@ import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
+import { settingsOf, writeSetting } from '#src/config/settings.ts';
 import { contract } from '#src/contract/index.ts';
 import type { ProviderRef, Service } from '#src/contract/schemas.ts';
 import { runtimeFor } from '#src/daemon/runtime.ts';
@@ -120,6 +121,33 @@ export const router = os.router({
         // silently shown a feed with a hole in it.
         gap: input.since > 0 && input.since < runtime.feed.oldestSeq - 1,
       };
+    }),
+  },
+
+  config: {
+    get: os.config.get.handler(({ input }) => {
+      const runtime = runtimeFor(input.project);
+      return { project: runtime.name, file: runtime.resolved.paths?.projectFile ?? null, settings: settingsOf(runtime.resolved.file) };
+    }),
+
+    set: os.config.set.handler(({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const projectFile = runtime.resolved.paths?.projectFile;
+      if (!projectFile)
+        throw new ORPCError('BAD_REQUEST', {
+          message: 'This project has no workspace, so it has no mocktown.json to edit. Run `mocktown init` in the repo first.',
+        });
+
+      let settings: ReturnType<typeof settingsOf>;
+      try {
+        settings = writeSetting(projectFile, input.key, input.value);
+      } catch (error) {
+        throw new ORPCError('BAD_REQUEST', { message: error instanceof Error ? error.message : String(error) });
+      }
+      // The file on disk is the source of truth, and the runtime is holding the old copy —
+      // without this the caller reads back the value they just replaced.
+      runtime.reload();
+      return { project: runtime.name, file: projectFile, settings };
     }),
   },
 
@@ -515,7 +543,7 @@ export const router = os.router({
   env: {
     get: os.env.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      return { project: runtime.name, ...runtime.envArtifacts(), written: [] };
+      return { project: runtime.name, ...runtime.envArtifacts(), written: [], notes: [] };
     }),
 
     write: os.env.write.handler(({ input }) => {
@@ -528,11 +556,20 @@ export const router = os.router({
         });
 
       writeFileSync(paths.envFile, renderEnvFile(runtime.name, artifacts.variables));
+      // AGENTS.md is committed and hand-written, so touching it is opt-in. The alternative
+      // to saying so here is a caller who thinks the section was written and cannot see why
+      // their agent never read it.
+      const agentsFile = runtime.resolved.file?.env?.agentsFile ?? false;
       const written = [
         paths.envFile,
-        writeAgentsSection(paths.root, renderAgentsSection(runtime.name, artifacts.agentTasks, artifacts.report)),
+        ...(agentsFile ? [writeAgentsSection(paths.root, renderAgentsSection(runtime.name, artifacts.agentTasks, artifacts.report))] : []),
       ];
-      return { project: runtime.name, ...artifacts, written };
+      const notes = agentsFile
+        ? []
+        : [
+            'AGENTS.md was not touched. `mocktown config set --key env.agentsFile --value true` lets `env write` maintain its section there.',
+          ];
+      return { project: runtime.name, ...artifacts, written, notes };
     }),
 
     portless: {

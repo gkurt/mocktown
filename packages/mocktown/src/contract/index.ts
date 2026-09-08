@@ -31,6 +31,7 @@ import {
   SealCheck,
   SealStamp,
   Service,
+  Setting,
   SocketFrame,
   StateCollection,
   VerifyResult,
@@ -43,6 +44,7 @@ const EnvOutput = withProject({
   report: z.array(z.object({ service: z.string(), rung: z.number().int().nullable(), covered: z.boolean(), how: z.string() })),
   agentTasks: z.array(z.object({ service: z.string(), rung: z.number().int(), instruction: z.string(), snippet: z.string().nullable() })),
   written: z.array(z.string()).describe('Files written, empty for the read'),
+  notes: z.array(z.string()).default([]).describe('What was deliberately not written, and the knob that would change that'),
 });
 
 export const contract = {
@@ -106,6 +108,29 @@ export const contract = {
             .describe('True when events were dropped between `since` and the oldest kept one — the feed is a window, not a log'),
         }),
       ),
+  },
+
+  config: {
+    get: oc
+      .route({ method: 'GET', path: '/config', summary: "The project's knobs, their current values and their defaults" })
+      .input(z.object({ ...ProjectInput }))
+      .output(
+        withProject({
+          file: z.string().nullable().describe('Path to mocktown.json, null when the project has no workspace'),
+          settings: z.array(Setting),
+        }),
+      ),
+
+    set: oc
+      .route({ method: 'PUT', path: '/config', summary: 'Set one knob in mocktown.json' })
+      .input(
+        z.object({
+          ...ProjectInput,
+          key: z.string().describe('Dotted key, e.g. `portless.enabled` or `app.url`'),
+          value: z.string().describe('JSON text: `true`, `24`, `"localhost"`, `null`, `["a","b"]`'),
+        }),
+      )
+      .output(withProject({ file: z.string().nullable(), settings: z.array(Setting) })),
   },
 
   services: {

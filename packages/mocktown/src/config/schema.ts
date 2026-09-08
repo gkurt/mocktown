@@ -65,7 +65,14 @@ export const ProjectFile = z.object({
     })
     .default({ image: 'auto', browser: true, ports: [] }),
   /** The flows a seal run exercises. A seal is only as good as this list (05-redirection.md). */
-  seal: z.object({ flows: z.array(z.string()).default([]) }).default({ flows: [] }),
+  seal: z
+    .object({
+      flows: z
+        .array(z.string())
+        .default([])
+        .describe('Commands a seal run executes inside the boundary. A seal proves only what these exercise'),
+    })
+    .default({ flows: [] }),
   /**
    * Drift watch (07-issues-agent-loop.md). **Off by default, and it must stay that way:** a
    * drift run re-records against the *real* services, so it spends real quota and real
@@ -75,7 +82,7 @@ export const ProjectFile = z.object({
   drift: z
     .object({
       enabled: z.boolean().default(false).describe('Run on a schedule. A drift run calls the real services'),
-      intervalHours: z.number().int().min(1).default(24),
+      intervalHours: z.number().int().min(1).default(24).describe('Hours between drift runs, when drift is enabled'),
       services: z.array(z.string()).default([]).describe('Services to judge; empty means every service with a running provider'),
       flows: z.array(z.string()).default([]).describe('Commands that exercise the real dependencies; falls back to seal.flows when empty'),
     })
@@ -90,6 +97,23 @@ export const ProjectFile = z.object({
       url: z.string().nullable().default(null).describe('The app under test, e.g. http://localhost:5173'),
     })
     .default({ url: null }),
+  /**
+   * What `env write` is allowed to touch. `.env.mocktown` is gitignored and mocktown's own
+   * file, so writing it is unremarkable. `AGENTS.md` is neither: it is committed, hand-written
+   * and shared, and mocktown appending a generated section to it turns every `env write` into
+   * an unrequested diff on a tracked file. Off by default — editing a repo's own documentation
+   * is a decision someone makes once, not a side effect of regenerating an env file.
+   */
+  env: z
+    .object({
+      agentsFile: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Let `env write` add its section to the workspace AGENTS.md. That file is committed; mocktown does not edit it uninvited',
+        ),
+    })
+    .default({ agentsFile: false }),
   /**
    * portless stable names (05-redirection.md). Off by default like drift, for a different
    * reason: portless binds 443 with sudo, edits `/etc/hosts` and puts a CA in the system
@@ -117,9 +141,15 @@ export const ProjectFile = z.object({
         )
         .default([]),
       /** The entropy heuristic from 10-security.md. On by default; off is a project decision. */
-      entropyBackstop: z.boolean().default(true),
+      entropyBackstop: z
+        .boolean()
+        .default(true)
+        .describe('Redact high-entropy strings no named rule caught. Off trades a safety net for fewer false positives'),
       /** Emails are load-bearing for mock fidelity, so redacting them is opt-in (spike 05). */
-      redactEmails: z.boolean().default(false),
+      redactEmails: z
+        .boolean()
+        .default(false)
+        .describe('Redact email addresses too. Off by default because they are load-bearing for mock fidelity'),
     })
     .default({ rules: [], entropyBackstop: true, redactEmails: false }),
 });

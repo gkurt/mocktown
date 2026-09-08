@@ -11,7 +11,7 @@
  *   - a panel URL is a path from an untrusted document, so `..` must not reach the repo.
  */
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ORPCError } from '@orpc/client';
 
@@ -179,4 +179,57 @@ test('the feed is reachable over HTTP as a plain procedure', async () => {
   });
   const body = (await response.json()) as any;
   expect(body).toMatchObject({ project: 'gui-test', cursor: 0, events: [], gap: false });
+});
+
+/**
+ * `env write` used to append its section to AGENTS.md unconditionally. That file is
+ * committed, hand-written and shared, so every regeneration of a gitignored env file also
+ * produced an unrequested diff on a tracked one — and the only way to stop it was to not
+ * run the command.
+ */
+test('env write leaves AGENTS.md alone until the project says otherwise', async () => {
+  const call = (path: string, init?: RequestInit) =>
+    fetch(`${origin}/api/v1${path}`, {
+      ...init,
+      headers: { authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json', ...init?.headers },
+    });
+
+  const agents = join(workspace, 'AGENTS.md');
+  writeFileSync(agents, '# House rules\n\nWritten by a person.\n');
+
+  const off = await call('/env/write?project=gui-test', { method: 'POST', body: JSON.stringify({ project: 'gui-test' }) });
+  expect(off.status).toBe(200);
+  const quiet = (await off.json()) as { written: string[]; notes: string[] };
+  expect(quiet.written).toEqual([join(workspace, '.env.mocktown')]);
+  // Doing less has to be said out loud, or the caller reads a silence as a failure.
+  expect(quiet.notes.join(' ')).toContain('env.agentsFile');
+  expect(readFileSync(agents, 'utf8')).toBe('# House rules\n\nWritten by a person.\n');
+
+  const set = await call('/config?project=gui-test', {
+    method: 'PUT',
+    body: JSON.stringify({ project: 'gui-test', key: 'env.agentsFile', value: 'true' }),
+  });
+  expect(set.status).toBe(200);
+  const applied = (await set.json()) as { settings: { key: string; value: string }[] };
+  expect(applied.settings.find((s) => s.key === 'env.agentsFile')!.value).toBe('true');
+
+  const on = await call('/env/write?project=gui-test', { method: 'POST', body: JSON.stringify({ project: 'gui-test' }) });
+  const loud = (await on.json()) as { written: string[]; notes: string[] };
+  expect(loud.written).toContain(agents);
+  expect(loud.notes).toEqual([]);
+
+  const written = readFileSync(agents, 'utf8');
+  expect(written).toContain('<!-- BEGIN mocktown -->');
+  // Opting in is permission to add a section, never to take over the file.
+  expect(written).toContain('Written by a person.');
+});
+
+test('a setting the schema does not have is refused, not written', async () => {
+  const response = await fetch(`${origin}/api/v1/config?project=gui-test`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ project: 'gui-test', key: 'env.agentsFile', value: 'perhaps' }),
+  });
+  expect(response.status).toBe(400);
+  expect(JSON.stringify(await response.json())).toContain('must be JSON');
 });

@@ -27,6 +27,7 @@ const { contract } = await import('#src/contract/index.ts');
 const { walkContract, inputShape, describedAs, fieldInfo, contractSignature } = await import('#src/contract/walk.ts');
 const { captureEnv } = await import('#src/capture/launch.ts');
 const { RENDERERS } = await import('#src/cli/render.ts');
+const { settingsOf, writeSetting } = await import('#src/config/settings.ts');
 
 const workspace = join(root, 'app');
 let runtime: InstanceType<typeof ProjectRuntime>;
@@ -177,6 +178,67 @@ describe('mocktown env', () => {
     // The kubectl current-context footgun: concurrent agents would cross-contaminate.
     expect(section).toContain('export MOCKTOWN_PROJECT=surfaces-test');
     expect(section).toContain('untrusted input');
+  });
+});
+
+describe('the project settings surface', () => {
+  /**
+   * The list is derived from `ProjectFile` rather than written out, so the test that matters
+   * is that the derivation stays faithful: right type, right default, and no entry for a
+   * shape no form could edit.
+   */
+  test('every knob comes from the schema, with its type and default', () => {
+    const byKey = Object.fromEntries(settingsOf(null).map((setting) => [setting.key, setting]));
+
+    expect(byKey['portless.enabled']).toMatchObject({ type: 'boolean', value: 'false', default: 'false' });
+    expect(byKey['drift.intervalHours']).toMatchObject({ type: 'number', default: '24' });
+    expect(byKey['capture.ignore']).toMatchObject({ type: 'string[]', default: '[]' });
+    expect(byKey['app.url']).toMatchObject({ type: 'string', default: 'null' });
+    // The description is the only documentation a GUI form field gets.
+    expect(byKey['drift.enabled']!.description).toContain('real services');
+
+    // Identity is not a knob — renaming a project in place orphans its data directory rather
+    // than renaming anything. Services have their own screen. Rules are objects, not fields.
+    const keys = settingsOf(null).map((setting) => setting.key);
+    expect(keys).not.toContain('project');
+    expect(keys).not.toContain('services');
+    expect(keys).not.toContain('scrub.rules');
+  });
+
+  test('every knob explains itself', () => {
+    // The settings screen renders this text as the only documentation a knob gets, and a
+    // form field labelled `scrub.entropyBackstop` with a checkbox and nothing else is not a
+    // control anyone can use. Adding a field to the schema means writing its `.describe()`.
+    const undocumented = settingsOf(null).filter((setting) => !setting.description);
+    expect(undocumented.map((setting) => setting.key)).toEqual([]);
+  });
+
+  test('a written knob lands in mocktown.json and keeps the rest of the file', () => {
+    const file = join(workspace, 'mocktown.json');
+    writeFileSync(file, JSON.stringify({ project: 'surfaces-test', services: { 'api.acme': { provider: 'record' } } }, null, 2));
+
+    const settings = writeSetting(file, 'portless.enabled', 'true');
+    expect(settings.find((s) => s.key === 'portless.enabled')!.value).toBe('true');
+
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    expect(raw.portless.enabled).toBe(true);
+    // A settings write is not a rewrite: the file is edited, not regenerated from a parse,
+    // so nothing the caller did not touch is normalised away.
+    expect(raw.services).toEqual({ 'api.acme': { provider: 'record' } });
+    expect(raw.capture).toBeUndefined();
+  });
+
+  test('a bad value is refused before it can break every other command', () => {
+    const file = join(workspace, 'mocktown.json');
+    const before = readFileSync(file, 'utf8');
+
+    expect(() => writeSetting(file, 'portless.enabled', 'yes please')).toThrow(/must be JSON/);
+    expect(() => writeSetting(file, 'drift.intervalHours', '"soon"')).toThrow(/intervalHours/);
+    expect(() => writeSetting(file, 'nonsense.key', 'true')).toThrow(/not a setting/);
+
+    // A config file that will not parse takes down the command that would fix it, so a
+    // rejected write must leave the file exactly as it was.
+    expect(readFileSync(file, 'utf8')).toBe(before);
   });
 });
 
