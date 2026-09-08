@@ -12,6 +12,7 @@ export const Service = z.object({
   id: z.string().describe('Hostname or logical service id, e.g. api.stripe.com'),
   provider: ProviderRef,
   seed: z.string().nullable().describe('Path to a seed file, relative to the repo root'),
+  aliases: z.array(z.string()).describe('Other hostnames routed to this same service, sharing its provider, mock and corpus'),
   discovered: z.boolean().describe('Added from observed traffic rather than mocktown.json'),
   lastSeenAt: z.string().nullable().describe('When traffic for this service was last observed'),
 });

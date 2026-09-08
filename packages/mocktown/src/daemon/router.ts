@@ -49,6 +49,7 @@ function toService(row: typeof schema.services.$inferSelect): Service {
     id: row.id,
     provider: row.provider as ProviderRef,
     seed: row.seed,
+    aliases: row.aliases ?? [],
     discovered: row.discovered,
     lastSeenAt: row.lastSeenAt,
   };
@@ -165,10 +166,16 @@ export const router = os.router({
       const runtime = runtimeFor(input.project);
       runtime.db
         .insert(schema.services)
-        .values({ id: input.id, provider: input.provider, seed: input.seed ?? null, discovered: false })
+        .values({ id: input.id, provider: input.provider, seed: input.seed ?? null, aliases: input.aliases ?? [], discovered: false })
         .onConflictDoUpdate({
           target: schema.services.id,
-          set: { provider: input.provider, seed: input.seed ?? null, discovered: false },
+          // Omitting `--alias` leaves the aliases alone; `--alias ''` is how you clear them.
+          set: {
+            provider: input.provider,
+            seed: input.seed ?? null,
+            ...(input.aliases ? { aliases: input.aliases } : {}),
+            discovered: false,
+          },
         })
         .run();
       const row = runtime.db.select().from(schema.services).where(eq(schema.services.id, input.id)).get()!;

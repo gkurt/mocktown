@@ -36,13 +36,28 @@ export class Recorder {
   private readonly sessionId: string;
   /** Called once, the first time a host is seen without a registry entry. */
   private readonly onDiscovered: (service: string) => void;
+  /**
+   * Declared aliases collapse to the service they name. Declaring one asserts the two
+   * hostnames are the same backend, so recording through either has to build one corpus —
+   * otherwise the second name arrives as a new discovered service and splits the evidence
+   * a mock is written from.
+   */
+  private readonly canonical: (host: string) => string;
 
-  constructor(db: Db, project: string, scrubber: Scrubber, sessionId: string, onDiscovered: (service: string) => void = () => {}) {
+  constructor(
+    db: Db,
+    project: string,
+    scrubber: Scrubber,
+    sessionId: string,
+    onDiscovered: (service: string) => void = () => {},
+    canonical: (host: string) => string = (host) => host,
+  ) {
     this.db = db;
     this.project = project;
     this.scrubber = scrubber;
     this.sessionId = sessionId;
     this.onDiscovered = onDiscovered;
+    this.canonical = canonical;
   }
 
   /** Persist one exchange. */
@@ -63,7 +78,8 @@ export class Recorder {
     if (exchange.requestEncoding === 'base64') scrubbed.requestBody = exchange.requestBody;
     if (exchange.responseEncoding === 'base64') scrubbed.responseBody = exchange.responseBody;
 
-    const { service, path, pathTemplate, query } = normalizeUrl(scrubbed.url);
+    const { service: host, path, pathTemplate, query } = normalizeUrl(scrubbed.url);
+    const service = this.canonical(host);
     const rowId = id('rec');
 
     const request = this.spill(scrubbed.requestBody, String(scrubbed.requestHeaders['content-type'] ?? ''));
@@ -117,7 +133,8 @@ export class Recorder {
       responseBody: '',
     });
 
-    const { service, path, pathTemplate, query } = normalizeUrl(scrubbed.url);
+    const { service: host, path, pathTemplate, query } = normalizeUrl(scrubbed.url);
+    const service = this.canonical(host);
     const rowId = id('rec');
 
     this.db

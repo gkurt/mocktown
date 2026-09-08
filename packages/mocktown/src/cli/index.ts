@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { Command, Option } from 'commander';
 import type * as z from 'zod/v4';
 import { launch } from '#src/capture/launch.ts';
+import { coerceInput, kebab } from '#src/cli/coerce.ts';
 import { clientFor, ensureDaemon } from '#src/cli/daemon-client.ts';
 import { feedLine, renderResult } from '#src/cli/render.ts';
 import { projectPaths } from '#src/config/paths.ts';
@@ -38,8 +39,6 @@ const program = new Command('mocktown')
 
 // ── Flag generation ───────────────────────────────────────────────────────────
 
-const kebab = (name: string) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
-
 function addOptions(command: Command, schema: z.ZodType, commandLine = false): void {
   const shape = inputShape(schema);
   if (!shape) return;
@@ -58,28 +57,6 @@ function addOptions(command: Command, schema: z.ZodType, commandLine = false): v
     if (!optional && type !== 'boolean' && !(commandLine && name === COMMAND_INPUT)) option.makeOptionMandatory();
     command.addOption(option);
   }
-}
-
-/** Commander gives strings; the contract wants the declared type. */
-function coerceInput(schema: z.ZodType, options: Record<string, unknown>): Record<string, unknown> {
-  const shape = inputShape(schema);
-  if (!shape) return options;
-  const out: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(options)) {
-    const field = shape[name];
-    if (value === undefined || !field) continue;
-    const { type } = fieldInfo(field);
-    if (type === 'object' || type === 'record' || type === 'array') {
-      // Nested inputs (seed editors, knob values, profile credentials) arrive as JSON on
-      // one flag — spike 02 flagged this as the open question; JSON is the honest answer.
-      out[name] = typeof value === 'string' ? JSON.parse(value) : value;
-    } else if (type === 'number' || type === 'int') {
-      out[name] = typeof value === 'string' ? Number(value) : value;
-    } else {
-      out[name] = value;
-    }
-  }
-  return out;
 }
 
 // ── Generated commands ────────────────────────────────────────────────────────

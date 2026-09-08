@@ -19,6 +19,16 @@ export type ProviderRef = z.infer<typeof ProviderRef>;
 export const ServiceConfig = z.object({
   provider: ProviderRef,
   seed: z.string().optional().describe('Path to a seed file, relative to the repo root'),
+  /**
+   * Other hostnames the same backend answers on. Declaring one asserts they are the same
+   * service — the front door routes them to this service's provider, the mock answers to
+   * them, and traffic recorded from either lands in one corpus. Without it, a client that
+   * hardcodes the second hostname escapes to the real upstream.
+   */
+  aliases: z
+    .array(z.string())
+    .default([])
+    .describe("Other hostnames this same backend answers on. They share this service's provider, mock and corpus"),
 });
 
 /** `mocktown.json` — committed, so project identity travels with the code. */

@@ -180,10 +180,10 @@ export class ProjectRuntime {
     for (const [host, config] of Object.entries(this.project.file?.services ?? {})) {
       this.db
         .insert(schema.services)
-        .values({ id: host, provider: config.provider, seed: config.seed ?? null, discovered: false })
+        .values({ id: host, provider: config.provider, seed: config.seed ?? null, aliases: config.aliases ?? [], discovered: false })
         .onConflictDoUpdate({
           target: schema.services.id,
-          set: { provider: config.provider, seed: config.seed ?? null, discovered: false },
+          set: { provider: config.provider, seed: config.seed ?? null, aliases: config.aliases ?? [], discovered: false },
         })
         .run();
     }
@@ -198,6 +198,43 @@ export class ProjectRuntime {
 
   services() {
     return this.db.select().from(schema.services).all();
+  }
+
+  /**
+   * Declared aliases, as `alias -> service`, with the ambiguous ones dropped.
+   *
+   * An alias that is also a real service id, or that two services both claim, has no single
+   * right answer — so it gets none. Dropping it leaves the host unmocked and loud rather
+   * than silently picking a winner, which is the failure nobody would ever debug. The real
+   * service always outranks an alias, matching the mock host's own precedence.
+   */
+  private aliasMap(): { aliases: Map<string, string>; conflicts: string[] } {
+    const services = this.services();
+    const ids = new Set(services.map((service) => service.id));
+    const claimedBy = new Map<string, string[]>();
+    for (const service of services) {
+      for (const alias of service.aliases ?? []) claimedBy.set(alias, [...(claimedBy.get(alias) ?? []), service.id]);
+    }
+
+    const aliases = new Map<string, string>();
+    const conflicts: string[] = [];
+    for (const [alias, claimants] of claimedBy) {
+      if (ids.has(alias)) {
+        conflicts.push(`"${alias}" is an alias of ${claimants.join(' and ')} but is also a service of its own, so the alias is ignored.`);
+        continue;
+      }
+      if (claimants.length > 1) {
+        conflicts.push(`"${alias}" is claimed as an alias by ${claimants.join(' and ')}, so it is routed to neither.`);
+        continue;
+      }
+      aliases.set(alias, claimants[0]!);
+    }
+    return { aliases, conflicts };
+  }
+
+  /** A configured alias that cannot be honoured is a config fault, and has to be said. */
+  private aliasWarnings(): string[] {
+    return this.aliasMap().conflicts;
   }
 
   // ── Front door ──────────────────────────────────────────────────────────────
@@ -393,23 +430,30 @@ export class ProjectRuntime {
   }
 
   /** The routing table the front door applies, derived from the registry and providers. */
-  private routingTable(): RoutingTable {
+  /** The plan handed to the front door: one route per host it should recognise. */
+  routingTable(): RoutingTable {
     // Full base URLs, not host:port — the route needs the provider's scheme as well, or
     // an https client reaches a cleartext emulator and gets a 502.
     const baseUrls = this.allBaseUrls();
     const serving = this.mode.kind === 'serve';
     const sealed = serving && this.mode.sealed;
     const servedBy = this.providerNamesByService();
-    const routes: Route[] = this.services().map((service) =>
-      this.recordOverride.has(service.id)
-        ? { host: service.id, mode: 'record' as const }
+    const honoured = this.aliasMap().aliases;
+    // An alias is the same service under another name, so it gets the same decision rather
+    // than one computed for it: `routeForProvider` looks a base URL up by host, and an alias
+    // has none of its own, so computing it independently would deny every aliased request.
+    const routes: Route[] = this.services().flatMap((service) => {
+      const route = this.recordOverride.has(service.id)
+        ? ({ host: service.id, mode: 'record' } as const)
         : routeForProvider(service.id, service.provider, baseUrls, {
             serving,
             sealed,
             discovered: service.discovered,
             servedBy: servedBy.get(service.id),
-          }),
-    );
+          });
+      const aliases = (service.aliases ?? []).filter((alias) => honoured.get(alias) === service.id);
+      return [route, ...aliases.map((alias) => ({ ...route, host: alias }))];
+    });
 
     return {
       routes,
@@ -483,7 +527,14 @@ export class ProjectRuntime {
     // what makes `{{secret:stripe-secret-key#1}}` mean "the same key as earlier".
     this.scrubber = new Scrubber(rulesFromConfig(this.project.file?.scrub), this.project.file?.scrub?.entropyBackstop ?? true);
     this.noise = new NoiseFilter(this.project.file?.capture);
-    this.recorder = new Recorder(this.db, this.project.name, this.scrubber, this.sessionId, (service) => this.fileUndeclared(service));
+    this.recorder = new Recorder(
+      this.db,
+      this.project.name,
+      this.scrubber,
+      this.sessionId,
+      (service) => this.fileUndeclared(service),
+      (host) => this.aliasMap().aliases.get(host) ?? host,
+    );
     this.mode = { kind: 'record', sealed: false };
     this.issues.startBatch();
 
@@ -602,7 +653,12 @@ export class ProjectRuntime {
       proxyUrl,
       caCertPath: ca.certPath,
       env: captureEnv({ proxyUrl, caCertPath: ca.certPath, noProxy: noProxy.entries }),
-      warnings: [...this.providers.flatMap((p) => p.warnings), ...this.escapeWarnings(), ...this.noProxyWarnings(noProxy)],
+      warnings: [
+        ...this.providers.flatMap((p) => p.warnings),
+        ...this.aliasWarnings(),
+        ...this.escapeWarnings(),
+        ...this.noProxyWarnings(noProxy),
+      ],
     };
   }
 
@@ -735,6 +791,12 @@ export class ProjectRuntime {
     // What the proxy is actually serving, which is not necessarily what the project declared.
     const tld = this.portless?.resolved?.tld ?? this.portlessSettings().tld;
     const aliases = new Map<string, string>();
+    // Declared first, so a stable name minted for the same service still wins below — the
+    // portless names are ours and unambiguous, a declared alias is a claim about the world.
+    for (const [alias, service] of this.aliasMap().aliases) {
+      aliases.set(alias, service);
+      aliases.set(`${alias}.${tld}`, service);
+    }
     for (const service of generated.services) {
       const name = stableName(this.project.name, service);
       aliases.set(name, service);

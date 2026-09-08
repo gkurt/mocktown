@@ -31,6 +31,8 @@ const UPSTREAM_PORT = 5599;
 const SERVICE = 'billing.localhost';
 const NOISE_SERVICE = 'telemetry.localhost';
 const UNDECLARED_SERVICE = 'ledger.localhost';
+/** The same backend under a second name — see aliases.test.ts. */
+const ALIAS = 'invoices.localhost';
 
 let upstream: Server;
 let runtime: InstanceType<typeof ProjectRuntime>;
@@ -83,7 +85,7 @@ beforeAll(async () => {
     JSON.stringify(
       {
         project: 'loop-test',
-        services: { [SERVICE]: { provider: 'record' } },
+        services: { [SERVICE]: { provider: 'record', aliases: [ALIAS] } },
         // A stand-in for the browser's own chatter: same upstream, a hostname the corpus
         // is told is not evidence.
         capture: { ignore: [NOISE_SERVICE] },
@@ -195,6 +197,31 @@ describe("phase 1 — record a real app's traffic, browse the scrubbed corpus", 
       .map((row) => row.id);
     expect(services).toContain(SERVICE);
     expect(services).not.toContain(NOISE_SERVICE);
+  }, 30_000);
+
+  /**
+   * The corpus half of an alias. Declaring one asserts the two hostnames are the same
+   * backend, so recording through either has to build one body of evidence — otherwise the
+   * second name arrives as a new discovered service and the mock gets written from half a
+   * corpus while the other half sits under a name nothing serves.
+   */
+  test('traffic recorded through an alias belongs to the service it names', async () => {
+    const before = runtime.db.select().from(schema.recordings).all().length;
+    await fetch(`http://${ALIAS}:${UPSTREAM_PORT}/v1/invoices`, { proxy: proxyUrl });
+    await Bun.sleep(500);
+
+    const rows = runtime.db.select().from(schema.recordings).all();
+    expect(rows.length).toBe(before + 1);
+    expect(rows.at(-1)!.service).toBe(SERVICE);
+
+    // And no second registry entry: an alias is not a dependency of its own to go and mock.
+    const services = runtime.db
+      .select()
+      .from(schema.services)
+      .all()
+      .map((row) => row.id);
+    expect(services).not.toContain(ALIAS);
+    expect(runtime.issues.list({ type: 'undeclared-service' }).some((i) => i.service === ALIAS)).toBe(false);
   }, 30_000);
 
   /**

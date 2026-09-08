@@ -26,7 +26,7 @@ export function Services({ project }: { project: string }) {
       {services.data.services.length === 0 ? (
         <Empty>Empty registry. Anything the app calls while recording lands here.</Empty>
       ) : (
-        <Table head={['service', 'provider', 'seed', 'origin', 'last seen']}>
+        <Table head={['service', 'provider', 'aliases', 'seed', 'origin', 'last seen']}>
           {services.data.services.map((service) => (
             <tr key={service.id}>
               <Cell mono>{service.id}</Cell>
@@ -50,6 +50,9 @@ export function Services({ project }: { project: string }) {
                   </select>
                 )}
               </Cell>
+              {/* Other hostnames routed here. Shown next to the provider because they share
+                  it: an alias is the same mock and the same corpus under another name. */}
+              <Cell mono>{service.aliases.length ? service.aliases.join(', ') : <Muted>—</Muted>}</Cell>
               <Cell mono>{service.seed ?? '—'}</Cell>
               <Cell>{service.discovered ? <Badge tone="warn">from traffic</Badge> : <Badge>configured</Badge>}</Cell>
               <Cell>

@@ -1,0 +1,1 @@
+ALTER TABLE `services` ADD `aliases` text DEFAULT '[]' NOT NULL;

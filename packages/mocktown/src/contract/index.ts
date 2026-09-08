@@ -147,6 +147,7 @@ export const contract = {
           id: z.string().describe('Hostname or logical service id'),
           provider: ProviderRef,
           seed: z.string().optional().describe('Path to a seed file, relative to the repo root'),
+          aliases: z.array(z.string()).optional().describe('Other hostnames this same backend answers on. Omit to leave them unchanged'),
         }),
       )
       .output(withProject({ service: Service })),

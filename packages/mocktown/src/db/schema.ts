@@ -16,6 +16,8 @@ export const services = sqliteTable('services', {
   id: text('id').primaryKey(), // hostname or logical service id
   provider: text('provider').notNull(), // ProviderRef, see config/schema.ts
   seed: text('seed'),
+  /** Other hostnames routed to this same service — see `ServiceConfig.aliases`. */
+  aliases: text('aliases', { mode: 'json' }).$type<string[]>().notNull().default([]),
   /** Set when the registry entry came from observed traffic rather than mocktown.json. */
   discovered: integer('discovered', { mode: 'boolean' }).notNull().default(false),
   lastSeenAt: text('last_seen_at'),

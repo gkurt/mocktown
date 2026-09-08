@@ -58,10 +58,18 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
 
   'services.list': (r) =>
     r.services.length
-      ? r.services.map((s: any) => `  ${pad(s.id, 30)} ${pad(s.provider, 22)} ${s.lastSeenAt ?? 'never seen'}`)
+      ? r.services.flatMap((s: any) => [
+          `  ${pad(s.id, 30)} ${pad(s.provider, 22)} ${s.lastSeenAt ?? 'never seen'}`,
+          // Indented under their service: an alias is not a registry entry of its own, and
+          // listing it flat would read as one more dependency to mock.
+          ...(s.aliases ?? []).map((alias: string) => `    also ${alias}`),
+        ])
       : ['  (no services registered)'],
 
-  'services.set': (r) => [`  ${r.service.id} -> ${r.service.provider}`],
+  'services.set': (r) => [
+    `  ${r.service.id} -> ${r.service.provider}`,
+    ...(r.service.aliases?.length ? [`  also ${r.service.aliases.join(', ')}`] : []),
+  ],
 
   'config.get': (r) => renderSettings(r),
   'config.set': (r) => renderSettings(r),

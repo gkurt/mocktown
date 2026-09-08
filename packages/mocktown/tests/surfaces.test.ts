@@ -27,6 +27,7 @@ const { contract } = await import('#src/contract/index.ts');
 const { walkContract, inputShape, describedAs, fieldInfo, contractSignature } = await import('#src/contract/walk.ts');
 const { captureEnv } = await import('#src/capture/launch.ts');
 const { RENDERERS } = await import('#src/cli/render.ts');
+const { coerceInput } = await import('#src/cli/coerce.ts');
 const { settingsOf, writeSetting } = await import('#src/config/settings.ts');
 
 const workspace = join(root, 'app');
@@ -178,6 +179,20 @@ describe('mocktown env', () => {
     // The kubectl current-context footgun: concurrent agents would cross-contaminate.
     expect(section).toContain('export MOCKTOWN_PROJECT=surfaces-test');
     expect(section).toContain('untrusted input');
+  });
+});
+
+describe('nested CLI flags', () => {
+  const shape = walkContract(contract).find((p) => p.route === '/services/{id}')!.inputSchema;
+
+  test('a list of strings accepts one bare value, and JSON for more', () => {
+    // `--aliases '["app.example.com"]'` to name a single hostname is a tax with nothing
+    // behind it, and the parser's own failure names an offset into a string nobody can see.
+    expect(coerceInput(shape, { aliases: 'app.example.com' }).aliases).toEqual(['app.example.com']);
+    expect(coerceInput(shape, { aliases: '["a.com","b.com"]' }).aliases).toEqual(['a.com', 'b.com']);
+    // Splitting on commas would be the obvious next step and is wrong: `--flows` carries
+    // shell commands, and those contain commas.
+    expect(coerceInput(shape, { aliases: 'a.com,b.com' }).aliases).toEqual(['a.com,b.com']);
   });
 });
 
