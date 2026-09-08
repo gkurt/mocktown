@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useNavigate, useSearch } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { boot } from './api.ts';
+import { boot, useStranded } from './api.ts';
 import { Corpus } from './pages/corpus.tsx';
 import { Dashboard } from './pages/dashboard.tsx';
 import { Feed } from './pages/feed.tsx';
@@ -23,6 +23,7 @@ import { Services } from './pages/services.tsx';
 import { Settings } from './pages/settings.tsx';
 import { State } from './pages/state.tsx';
 import { Urls } from './pages/urls.tsx';
+import { Button } from './ui.tsx';
 import './styles.css';
 
 const NAV = [
@@ -54,12 +55,32 @@ function useProject(): string {
   return useSearch({ from: rootRoute.id }).project ?? boot.project;
 }
 
+/**
+ * Shown once the daemon that served this page has been replaced. Reload is not a suggestion
+ * here — it is the only thing that works, because the token lives in the HTML — so it is a
+ * button rather than a line of prose asking for one.
+ */
+function Stranded() {
+  const stranded = useStranded();
+  if (!stranded) return null;
+
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warn/40 bg-warn/10 px-4 py-2 text-warn">
+      <span>
+        The daemon restarted, so this page's API token no longer exists. Everything below is the last data it sent — nothing is live.
+      </span>
+      <Button onClick={() => window.location.reload()}>Reload</Button>
+    </div>
+  );
+}
+
 function Chrome() {
   const project = useProject();
   const navigate = useNavigate();
 
   return (
     <div className="min-h-dvh">
+      <Stranded />
       <header className="flex flex-wrap items-baseline gap-x-4 gap-y-2 border-b border-line px-4 py-2">
         <span className="font-medium">mocktown</span>
         <nav className="flex flex-wrap gap-3">

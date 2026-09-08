@@ -90,14 +90,15 @@ function ProjectSettings({ project }: { project: string }) {
   if (config.error) return <Failure error={config.error} />;
   if (!config.data) return <Pending what="the settings" />;
 
-  const changed = config.data.settings.filter((s) => s.value !== s.default).length;
+  const data = config.data;
+  const changed = data.settings.filter((s) => s.value !== s.default).length;
 
   return (
     <Card title="Project settings" action={<Badge tone={changed ? 'good' : 'plain'}>{changed} changed</Badge>}>
-      {config.data.file ? (
+      {data.file ? (
         <p className="mb-2">
           <Muted>
-            Committed to <code className="font-mono">{config.data.file}</code>. A text field commits on Enter; Escape reverts it.
+            Committed to <code className="font-mono">{data.file}</code>. A text field commits on Enter; Escape reverts it.
           </Muted>
         </p>
       ) : (
@@ -105,7 +106,7 @@ function ProjectSettings({ project }: { project: string }) {
       )}
 
       <Table head={['setting', 'value', 'default', 'what it does']}>
-        {config.data.settings.map((setting) => (
+        {data.settings.map((setting) => (
           <tr key={setting.key}>
             <Cell mono className="whitespace-nowrap align-top">
               {setting.value === setting.default ? setting.key : <strong className="font-medium">{setting.key}</strong>}
@@ -115,7 +116,7 @@ function ProjectSettings({ project }: { project: string }) {
             <Cell className="w-2/5 align-top">
               <Field
                 setting={setting}
-                disabled={set.isPending || !config.data.file}
+                disabled={set.isPending || !data.file}
                 onCommit={(value) => set.mutate({ key: setting.key, value })}
               />
             </Cell>

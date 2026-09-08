@@ -5,13 +5,34 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { api } from './api.ts';
+import { api, strandedToken, useStranded } from './api.ts';
 
 export type IssueStatus = NonNullable<Parameters<typeof api.issues.list>[0]['status']>;
 
-/** Everything is scoped to one project, and the project is always visible (08-projects-config.md). */
-export function useProjectQuery<T>(key: unknown[], project: string, fn: () => Promise<T>, refetchMs?: number) {
-  return useQuery({ queryKey: [...key, project], queryFn: fn, refetchInterval: refetchMs });
+/**
+ * Everything is scoped to one project, and the project is always visible
+ * (08-projects-config.md).
+ *
+ * A stranded token (api.ts) fails every request, including the ones that were succeeding a
+ * second earlier. There is nothing to poll for and nothing the reader can do from this page,
+ * so the polling stops, the error is dropped for any query that already has data, and what
+ * was last fetched stays on screen under the shell's banner.
+ */
+export function useProjectQuery<T>(
+  key: unknown[],
+  project: string,
+  fn: () => Promise<T>,
+  refetchMs?: number,
+): { data: T | undefined; error: unknown } {
+  const stranded = useStranded();
+  const query = useQuery({
+    queryKey: [...key, project],
+    queryFn: fn,
+    refetchInterval: stranded ? false : refetchMs,
+    retry: stranded ? false : 1,
+  });
+
+  return { data: query.data, error: stranded && query.data !== undefined ? null : query.error };
 }
 
 export const useStatus = (project: string) => useProjectQuery(['status'], project, () => api.status.get({ project }), 4000);
@@ -64,6 +85,10 @@ export function useFeed(project: string, kind?: FeedEvent['kind']): { events: Fe
           if (page.events.length) setEvents((current) => [...page.events.toReversed(), ...current].slice(0, FEED_KEEP));
         } catch (failure) {
           if (!live) return;
+          // A stranded token will refuse the next poll and every one after it. Stopping
+          // leaves the events already received on screen, which is the whole point of the
+          // feed; retrying every two seconds until reload would only replace them.
+          if (strandedToken.get()) return;
           setError(failure);
           await new Promise((resolve) => setTimeout(resolve, 2000));
         }
