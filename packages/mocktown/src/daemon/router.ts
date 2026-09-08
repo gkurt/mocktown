@@ -25,7 +25,7 @@ import type { ProviderRef, Service } from '#src/contract/schemas.ts';
 import { runtimeFor } from '#src/daemon/runtime.ts';
 import { schema } from '#src/db/client.ts';
 import { checkDrift } from '#src/drift/watch.ts';
-import { renderAgentsSection, renderEnvFile, writeAgentsSection } from '#src/env/generate.ts';
+import { renderAgentsSection, renderEnvFile, staleEnvVars, writeAgentsSection } from '#src/env/generate.ts';
 import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { listPanels, workspacePanelDir } from '#src/gui/panels.ts';
 import { exportCorpus, inflateRecording, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
@@ -609,7 +609,19 @@ export const router = os.router({
   env: {
     get: os.env.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      return { project: runtime.name, ...runtime.envArtifacts(), written: [], notes: [] };
+      const artifacts = runtime.envArtifacts();
+      const envFile = runtime.resolved.paths?.envFile;
+      // The values above are current; the file an app actually loads may not be. Saying so
+      // is the whole job — a stale `.env.mocktown` points at names that still resolve, so
+      // the app keeps working and nobody finds out the URLs moved.
+      const stale = envFile && existsSync(envFile) ? staleEnvVars(readFileSync(envFile, 'utf8'), artifacts.variables) : [];
+      const notes = stale.length
+        ? [
+            `${envFile} is out of date: ${stale.join(', ')} ${stale.length === 1 ? 'differs' : 'differ'} from the values above. ` +
+              'Run `mocktown env write`.',
+          ]
+        : [];
+      return { project: runtime.name, ...artifacts, written: [], notes };
     }),
 
     write: os.env.write.handler(({ input }) => {

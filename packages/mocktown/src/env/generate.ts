@@ -158,6 +158,28 @@ export function renderEnvFile(project: string, variables: Record<string, string>
   ].join('\n');
 }
 
+/**
+ * Which variables the file on disk disagrees with, ignoring the comment header and any line
+ * someone deleted on purpose — "presence = emulated" is the file's own convention, so a
+ * missing line is a decision, not drift.
+ *
+ * This exists because `.env.mocktown` is a thing that remembers URLs, which is the exact
+ * failure stable names were introduced to stop. Change the TLDs and the file keeps pointing
+ * at the old spelling, which still resolves, so nothing breaks and nobody notices.
+ */
+export function staleEnvVars(existing: string, variables: Record<string, string>): string[] {
+  const onDisk = new Map<string, string>();
+  for (const line of existing.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const at = trimmed.indexOf('=');
+    if (at > 0) onDisk.set(trimmed.slice(0, at), trimmed.slice(at + 1));
+  }
+  return Object.entries(variables)
+    .filter(([key, value]) => onDisk.has(key) && onDisk.get(key) !== shellAssignment(key, value).slice(key.length + 1))
+    .map(([key]) => key);
+}
+
 const AGENTS_BEGIN = '<!-- BEGIN mocktown -->';
 const AGENTS_END = '<!-- END mocktown -->';
 

@@ -537,7 +537,9 @@ function renderEnv(r: any): string[] {
       ? ['', 'agent tasks', ...r.agentTasks.map((t: any) => `  [rung ${t.rung}] ${t.service}: ${t.instruction}`)]
       : []),
     ...(r.written.length ? ['', 'written', ...r.written.map((f: string) => `  ${f}`)] : []),
-    ...(r.notes?.length ? ['', 'not written', ...r.notes.map((n: string) => `  - ${n}`)] : []),
+    // `written` distinguishes the two callers: after a write the notes say what was skipped,
+    // on a read they say what on disk no longer matches.
+    ...(r.notes?.length ? ['', r.written.length ? 'not written' : 'stale', ...r.notes.map((n: string) => `  - ${n}`)] : []),
   ];
 }
 

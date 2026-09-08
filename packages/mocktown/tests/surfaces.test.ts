@@ -22,7 +22,7 @@ const { resolveProject } = await import('#src/config/project.ts');
 const { schema } = await import('#src/db/client.ts');
 const { parseHar } = await import('#src/capture/har.ts');
 const { Recorder, startSession } = await import('#src/capture/recorder.ts');
-const { generateEnv, renderAgentsSection, renderEnvFile } = await import('#src/env/generate.ts');
+const { generateEnv, renderAgentsSection, renderEnvFile, staleEnvVars } = await import('#src/env/generate.ts');
 const { contract } = await import('#src/contract/index.ts');
 const { walkContract, inputShape, describedAs, fieldInfo, contractSignature } = await import('#src/contract/walk.ts');
 const { captureEnv } = await import('#src/capture/launch.ts');
@@ -175,6 +175,24 @@ describe('mocktown env', () => {
     expect(shell.stdout.toString()).toBe(`${caPath}\nhttp://127.0.0.1:4400`);
     // Quoting is reserved for values that need it, so the common line still reads as before.
     expect(renderEnvFile('surfaces-test', { PLAIN: 'http://127.0.0.1:4400' })).toContain('PLAIN=http://127.0.0.1:4400');
+  });
+
+  test('an env file that no longer matches is reported, and a deleted line is not', () => {
+    const variables = { VITE_API_URL: 'http://api.proj.mocktown', MOCKTOWN_CA: '/Users/n o/ca.pem' };
+
+    // The failure this exists for. `.env.mocktown` is a thing that remembers URLs, which is
+    // what stable names were introduced to stop; change the TLDs and the file keeps the old
+    // spelling, which still resolves, so nothing breaks and nobody finds out.
+    const drifted = renderEnvFile('surfaces-test', { ...variables, VITE_API_URL: 'http://api.proj.localhost' });
+    expect(staleEnvVars(drifted, variables)).toEqual(['VITE_API_URL']);
+
+    // Anything this writer produces from the current values agrees with itself, quoting
+    // included — comparing raw would flag every path containing a space, forever.
+    expect(staleEnvVars(renderEnvFile('surfaces-test', variables), variables)).toEqual([]);
+
+    // "Presence = emulated" is the file's own convention, so a line someone deleted is a
+    // decision to send that dependency to the real service, not something to nag about.
+    expect(staleEnvVars('VITE_API_URL=http://api.proj.mocktown', variables)).toEqual([]);
   });
 
   test('the AGENTS.md section pins the project rather than trusting the global default', () => {
