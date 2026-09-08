@@ -20,6 +20,7 @@ import { SqliteStateStore } from '#src/mocks/state.ts';
 import type { MockCtx, MockModule, MockRequest, MockResponse, MockSocket, MockSocketCtx, MockSocketRequest } from '#src/mocks/types.ts';
 import { DEFAULT_RULES } from '#src/scrub/rules.ts';
 import { id } from '#src/util/id.ts';
+import { BROWSER_CHROME, markResponse } from '#src/util/mark.ts';
 
 export interface MockHostDeps {
   db: Db;
@@ -212,6 +213,11 @@ export class MockHost {
     // An explicit route wins, and a preflight that matches nothing is *not* an unmatched
     // request: filing it would bury the issue queue under browser plumbing.
     if (!match && request.method === 'OPTIONS' && request.headers.get('origin')) return preflightResponse(request);
+
+    // Same reasoning, same precedence: a browser asks every origin it visits for an icon,
+    // and a mock that has no recording of one has not failed to cover a route. Serving
+    // mocktown's own mark rather than 404ing also makes a mocked tab visibly a mocked tab.
+    if (!match && BROWSER_CHROME.has(url.pathname)) return markResponse();
 
     if (!match) {
       const near = diagnose(module.routes, request.method, url.pathname);
@@ -597,6 +603,12 @@ function corsHeaders(request: Request): Record<string, string> {
     vary: 'Origin',
   };
 }
+
+/**
+ * Paths a browser requests on its own, for no route the app asked for. Answering them is
+ * not fabricating API behaviour: they belong to the browser, not to the service being
+ * mocked, and an explicit route in the mock still wins over this.
+ */
 
 function preflightResponse(request: Request): Response {
   const headers = new Headers(corsHeaders(request));

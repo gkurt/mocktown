@@ -8,7 +8,7 @@
  * developer's process. It comes from `app.url` in mocktown.json and is asked for here.
  */
 import { useEnv, usePortless, useStatus } from '../hooks.ts';
-import { Badge, Card, Cell, Empty, Failure, Muted, Pending, Table } from '../ui.tsx';
+import { Badge, Card, Cell, Copy, Empty, Failure, Muted, Pending, Table } from '../ui.tsx';
 
 const Link = ({ href }: { href: string }) => (
   <a className="font-mono text-good underline underline-offset-2" href={href} target="_blank" rel="noreferrer">
@@ -51,12 +51,14 @@ export function Urls({ project }: { project: string }) {
         {services.length === 0 ? (
           <Empty>Nothing is serving. `mocktown serve start` brings the providers up.</Empty>
         ) : (
-          <Table head={['service', 'stable name', 'direct']}>
+          <Table head={['service', 'stable name', '', 'direct', '']}>
             {services.map((service) => (
               <tr key={service}>
                 <Cell mono>{service}</Cell>
                 <Cell>{stable.get(service) ? <Link href={stable.get(service)!} /> : <Muted>—</Muted>}</Cell>
+                <Cell>{stable.get(service) ? <Copy value={stable.get(service)!} label="the stable name" /> : null}</Cell>
                 <Cell>{direct.get(service) ? <Link href={direct.get(service)!} /> : <Muted>—</Muted>}</Cell>
+                <Cell>{direct.get(service) ? <Copy value={direct.get(service)!} label="the direct address" /> : null}</Cell>
               </tr>
             ))}
           </Table>

@@ -30,6 +30,7 @@ const workspace = join(root, 'app');
 const UPSTREAM_PORT = 5599;
 const SERVICE = 'billing.localhost';
 const NOISE_SERVICE = 'telemetry.localhost';
+const UNDECLARED_SERVICE = 'ledger.localhost';
 
 let upstream: Server;
 let runtime: InstanceType<typeof ProjectRuntime>;
@@ -196,6 +197,34 @@ describe("phase 1 — record a real app's traffic, browse the scrubbed corpus", 
     expect(services).not.toContain(NOISE_SERVICE);
   }, 30_000);
 
+  /**
+   * The other half of the editorial line. A host that is *not* filtered and *not* declared
+   * is the interesting case: mocktown records it, and someone now has a decision to make.
+   * That was only ever a warning recomputed by `status`, so it vanished on restart and
+   * could not be assigned or closed — the shape of a work item, filed as one.
+   */
+  test('an undeclared host becomes a work item, not a warning', async () => {
+    await fetch(`http://${UNDECLARED_SERVICE}:${UPSTREAM_PORT}/v1/invoices`, { proxy: proxyUrl });
+    await Bun.sleep(500);
+
+    const discovered = runtime.db
+      .select()
+      .from(schema.services)
+      .all()
+      .find((row) => row.id === UNDECLARED_SERVICE);
+    expect(discovered?.discovered).toBe(true);
+
+    const issue = runtime.issues.list({ status: 'open' }).find((i) => i.service === UNDECLARED_SERVICE);
+    expect(issue).toBeDefined();
+    expect(issue!.type).toBe('undeclared-service');
+    // A decision needs the command that records it, and the evidence it is made from.
+    expect(issue!.suggestedResolution).toContain(`mocktown services set --id ${UNDECLARED_SERVICE}`);
+    expect(issue!.links).toContain(`mocktown recordings routes --service ${UNDECLARED_SERVICE}`);
+
+    // A declared service is a decision already made and must never be filed against.
+    expect(runtime.issues.list({ type: 'undeclared-service' }).some((i) => i.service === SERVICE)).toBe(false);
+  }, 30_000);
+
   test('stops cleanly and reports what it captured', async () => {
     const stopped = await runtime.stopRecord();
     expect(stopped.recorded).toBeGreaterThanOrEqual(3);
@@ -270,6 +299,11 @@ describe('phase 2 — the loop closes on a real project', () => {
     // Restart so the patched module is loaded, exactly as the agent loop would.
     await runtime.stopServe();
     await runtime.startServe({ sealed: true });
+
+    // The undeclared host is still undeclared, so its work item survives the restart that
+    // used to be all it took to lose a discovery warning.
+    const undeclared = runtime.issues.list({ status: 'open' }).find((i) => i.service === UNDECLARED_SERVICE);
+    expect(undeclared?.type).toBe('undeclared-service');
 
     const issue = runtime.issues.list().find((i) => i.pathTemplate === '/v1/invoices' && i.method === 'GET')!;
     const baseUrl = runtime.baseUrlFor(SERVICE)!;

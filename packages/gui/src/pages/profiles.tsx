@@ -10,7 +10,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api.ts';
 import { useProfiles, useStatus } from '../hooks.ts';
-import { Badge, Button, Card, Cell, Empty, Failure, Muted, Pending, Table } from '../ui.tsx';
+import { Badge, Button, Card, Cell, Copy, Empty, Failure, Muted, Pending, Table } from '../ui.tsx';
 
 const SIGN_IN: Record<string, { tone: 'good' | 'warn' | 'plain'; hint: string }> = {
   credentials: { tone: 'good', hint: 'Sign in through the app with the credentials below.' },
@@ -52,8 +52,8 @@ export function Profiles({ project }: { project: string }) {
                       <Muted>—</Muted>
                     ) : (
                       credentials.map(([field, value]) => (
-                        <div key={field}>
-                          <Muted>{field}</Muted> {value}
+                        <div key={field} className="flex items-center gap-2 py-0.5">
+                          <Muted>{field}</Muted> <span className="grow">{value}</span> <Copy value={value} label={field} />
                         </div>
                       ))
                     )}
@@ -80,7 +80,10 @@ export function Profiles({ project }: { project: string }) {
         <Card title={`Authorization header for ${minted.profile}`}>
           {/* The point of minting is skipping the login UI entirely, so what is shown is the
               header value itself rather than the token it wraps. */}
-          <pre className="overflow-x-auto rounded border border-line bg-base p-2 font-mono text-[12px]">{minted.header}</pre>
+          <div className="flex items-start gap-2">
+            <pre className="grow overflow-x-auto rounded border border-line bg-base p-2 font-mono text-[12px]">{minted.header}</pre>
+            <Copy value={minted.header} label="the Authorization header" />
+          </div>
           <p className="mt-2">
             <Muted>Send this as `Authorization` to call the mocks directly, with no sign-in.</Muted>
           </p>

@@ -156,7 +156,16 @@ export const issues = sqliteTable(
   {
     id: text('id').primaryKey(),
     type: text('type', {
-      enum: ['unknown-service', 'unmatched-request', 'near-miss', 'state-violation', 'redirect-gap', 'pinned-client', 'provider-drift'],
+      enum: [
+        'unknown-service',
+        'unmatched-request',
+        'near-miss',
+        'state-violation',
+        'redirect-gap',
+        'pinned-client',
+        'provider-drift',
+        'undeclared-service',
+      ],
     }).notNull(),
     status: text('status', { enum: ['open', 'resolved', 'verifying', 'reopened'] })
       .notNull()

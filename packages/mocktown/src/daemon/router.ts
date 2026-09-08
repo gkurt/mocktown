@@ -71,10 +71,10 @@ export const router = os.router({
         ...services
           .filter((s) => s.provider === 'passthrough')
           .map((s) => `${s.id} is set to passthrough: its traffic goes to the real service and is not recorded.`),
-        ...services
-          .filter((s) => s.discovered)
-          .map((s) => `${s.id} was discovered from traffic and is not in mocktown.json. Add it to commit the decision.`),
       ];
+      // Discovered services are filed as `undeclared-service` issues instead of repeated
+      // here: each one is a decision someone has to make and close, and a warning recomputed
+      // on every poll cannot be counted, assigned or resolved.
 
       return {
         project: runtime.name,
@@ -297,8 +297,9 @@ export const router = os.router({
       const issue = runtime.issues.get(input.id);
       if (!issue) throw new ORPCError('NOT_FOUND', { message: `no issue "${input.id}"` });
 
-      // Some issue types have nothing to replay — a pinned client never reaches a mock.
-      const unverifiable = issue.type === 'pinned-client' || issue.type === 'redirect-gap';
+      // Some issue types have nothing to replay — a pinned client never reaches a mock, and
+      // an undeclared service is answered in mocktown.json rather than by a request.
+      const unverifiable = issue.type === 'pinned-client' || issue.type === 'redirect-gap' || issue.type === 'undeclared-service';
       if (input.skipVerify || unverifiable) {
         runtime.issues.setStatus(
           input.id,

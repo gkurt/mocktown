@@ -59,7 +59,16 @@ export const SocketFrame = z.object({
 export type SocketFrame = z.infer<typeof SocketFrame>;
 
 export const IssueType = z
-  .enum(['unknown-service', 'unmatched-request', 'near-miss', 'state-violation', 'redirect-gap', 'pinned-client', 'provider-drift'])
+  .enum([
+    'unknown-service',
+    'unmatched-request',
+    'near-miss',
+    'state-violation',
+    'redirect-gap',
+    'pinned-client',
+    'provider-drift',
+    'undeclared-service',
+  ])
   .describe('The issue taxonomy from 07-issues-agent-loop.md');
 
 export const IssueStatus = z.enum(['open', 'resolved', 'verifying', 'reopened']);

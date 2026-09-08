@@ -34,12 +34,15 @@ export class Recorder {
   private readonly project: string;
   private readonly scrubber: Scrubber;
   private readonly sessionId: string;
+  /** Called once, the first time a host is seen without a registry entry. */
+  private readonly onDiscovered: (service: string) => void;
 
-  constructor(db: Db, project: string, scrubber: Scrubber, sessionId: string) {
+  constructor(db: Db, project: string, scrubber: Scrubber, sessionId: string, onDiscovered: (service: string) => void = () => {}) {
     this.db = db;
     this.project = project;
     this.scrubber = scrubber;
     this.sessionId = sessionId;
+    this.onDiscovered = onDiscovered;
   }
 
   /** Persist one exchange. */
@@ -208,6 +211,9 @@ export class Recorder {
       .values({ id: service, provider: 'record', discovered: true, lastSeenAt: now })
       .onConflictDoNothing()
       .run();
+    // Announced exactly here, on the insert, so the count in the queue is the number of
+    // times the host was newly discovered rather than the number of times it was polled.
+    this.onDiscovered(service);
   }
 }
 

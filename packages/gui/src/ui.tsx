@@ -4,7 +4,7 @@
  * where they should come from once this app needs a real component — a dialog, a combobox,
  * a data table. Each `TODO(registry)` marks a place where that swap is a one-liner.
  */
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 
 export function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -91,3 +91,34 @@ export function Pending({ what }: { what: string }) {
 export const Ok = ({ ok, children }: { ok: boolean; children?: ReactNode }) => (
   <Badge tone={ok ? 'good' : 'bad'}>{children ?? (ok ? 'ok' : 'no')}</Badge>
 );
+
+/**
+ * Copy to clipboard, with the confirmation in the button itself. Credentials and tokens are
+ * meant to be pasted somewhere else — into a login form, into a request — so selecting them
+ * by hand was the one interaction this GUI asked for and did not help with.
+ *
+ * `navigator.clipboard` needs a secure context; the daemon serves over plain HTTP on
+ * loopback, which qualifies, but a failure is shown rather than swallowed.
+ */
+export function Copy({ value, label }: { value: string; label?: string }) {
+  const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle');
+
+  return (
+    <button
+      type="button"
+      title={`Copy ${label ?? 'to clipboard'}`}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setState('done');
+        } catch {
+          setState('failed');
+        }
+        setTimeout(() => setState('idle'), 1200);
+      }}
+      className="rounded border border-line px-1 py-0.5 text-[11px] leading-none text-muted hover:bg-line/40"
+    >
+      {state === 'done' ? 'copied' : state === 'failed' ? 'blocked' : 'copy'}
+    </button>
+  );
+}

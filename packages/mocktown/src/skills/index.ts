@@ -306,6 +306,7 @@ Issues also exist as JSON under \`.mocktown/issues/\` if you prefer files to com
 | \`redirect-gap\` | An SDK is not pointed at its mock. Apply the EKB recipe: env var, constructor option, or code patch. |
 | \`pinned-client\` | Out of scope by design. Surface it; do not try to defeat the pinning. |
 | \`provider-drift\` | The real API moved. Patch the provider, and leave the diff for a human to review. |
+| \`undeclared-service\` | Traffic reached a host that is not in mocktown.json. Add it with a provider, so the decision is committed rather than rediscovered. |
 
 ## Rules
 

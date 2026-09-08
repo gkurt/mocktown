@@ -483,7 +483,7 @@ export class ProjectRuntime {
     // what makes `{{secret:stripe-secret-key#1}}` mean "the same key as earlier".
     this.scrubber = new Scrubber(rulesFromConfig(this.project.file?.scrub), this.project.file?.scrub?.entropyBackstop ?? true);
     this.noise = new NoiseFilter(this.project.file?.capture);
-    this.recorder = new Recorder(this.db, this.project.name, this.scrubber, this.sessionId);
+    this.recorder = new Recorder(this.db, this.project.name, this.scrubber, this.sessionId, (service) => this.fileUndeclared(service));
     this.mode = { kind: 'record', sealed: false };
     this.issues.startBatch();
 
@@ -491,6 +491,7 @@ export class ProjectRuntime {
     await this.applyRouting();
 
     const ca = await ensureProjectCa(this.project.name);
+    this.reconcileUndeclared();
     await this.syncPortless();
     const proxyUrl = `http://127.0.0.1:${frontDoor.port}`;
     this.note('session', `record mode started on :${frontDoor.port} — session ${this.sessionId}`, { ref: this.sessionId });
@@ -587,6 +588,7 @@ export class ProjectRuntime {
     await this.applyRouting();
 
     const ca = await ensureProjectCa(this.project.name);
+    this.reconcileUndeclared();
     await this.syncPortless();
     const proxyUrl = `http://127.0.0.1:${frontDoor.port}`;
     this.note(
@@ -743,6 +745,36 @@ export class ProjectRuntime {
       aliases.set(`${entry.name}.${tld}`, entry.service);
     }
     generated.setAliases(aliases);
+  }
+
+  /**
+   * Discovery happens once, but a project can be opened long after it — and inherited by
+   * someone who never saw the session that found the host. Every session start re-files what
+   * is still undeclared, so the queue reflects the registry as it is now rather than the
+   * moment a host first appeared.
+   */
+  private reconcileUndeclared(): void {
+    for (const service of this.services()) if (service.discovered) this.fileUndeclared(service.id);
+  }
+
+  /**
+   * A host seen without a registry entry is a decision waiting to be made — emulate it,
+   * record it, mock it, or let it out — and it was only ever a warning recomputed on every
+   * `status` call. That is the shape of a work item: it has an owner, an action, and it is
+   * done when mocktown.json says so. As a warning it vanished on restart and could not be
+   * counted, assigned, or closed.
+   */
+  private fileUndeclared(service: string): void {
+    this.issues.file({
+      type: 'undeclared-service',
+      service,
+      sessionId: this.sessionId,
+      diagnosis: { reason: `${service} was seen in traffic and has no entry in mocktown.json` },
+      suggestedResolution:
+        `Decide what ${service} is and commit it: \`mocktown services set --id ${service} --provider <emulator:<name>|record|generated:${service}|passthrough>\`. ` +
+        'Leaving it discovered means the next machine to run this project records it again instead of inheriting the decision.',
+      links: [`mocktown recordings routes --service ${service}`, 'mocktown services list'],
+    });
   }
 
   private onMockUnmatched(event: {

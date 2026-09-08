@@ -27,7 +27,8 @@ export type IssueType =
   | 'state-violation'
   | 'redirect-gap'
   | 'pinned-client'
-  | 'provider-drift';
+  | 'provider-drift'
+  | 'undeclared-service';
 
 export interface FileIssueInput {
   type: IssueType;

@@ -22,6 +22,7 @@ import { runtimeFor } from '#src/daemon/runtime.ts';
 import { DriftScheduler } from '#src/drift/scheduler.ts';
 import { panelFile } from '#src/gui/panels.ts';
 import { assetPath, guiDist, htmlResponse, PANEL_CSP, SHELL_CSP } from '#src/gui/serve.ts';
+import { BROWSER_CHROME, markResponse } from '#src/util/mark.ts';
 import { findFreePort } from '#src/util/ports.ts';
 
 /**
@@ -151,6 +152,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
         if (!file.endsWith('.html')) return new Response(Bun.file(file), { headers: { 'content-security-policy': PANEL_CSP } });
         return htmlResponse(file, boot, PANEL_CSP);
       }
+
+      // Same reasoning as a generated mock's: the tab strip asks for an icon on its own, and
+      // the answer is the same mark, so a mocktown tab is identifiable among a row of them.
+      if (BROWSER_CHROME.has(url.pathname)) return markResponse();
 
       if (staticDir) {
         const file = assetPath(staticDir, url.pathname);

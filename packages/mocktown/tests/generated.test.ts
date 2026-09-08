@@ -300,3 +300,25 @@ test('a Host that names no service is a mapping fault, not a missing mock', asyn
   // The links have to be actionable for a name that is not a service.
   expect(issue!.links).not.toContain(`mocktown corpus export --service ${stable}`);
 });
+
+test('browser chrome is answered, not filed', async () => {
+  // A browser asks every origin it opens for an icon. Those requests used to land as
+  // `unmatched-request` issues against a route the mock was never going to have, which put
+  // the cost of opening a mock in a tab straight into the issue queue.
+  const baseUrl = runtime.allBaseUrls().get(GOOD);
+  const before = runtime.issues.list({}).length;
+
+  for (const path of ['/favicon.ico', '/apple-touch-icon.png', '/apple-touch-icon-precomposed.png']) {
+    const response = await fetch(`${baseUrl}${path}`, { headers: { host: GOOD } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('image/png');
+    expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  }
+
+  expect(runtime.issues.list({}).length).toBe(before);
+
+  // Answering the chrome is a fallback, never an override: a mock that does define the route
+  // still owns it, and a path that is merely icon-adjacent is still an unmatched request.
+  const missing = await fetch(`${baseUrl}/favicon.png`, { headers: { host: GOOD } });
+  expect(missing.status).toBe(501);
+});
