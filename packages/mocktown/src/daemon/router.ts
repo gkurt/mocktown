@@ -16,6 +16,7 @@ import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { projectPaths } from '#src/config/paths.ts';
+import { writeService } from '#src/config/services.ts';
 import { settingsOf, writeSetting } from '#src/config/settings.ts';
 import { contract } from '#src/contract/index.ts';
 import type { ProviderRef, Service } from '#src/contract/schemas.ts';
@@ -179,7 +180,20 @@ export const router = os.router({
         })
         .run();
       const row = runtime.db.select().from(schema.services).where(eq(schema.services.id, input.id)).get()!;
-      return { project: runtime.name, service: toService(row) };
+
+      // The database decides how this run behaves; the file is how the decision travels. A
+      // workspace-less project has nowhere to put it, and that is worth saying rather than
+      // reporting a write that did not happen.
+      const projectFile = runtime.resolved.paths?.projectFile ?? null;
+      if (projectFile) {
+        try {
+          writeService(projectFile, input.id, { provider: input.provider, seed: input.seed, aliases: input.aliases ?? row.aliases });
+        } catch (error) {
+          throw new ORPCError('BAD_REQUEST', { message: error instanceof Error ? error.message : String(error) });
+        }
+        runtime.reload();
+      }
+      return { project: runtime.name, service: toService(row), file: projectFile };
     }),
   },
 
@@ -367,10 +381,19 @@ export const router = os.router({
       // entirely exempted cannot close an issue by having nothing to say about it.
       const judged = result.passed + result.failed;
       const passed = judged > 0 && result.failed === 0;
+      const route = `${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim();
+      // A near-miss is *defined* by the corpus not containing the route the app asked for,
+      // so replay can never confirm a fix for one and "nothing to replay" is the structure
+      // of the issue rather than a mistake the caller made. Saying only that the replay was
+      // empty sends someone hunting for a recording that cannot exist.
       const reason =
-        judged === 0
-          ? `verification found nothing to replay for ${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim()
-          : `verification failed: ${result.failed}/${judged} replayed requests did not match`;
+        judged > 0
+          ? `verification failed: ${result.failed}/${judged} replayed requests did not match`
+          : issue.type === 'near-miss'
+            ? `nothing to replay for ${route}: a near-miss means the corpus never recorded this route, so replay cannot confirm the fix. ` +
+              `Prove it with \`mocktown mocks verify --service ${issue.service}\` — which checks the routes that *are* recorded still pass — ` +
+              'then close this with `--skip-verify` and a note saying what the new route was written against.'
+            : `verification found nothing to replay for ${route}`;
       runtime.issues.setStatus(input.id, passed ? 'resolved' : 'reopened', passed ? input.note : reason);
 
       return { project: runtime.name, issue: toIssue(runtime.issues.get(input.id)!), verified: passed, verification: result };

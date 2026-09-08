@@ -29,6 +29,7 @@ const { captureEnv } = await import('#src/capture/launch.ts');
 const { RENDERERS } = await import('#src/cli/render.ts');
 const { coerceInput } = await import('#src/cli/coerce.ts');
 const { settingsOf, writeSetting } = await import('#src/config/settings.ts');
+const { writeService } = await import('#src/config/services.ts');
 const { projectFileJsonSchema, SCHEMA_REF } = await import('#src/config/jsonschema.ts');
 const { ProjectFile } = await import('#src/config/schema.ts');
 const { workspacePaths } = await import('#src/config/paths.ts');
@@ -322,6 +323,38 @@ describe('the project settings surface', () => {
     // so nothing the caller did not touch is normalised away.
     expect(raw.services).toEqual({ 'api.acme': { provider: 'record' } });
     expect(raw.capture).toBeUndefined();
+  });
+
+  test('a registry decision lands in mocktown.json, not just in the database', () => {
+    // The `undeclared-service` issue tells you to run `services set` so the next machine
+    // inherits the decision. For a while the command wrote only the daemon's database, so
+    // the decision never left the machine that made it and the host was rediscovered on the
+    // next clone — the one failure the issue exists to prevent.
+    const file = join(workspace, 'registry.json');
+    writeFileSync(file, JSON.stringify({ $schema: SCHEMA_REF, project: 'surfaces-test' }, null, 2));
+
+    writeService(file, 'accounts.example', { provider: 'passthrough' });
+
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    expect(raw.services['accounts.example']).toEqual({ provider: 'passthrough' });
+    expect(raw.$schema).toBe(SCHEMA_REF);
+  });
+
+  test('changing a provider keeps the aliases and seed already committed for that service', () => {
+    const file = join(workspace, 'registry-merge.json');
+    writeFileSync(
+      file,
+      JSON.stringify(
+        { project: 'surfaces-test', services: { 'api.acme': { provider: 'record', seed: 'seeds/api.ts', aliases: ['api.acme.dev'] } } },
+        null,
+        2,
+      ),
+    );
+
+    writeService(file, 'api.acme', { provider: 'generated:api.acme' });
+
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    expect(raw.services['api.acme']).toEqual({ provider: 'generated:api.acme', seed: 'seeds/api.ts', aliases: ['api.acme.dev'] });
   });
 
   test('a bad value is refused before it can break every other command', () => {

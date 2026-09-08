@@ -150,7 +150,12 @@ export const contract = {
           aliases: z.array(z.string()).optional().describe('Other hostnames this same backend answers on. Omit to leave them unchanged'),
         }),
       )
-      .output(withProject({ service: Service })),
+      .output(
+        withProject({
+          service: Service,
+          file: z.string().nullable().describe('The mocktown.json the decision was written to, or null when the project has no workspace'),
+        }),
+      ),
   },
 
   recordings: {
