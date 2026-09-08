@@ -243,13 +243,15 @@ mocktown feed --follow
 ```
 
 ```bash
-mocktown gui
+mocktown ui
 ```
 
-`mocktown gui` opens the shell the daemon serves on its own port — dashboard, live feed,
-issues, services, corpus, provider state, seal and sandbox, and panels. The bearer token is
-injected by the daemon as it serves the page, so the build on disk carries no capability.
-Build it first (once) with `bun run gui:build` from the repo root.
+`mocktown ui` (`mocktown gui` still works) opens the shell the daemon serves on its own port
+— dashboard, live feed, issues, services, corpus, provider state, seal and sandbox, and
+panels. When portless has claimed a stable name it opens `http://ui.mocktown` and prints the
+loopback address beside it; `--loopback` forces the direct one. The bearer token is injected
+by the daemon as it serves the page, so the build on disk carries no capability. Build it
+first (once) with `bun run gui:build` from the repo root.
 
 A **panel** is one self-contained HTML file plus a manifest in `.mocktown/panels/`:
 

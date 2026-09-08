@@ -23,7 +23,7 @@ export interface Boot {
 
 function readBoot(): Boot {
   const block = document.querySelector('meta[name="mocktown-boot"]')?.getAttribute('content');
-  if (!block) throw new Error('This page was not served by the Mocktown daemon, so it has no API token. Run `mocktown gui`.');
+  if (!block) throw new Error('This page was not served by the Mocktown daemon, so it has no API token. Run `mocktown ui`.');
   return JSON.parse(block);
 }
 

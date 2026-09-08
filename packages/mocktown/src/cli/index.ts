@@ -395,16 +395,21 @@ feedCommand
   });
 
 /**
- * `mocktown gui` — the shell from 09-gui-plugins.md. The daemon serves it, so this command
+ * `mocktown ui` — the shell from 09-gui-plugins.md. The daemon serves it, so this command
  * only finds it, prints the URL and opens a browser. There is no dev server to babysit and
  * no second port: the GUI is a client of the same API on the same origin, which is what
  * makes the token injection and the panel CSP possible at all.
+ *
+ * `gui` stays as an alias. It was the name for long enough to be in people's fingers and in
+ * older notes, and an alias costs one line where a removal costs someone a puzzled minute.
  */
 program
-  .command('gui')
+  .command('ui')
+  .alias('gui')
   .description('Open the local GUI shell in a browser')
   .option('--no-open', 'Print the URL instead of opening a browser')
-  .action(async (options: { open: boolean }) => {
+  .option('--loopback', 'Use the 127.0.0.1 address even when a stable name is live')
+  .action(async (options: { open: boolean; loopback?: boolean }) => {
     const globals = program.opts();
     const project = resolveProject({ project: globals.project as string | undefined });
     ensureRegistered(project);
@@ -418,9 +423,29 @@ program
     }
 
     const connection = await ensureDaemon();
-    const url = `${connection.url.replace(/\/api\/v1$/, '')}/?project=${encodeURIComponent(project.name)}`;
+    const loopback = `${connection.url.replace(/\/api\/v1$/, '')}/?project=${encodeURIComponent(project.name)}`;
+
+    // The stable name when portless has one, because that is the address worth having in a
+    // bookmark — the loopback port is whatever was free the last time the daemon started.
+    // `gui` is non-null only while a serve session holds the alias (the runtime drops the
+    // status when it releases), so this is a live fact rather than a remembered one.
+    let stable: string | null = null;
+    if (!options.loopback) {
+      try {
+        const status = await clientFor(connection).env.portless.get({ project: project.name });
+        if (status.gui) stable = `${status.gui.url}/?project=${encodeURIComponent(project.name)}`;
+      } catch {
+        // A daemon that cannot answer is not a reason to withhold the address that works.
+      }
+    }
+
+    const url = stable ?? loopback;
     console.log(`project: ${project.name}`);
     console.log(`  ${url}`);
+    // Both, always, when they differ: a stable name depends on a proxy and a hosts entry,
+    // and the one address that cannot stop resolving belongs in reach rather than in a
+    // second command someone has to know about.
+    if (stable) console.log(`  ${loopback}  (direct)`);
     if (!options.open) return;
 
     // The token is injected into the page by the daemon, not put in this URL: a URL ends up
