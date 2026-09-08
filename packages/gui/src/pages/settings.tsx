@@ -16,7 +16,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api.ts';
 import { useConfig, useKnobs, useStatus } from '../hooks.ts';
-import { Badge, Card, Cell, Empty, Failure, Muted, Pending, Table } from '../ui.tsx';
+import { Badge, Card, Cell, Empty, Failure, Muted, Path, Pending, Table } from '../ui.tsx';
 
 type Setting = Awaited<ReturnType<typeof api.config.get>>['settings'][number];
 
@@ -98,7 +98,7 @@ function ProjectSettings({ project }: { project: string }) {
       {data.file ? (
         <p className="mb-2">
           <Muted>
-            Committed to <code className="font-mono">{data.file}</code>. A text field commits on Enter; Escape reverts it.
+            Committed to <Path>{data.file}</Path>. A text field commits on Enter; Escape reverts it.
           </Muted>
         </p>
       ) : (

@@ -9,6 +9,7 @@
  * read it would only make life harder for agents and `curl`.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { OpenAPIGenerator } from '@orpc/openapi';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { ORPCError, onError } from '@orpc/server';
@@ -126,6 +127,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
         apiBase: `http://127.0.0.1:${port}/api/v1`,
         token,
         project: project ?? loadGlobalConfig().defaultProject,
+        home: homedir(),
       });
 
       if (url.pathname === '/api/v1/openapi.json') return Response.json(openapi);

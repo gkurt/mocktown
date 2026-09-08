@@ -10,7 +10,7 @@
  */
 import { useState } from 'react';
 import { usePanels } from '../hooks.ts';
-import { Badge, Card, Empty, Failure, Muted, Pending } from '../ui.tsx';
+import { Badge, Card, Empty, Failure, Muted, Path, Pending } from '../ui.tsx';
 
 export function Panels({ project }: { project: string }) {
   const panels = usePanels(project);
@@ -23,7 +23,7 @@ export function Panels({ project }: { project: string }) {
 
   return (
     <div className="space-y-3">
-      <Card title="Panels" action={<Muted>{panels.data.dir ?? 'this project has no workspace'}</Muted>}>
+      <Card title="Panels" action={<Muted>{panels.data.dir ? <Path>{panels.data.dir}</Path> : 'this project has no workspace'}</Muted>}>
         {panels.data.panels.length === 0 ? (
           <Empty>No panels. Drop an HTML file and a manifest into `.mocktown/panels/`.</Empty>
         ) : (
@@ -49,7 +49,14 @@ export function Panels({ project }: { project: string }) {
       </Card>
 
       {active && (
-        <Card title={active.name} action={<Muted className="font-mono">{active.file}</Muted>}>
+        <Card
+          title={active.name}
+          action={
+            <Muted>
+              <Path>{active.file}</Path>
+            </Muted>
+          }
+        >
           <iframe
             key={active.url}
             title={active.name}

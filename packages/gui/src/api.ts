@@ -17,6 +17,7 @@ export interface Boot {
   apiBase: string;
   token: string;
   project: string;
+  home: string;
 }
 
 function readBoot(): Boot {

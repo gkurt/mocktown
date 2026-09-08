@@ -22,6 +22,8 @@ export interface BootData {
   apiBase: string;
   token: string;
   project: string;
+  /** So the shell can print `~/Work/repo` for a path it has no other way to recognise. */
+  home: string;
 }
 
 /**

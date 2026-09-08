@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { useIssues } from '../hooks.ts';
-import { Badge, Card, Cell, Empty, Failure, Muted, Pending, Table } from '../ui.tsx';
+import { Badge, Card, Cell, Empty, Failure, Muted, Path, Pending, Table } from '../ui.tsx';
 
 const STATUSES = ['open', 'verifying', 'reopened', 'resolved'] as const;
 
@@ -75,9 +75,11 @@ function IssueDetail({ issue }: { issue: ReturnType<typeof useIssues>['data'] ex
         {issue.links.length > 0 && (
           <div>
             <Muted>links</Muted>
-            <ul className="ml-4 font-mono">
+            <ul className="ml-4">
               {issue.links.map((link: string) => (
-                <li key={link}>{link}</li>
+                <li key={link}>
+                  <Path>{link}</Path>
+                </li>
               ))}
             </ul>
           </div>

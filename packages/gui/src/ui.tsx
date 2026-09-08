@@ -5,6 +5,7 @@
  * a data table. Each `TODO(registry)` marks a place where that swap is a one-liner.
  */
 import { type ReactNode, useState } from 'react';
+import { boot } from './api.ts';
 
 export function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -64,6 +65,23 @@ export function Button({ onClick, children, disabled }: { onClick: () => void; c
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * A filesystem path, with the home directory shortened to `~`. The daemon puts the home in
+ * the boot block because a browser has no way to know it.
+ *
+ * The full path stays in `title`, since the shortened form is for reading and the real one
+ * is what gets pasted into a terminal. The trailing slash is the guard: `~` for
+ * `/Users/ann` must not also claim `/Users/annex`.
+ */
+export function Path({ children, className = '' }: { children: string; className?: string }) {
+  const short = boot.home === '/' ? children : children.replaceAll(`${boot.home}/`, '~/');
+  return (
+    <span className={`font-mono ${className}`} title={short === children ? undefined : children}>
+      {short}
+    </span>
   );
 }
 

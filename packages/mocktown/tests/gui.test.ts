@@ -12,6 +12,7 @@
  */
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ORPCError } from '@orpc/client';
 
@@ -98,7 +99,8 @@ test('the shell is served with an injected token and a same-origin CSP', async (
   expect(response.status).toBe(200);
   const html = await response.text();
 
-  expect(boot(html)).toEqual({ apiBase: `${origin}/api/v1`, token: daemon.token, project: 'main' });
+  // `home` is what lets the shell print `~/Work/repo`; a browser cannot work it out.
+  expect(boot(html)).toEqual({ apiBase: `${origin}/api/v1`, token: daemon.token, project: 'main', home: homedir() });
   // Nothing in the build itself: the file on disk is worthless without the daemon.
   expect(Bun.file(join(shell, 'index.html')).text()).resolves.not.toContain('mocktown-boot');
 
@@ -168,7 +170,7 @@ test('a panel path cannot climb out of the panel directory', async () => {
 });
 
 test('the boot block survives a document with no head at all', () => {
-  const injected = injectBoot('<body>panel</body>', { apiBase: '/api/v1', token: 't', project: 'p' });
+  const injected = injectBoot('<body>panel</body>', { apiBase: '/api/v1', token: 't', project: 'p', home: '/Users/nobody' });
   expect(injected.startsWith('<meta name="mocktown-boot"')).toBe(true);
   expect(injected).toContain('<body>panel</body>');
 });
