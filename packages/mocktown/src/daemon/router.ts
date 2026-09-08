@@ -8,15 +8,15 @@
  * exist for any of them.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { ORPCError } from '@orpc/client';
 import { implement } from '@orpc/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
-import { localIgnoreCovers, writeLocalIgnore } from '#src/config/ignore.ts';
-import { projectPaths } from '#src/config/paths.ts';
+import { localIgnoreMisses, writeLocalIgnore } from '#src/config/ignore.ts';
+import { committedDirs, projectPaths } from '#src/config/paths.ts';
 import { loadGlobalConfig } from '#src/config/project.ts';
 import { writeService } from '#src/config/services.ts';
 import { settingsOf, writeSetting } from '#src/config/settings.ts';
@@ -77,10 +77,10 @@ export const router = os.router({
       // The exception that earns its place: mocks git cannot see are mocks the next clone
       // will not have, and the symptom shows up far from the cause. One line fixes it.
       const paths = runtime.resolved.paths;
-      if (paths && !localIgnoreCovers(paths.localIgnore, paths.localDir, paths.mocksDir)) {
+      for (const missing of paths ? localIgnoreMisses(paths.localIgnore, paths.localDir, committedDirs(paths)) : []) {
         warnings.push(
-          `${paths.localIgnore} does not un-ignore ${relative(paths.localDir, paths.mocksDir)}/, so the mocks are not tracked by git. ` +
-            `Add \`!/${relative(paths.localDir, paths.mocksDir)}/\` to it.`,
+          `${paths?.localIgnore} does not un-ignore ${missing}/, so nothing you write there is tracked by git. ` +
+            `Add \`!/${missing}/\` to it.`,
         );
       }
 
@@ -521,7 +521,7 @@ export const router = os.router({
       mkdirSync(paths.mocksDir, { recursive: true });
       // A project that predates `.mocktown/.gitignore` gets it the first time it scaffolds,
       // rather than only on an `init` it will never run again.
-      writeLocalIgnore(paths.localIgnore, paths.localDir, paths.mocksDir);
+      writeLocalIgnore(paths.localIgnore, paths.localDir, committedDirs(paths));
       const { files, brief } = scaffoldMock(paths.mocksDir, corpus, { force: input.force });
       return { project: runtime.name, service: input.service, files, brief };
     }),

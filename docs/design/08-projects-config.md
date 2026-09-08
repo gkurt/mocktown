@@ -45,7 +45,8 @@ a teammate or agent clones and `mocktown up` just works.
 }
 ```
 
-Committed alongside: `.mocktown/mocks/` (generated mock modules) and curated fixtures.
+Committed alongside: `.mocktown/mocks/` (generated mock modules) and `.mocktown/panels/`
+(workspace GUI panels) — both hand-authored, both worth having on the next clone.
 **Never committed:** recordings DB, CA private key, `.env.mocktown` if it embeds
 ports (regenerate instead).
 
@@ -79,9 +80,9 @@ name from a shell.
 <repo>/mocktown.json                    # committed identity + service registry
 <repo>/.env.mocktown                    # generated, gitignored
 <repo>/.mocktown/                       # one directory, `dirs`-configurable
-  ├─ .gitignore                         # generated: ignores all of the below but mocks/
+  ├─ .gitignore                         # generated: ignores all of the below but mocks/, panels/
   ├─ mocks/                             # committed — the agent loop's output
-  ├─ panels/                            # workspace GUI panels
+  ├─ panels/                            # committed — workspace GUI panels
   ├─ issues/*.json                       # mirrored from the database each session
   ├─ config.local.json                  # machine-specific
   └─ mocktown.schema.json               # generated, for the editor

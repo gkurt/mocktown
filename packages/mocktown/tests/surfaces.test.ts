@@ -262,6 +262,7 @@ describe("mocktown.json's JSON Schema", () => {
     // Anchored, or `*` matches at every depth and re-ignores the files inside `mocks/`.
     expect(localIgnore).toContain('/*');
     expect(localIgnore).toContain('!/mocks/');
+    expect(localIgnore).toContain('!/panels/');
     rmSync(schemaPath);
     new ProjectRuntime(resolveProject({ cwd: fresh })).ensureDirs();
     expect(existsSync(schemaPath)).toBe(true);

@@ -10,8 +10,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const { workspacePaths, DEFAULT_DIRS } = await import('#src/config/paths.ts');
-const { renderLocalIgnore, localIgnoreCovers } = await import('#src/config/ignore.ts');
+const { workspacePaths, committedDirs, DEFAULT_DIRS } = await import('#src/config/paths.ts');
+const { renderLocalIgnore, localIgnoreMisses } = await import('#src/config/ignore.ts');
 
 describe('dirs', () => {
   test('defaults put everything under .mocktown/', () => {
@@ -47,11 +47,13 @@ describe('.mocktown/.gitignore', () => {
 
     const paths = workspacePaths(repo);
     mkdirSync(join(paths.mocksDir, 'svc'), { recursive: true });
+    mkdirSync(paths.panelsDir, { recursive: true });
     mkdirSync(paths.issuesDir, { recursive: true });
     writeFileSync(join(paths.mocksDir, 'svc', 'index.ts'), 'export default {};\n');
+    writeFileSync(join(paths.panelsDir, 'state.html'), '<p>state</p>\n');
     writeFileSync(join(paths.issuesDir, 'iss_1.json'), '{}\n');
     writeFileSync(paths.localConfig, '{}\n');
-    writeFileSync(paths.localIgnore, renderLocalIgnore(paths.localDir, paths.mocksDir));
+    writeFileSync(paths.localIgnore, renderLocalIgnore(paths.localDir, committedDirs(paths)));
 
     const status = await Bun.$`git -C ${repo} status --porcelain --untracked-files=all`.text();
     const seen = status
@@ -60,20 +62,24 @@ describe('.mocktown/.gitignore', () => {
       .map((line) => line.slice(3));
 
     expect(seen).toContain('.mocktown/mocks/svc/index.ts');
+    // Hand-authored like the mocks, and swept into the ignore only because it shares a parent.
+    expect(seen).toContain('.mocktown/panels/state.html');
     expect(seen).toContain('.mocktown/.gitignore');
     expect(seen.some((path) => path.includes('issues'))).toBe(false);
     expect(seen.some((path) => path.includes('config.local.json'))).toBe(false);
   }, 20_000);
 
   test('a mocks directory outside .mocktown needs no line, and is not reported missing', () => {
-    const paths = workspacePaths('/repo', { mocks: 'mocks' });
-    expect(renderLocalIgnore(paths.localDir, paths.mocksDir)).not.toContain('!/mocks/');
-    expect(localIgnoreCovers('/repo/.mocktown/.gitignore', paths.localDir, paths.mocksDir)).toBe(true);
+    const paths = workspacePaths('/repo', { mocks: 'mocks', panels: 'panels' });
+    const rendered = renderLocalIgnore(paths.localDir, committedDirs(paths));
+    expect(rendered).not.toContain('!/mocks/');
+    expect(rendered).not.toContain('!/panels/');
+    expect(localIgnoreMisses('/repo/.mocktown/.gitignore', paths.localDir, committedDirs(paths))).toEqual([]);
   });
 
-  test('a moved mocks directory inside .mocktown is reported until the line is there', () => {
+  test('a moved directory inside .mocktown is reported until the line is there', () => {
     const paths = workspacePaths('/repo', { mocks: '.mocktown/handwritten' });
-    expect(localIgnoreCovers('/repo/.mocktown/.gitignore', paths.localDir, paths.mocksDir)).toBe(false);
-    expect(renderLocalIgnore(paths.localDir, paths.mocksDir)).toContain('!/handwritten/');
+    expect(localIgnoreMisses('/repo/.mocktown/.gitignore', paths.localDir, committedDirs(paths))).toEqual(['handwritten', 'panels']);
+    expect(renderLocalIgnore(paths.localDir, committedDirs(paths))).toContain('!/handwritten/');
   });
 });

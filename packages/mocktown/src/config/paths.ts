@@ -101,3 +101,10 @@ export const workspacePaths = (repoRoot: string, dirs: Partial<WorkspaceDirs> = 
     envFile: join(repoRoot, '.env.mocktown'),
   };
 };
+
+/**
+ * The hand-authored half of a workspace. Both are written by people (or by an agent on
+ * their behalf) and are worth having on the next machine that clones the repo; issues and
+ * the generated schema are derived and are not.
+ */
+export const committedDirs = (paths: ReturnType<typeof workspacePaths>) => [paths.mocksDir, paths.panelsDir];

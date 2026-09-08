@@ -24,7 +24,7 @@ import { clientFor, ensureDaemon } from '#src/cli/daemon-client.ts';
 import { feedLine, renderResult, tilde } from '#src/cli/render.ts';
 import { writeLocalIgnore } from '#src/config/ignore.ts';
 import { SCHEMA_REF, writeProjectFileJsonSchema } from '#src/config/jsonschema.ts';
-import { projectPaths, workspacePaths } from '#src/config/paths.ts';
+import { committedDirs, projectPaths, workspacePaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
 import { ProjectFile } from '#src/config/schema.ts';
 import { contract } from '#src/contract/index.ts';
@@ -201,10 +201,11 @@ program
     const paths = workspacePaths(cwd);
     mkdirSync(paths.issuesDir, { recursive: true });
     mkdirSync(paths.mocksDir, { recursive: true });
+    mkdirSync(paths.panelsDir, { recursive: true });
     writeProjectFileJsonSchema(paths.schemaFile);
     // `.mocktown/` says for itself what of it is committed, so the repo's own .gitignore
     // only has to carry the one file that lives outside it.
-    writeLocalIgnore(paths.localIgnore, paths.localDir, paths.mocksDir);
+    writeLocalIgnore(paths.localIgnore, paths.localDir, committedDirs(paths));
 
     // `.env.mocktown` embeds local ports — regenerate it rather than sharing it
     // (08-projects-config.md).
