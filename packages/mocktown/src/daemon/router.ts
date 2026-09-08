@@ -68,16 +68,9 @@ export const router = os.router({
       const openIssues = runtime.issues.list({ status: 'open' }).length;
       const services = runtime.services().map(toService);
 
-      const warnings = [
-        ...runtime.providerStatuses().flatMap((p) => p.warnings),
-        // Silent passthroughs are forbidden (06-emulation.md), so every one is announced.
-        ...services
-          .filter((s) => s.provider === 'passthrough')
-          .map((s) => `${s.id} is set to passthrough: its traffic goes to the real service and is not recorded.`),
-      ];
-      // Discovered services are filed as `undeclared-service` issues instead of repeated
-      // here: each one is a decision someone has to make and close, and a warning recomputed
-      // on every poll cannot be counted, assigned or resolved.
+      // Provider failures only. Anything a reader cannot put right from here is not a
+      // warning: the registry is `services`, and a decision someone owes is an issue.
+      const warnings = runtime.providerStatuses().flatMap((p) => p.warnings);
 
       return {
         project: runtime.name,
