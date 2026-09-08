@@ -132,22 +132,30 @@ Two further consequences, both deliberate:
     those variables, so the same bundle is also emitted as a list of SPKI fingerprints
     (`MOCKTOWN_CA_SPKI`) — every certificate in it, because a list naming one issuer leaves
     the other throwing certificate errors in a window that looks correctly configured.
-  - **`portless.tlds` is a list, not a name.** The default is
-    `["mocktown", "mocktown.localhost"]`. `.mocktown` is the one worth typing, and it only
-    resolves because portless writes `/etc/hosts` — which is exactly the step that fails on a
-    locked-down machine, in a devcontainer, or when someone declines the prompt. `.localhost`
-    resolves to loopback with no hosts entry at all (RFC 6761), so the second spelling is the
-    same proxy reachable when the first cannot be arranged. portless takes a repeated `--tld`
-    and serves them all, so the fallback costs one flag rather than a second proxy. The head
-    of the list is the one URLs are built from, because `.env.mocktown` holds one value per
-    service; the rest are accepted as `Host`, aliased, and kept out of `NO_PROXY`.
+  - **`portless.tlds` is a list, not a name.** The head of the list is the one URLs are built
+    from, because `.env.mocktown` holds one value per service; the rest are accepted as
+    `Host`, aliased, and kept out of `NO_PROXY`. portless takes a repeated `--tld` and serves
+    them all, so a fallback costs one flag rather than a second proxy.
+  - **The default is `["mocktown.localhost"]`, and a bare `.mocktown` is opt-in.** It was
+    briefly the default, and it earned its way back out. `.mocktown.localhost` resolves to
+    loopback with no hosts entry at all (RFC 6761) and, being under `localhost`, is a
+    potentially trustworthy origin over plain `http`, so it holds a session cookie. A bare
+    `.mocktown` is shorter and nothing else: it resolves only because portless writes
+    `/etc/hosts` — the step that fails on a locked-down machine, in a devcontainer, or when
+    someone declines the prompt — it is a TLD nobody has reserved, and every dev server with
+    a host allowlist has to be told about it separately, because `.localhost` is the spelling
+    they already permit. Each of those is a way a default can fail on a machine that never
+    asked for it, against a benefit that is purely how the name reads. So it stays supported
+    and configurable, first in the list for a project that wants it, and not what anyone gets
+    by accident.
   - **Which TLD is usable is asked, not assumed.** Being served is not the same as being
     reachable: `.mocktown` is in the proxy's routes and still fails to resolve until portless
     has written `/etc/hosts`. So the probe asks every candidate — configured first, then any
     the running proxy turned out to be serving that the config never mentioned — and the list
-    that survives is the list that answered, most preferred first. `.env.mocktown` therefore
-    carries `.mocktown` on a machine where the hosts entry exists and `.mocktown.localhost`
-    on one where it does not, with nothing for anyone to edit. The polling that covers the
+    that survives is the list that answered, most preferred first. A project that
+    prefers `.mocktown` therefore gets it in `.env.mocktown` on a machine where the hosts
+    entry exists and `.mocktown.localhost` on one where it does not, with nothing for anyone
+    to edit. The polling that covers the
     proxy's reload lag runs only until *something* answers; after that a silent TLD is silent
     for a reason that does not heal by waiting, so the rest are settled in one pass. The two
     reasons it can be silent have different fixes and are reported apart: a TLD the proxy is
@@ -155,8 +163,9 @@ Two further consequences, both deliberate:
     `portless hosts sync`. Unusable TLDs stay in the alias table and in `NO_PROXY` even though
     no URL is built from them — answering a `Host` that does arrive costs nothing, and one
     that starts resolving mid-session because someone ran `hosts sync` should not 501.
-  - **The daemon's own GUI gets a name too, and takes it from nobody.** `ui.mocktown` — or
-    `ui.mocktown.localhost` when the preferred TLD is unreachable. `ui` is a label anyone
+  - **The daemon's own GUI gets a name too, and takes it from nobody.**
+    `ui.mocktown.localhost`, or `ui.<whichever TLD the project put first>` when that one
+    answers. `ui` is a label anyone
     might want and the proxy is one process for the whole machine, but `portless alias` takes
     a name and never a TLD: the proxy applies every TLD it is serving, so mocktown cannot
     claim `ui.mocktown` without also creating `ui.localhost` on a proxy that serves both, and

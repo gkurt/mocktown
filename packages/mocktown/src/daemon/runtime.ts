@@ -1130,7 +1130,7 @@ export class ProjectRuntime {
 
   private portlessSettings(): PortlessSettings {
     const config = this.project.file?.portless;
-    return { tlds: config?.tlds ?? ['mocktown', 'mocktown.localhost'], port: config?.port ?? 443, tls: config?.tls ?? true };
+    return { tlds: config?.tlds ?? ['mocktown.localhost'], port: config?.port ?? 443, tls: config?.tls ?? true };
   }
 
   /** The last proven status, never a guess: an unsynced project says so rather than reading as broken. */

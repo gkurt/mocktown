@@ -290,13 +290,23 @@ daemon restart, and `.env.mocktown` uses it. Mocktown proves the whole path work
 registers a throwaway name and fetches it back through the proxy — before it claims a name,
 and reports the reason if it cannot. `mocktown env portless get` shows the verdict.
 
-`portless.tlds` is an ordered list, `["mocktown", "mocktown.localhost"]` by default. URLs are
-built from the first one that *works*, not the first one configured: `.mocktown` resolves only
-because portless writes `/etc/hosts`, and `.localhost` resolves to loopback whether or not that
-succeeded. Each is probed through the proxy, so `.env.mocktown` picks up the fallback by itself
-on a machine where the preferred name cannot be reached. `mocktown env portless get` lists both
-what answered and what did not, with the fix for each — a TLD the proxy is not serving needs the
-proxy restarted, one it serves that does not resolve needs `portless hosts sync`.
+`portless.tlds` is an ordered list, `["mocktown.localhost"]` by default. URLs are built from the
+first one that *works*, not the first one configured: each is probed through the proxy, so
+`.env.mocktown` picks up a fallback by itself on a machine where the preferred name cannot be
+reached. `mocktown env portless get` lists both what answered and what did not, with the fix for
+each — a TLD the proxy is not serving needs the proxy restarted, one it serves that does not
+resolve needs `portless hosts sync`.
+
+A bare `.mocktown` is supported, just not the default:
+
+```json
+{ "portless": { "enabled": true, "tlds": ["mocktown", "mocktown.localhost"] } }
+```
+
+It reads better and it is the same proxy, but it resolves only because portless writes
+`/etc/hosts`, and it is under no reserved TLD — so keep the `.localhost` spelling behind it, and
+expect your dev server to need it allowlisted (Vite, for one, permits `.localhost` and nothing
+else by default).
 
 One override: while the proxy has no TLS, a `.localhost` spelling leads even if you preferred
 another. Browsers only keep a `Secure` cookie on a trustworthy origin, and over plain http
@@ -304,7 +314,8 @@ that means `localhost` and its subdomains — so a session on `http://…mocktow
 silently and the app bounces back to its login page. Start the proxy with TLS to get your
 preference back.
 
-The daemon's GUI is claimed the same way, as `ui.mocktown` (or `ui.mocktown.localhost`).
+The daemon's GUI is claimed the same way, as `ui.mocktown.localhost` (or `ui.mocktown`, under a
+project that prefers it).
 `portless alias` takes a name and not a TLD, so the proxy serves that name under every TLD it
 has — including any you did not configure. What mocktown will not do is take the name from
 something else: a `ui.*` route already pointing at another port is left alone and reported.

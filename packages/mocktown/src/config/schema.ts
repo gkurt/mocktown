@@ -174,21 +174,24 @@ export const ProjectFile = z.object({
        * — `.env.mocktown` and every printed address take a single value — and all of them
        * are served, accepted as a `Host`, and excluded from the proxy.
        *
-       * The default pairs a short name with a `.localhost` spelling of it. `.mocktown` is
-       * not a reserved TLD, so it needs an `/etc/hosts` entry portless writes and could in
-       * principle be delegated one day — that is how Google's purchase of `.dev` broke
-       * local setups everywhere. `.mocktown.localhost` resolves to loopback with no hosts
-       * entry at all (RFC 6761), so it keeps working when the first cannot.
+       * The default is `.mocktown.localhost` alone: it resolves to loopback with no
+       * `/etc/hosts` entry at all (RFC 6761), and being under `localhost` it can hold a
+       * `Secure` cookie over plain http. A bare `.mocktown` is supported and reads better,
+       * but it earns nothing by default and costs a hosts entry portless has to write —
+       * the step that fails on a locked-down machine, in a devcontainer, or when someone
+       * declines the prompt — on a TLD nobody has reserved, which is how Google's purchase
+       * of `.dev` broke local setups everywhere. Put it first to use it; the `.localhost`
+       * spelling belongs after it as the fallback.
        */
       tlds: z
         .array(z.string().min(1))
         .min(1)
-        .default(['mocktown', 'mocktown.localhost'])
+        .default(['mocktown.localhost'])
         .describe('Preferred TLDs, most preferred first. Each is probed; URLs use the first that answers'),
       port: z.number().int().default(443).describe('Preferred proxy port; the running proxy overrides it'),
       tls: z.boolean().default(true).describe('Preferred scheme; whichever the running proxy answers on wins'),
     })
-    .default({ enabled: false, tlds: ['mocktown', 'mocktown.localhost'], port: 443, tls: true })
+    .default({ enabled: false, tlds: ['mocktown.localhost'], port: 443, tls: true })
     .describe(
       'Stable `<service>.<project>.<tld>` names via portless (05-redirection.md). Off by default: portless binds 443 with sudo, edits /etc/hosts and puts a CA in the system trust store',
     ),

@@ -45,6 +45,9 @@ beforeAll(async () => {
     JSON.stringify(
       {
         project: 'generated-test',
+        // Both spellings, and neither is the default: the point of the list is that a
+        // project picks it, so the aliasing has to follow the config and not a constant.
+        portless: { tlds: ['mocktown', 'mocktown.localhost'] },
         services: {
           [GOOD]: { provider: `generated:${GOOD}` },
           [BAD]: { provider: `generated:${BAD}` },
