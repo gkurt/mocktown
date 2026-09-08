@@ -184,7 +184,7 @@ export const ProjectFile = z.object({
         .array(z.string().min(1))
         .min(1)
         .default(['mocktown', 'mocktown.localhost'])
-        .describe('Preferred TLDs, most preferred first; the running proxy overrides them'),
+        .describe('Preferred TLDs, most preferred first. Each is probed; URLs use the first that answers'),
       port: z.number().int().default(443).describe('Preferred proxy port; the running proxy overrides it'),
       tls: z.boolean().default(true).describe('Preferred scheme; whichever the running proxy answers on wins'),
     })

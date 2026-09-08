@@ -308,10 +308,13 @@ test('a preferred TLD that does not resolve falls back to the one that does', as
 test('an unprivileged proxy is started for you; a privileged one is only ever reported', async () => {
   // The whole point of the split: no sudo, no prompt, so mocktown may as well do it. Port 80
   // or 443 is a root daemon on someone's machine and stays their call.
-  const privileged = await syncPortless(input({ settings: { ...settings(), port: 443 } }));
+  const privileged = await syncPortless(input({ settings: { ...settings(), tlds: ['mocktown'], port: 443 } }));
   expect(privileged.available).toBe(false);
   expect(privileged.reason).toContain('binding it needs root');
-  expect(privileged.reason).toContain('portless proxy start');
+  // With the TLDs in it. Printing a bare `portless proxy start` sent someone off to make a
+  // `.localhost` proxy, which mocktown then told them to restart — a two-step first run
+  // caused entirely by the message.
+  expect(privileged.reason).toContain('sudo portless proxy start -p 443 --no-tls --tld mocktown');
   expect(existsSync(join(stateDir, 'started.json'))).toBe(false);
 
   // Two TLDs, because that is the shipped default's shape: a preferred name and a fallback

@@ -299,17 +299,33 @@ async function listening(port: number): Promise<boolean> {
  * is reported with the command, never taken. The proxy is shared by every project on the
  * machine, so one that is already up is used as-is and one mocktown starts is left running.
  */
+/**
+ * The command that starts a proxy matching these settings, TLDs included.
+ *
+ * Shared by the two places that print one, because they were written apart and drifted: the
+ * cold-start message named no `--tld` at all, so someone following it verbatim got a
+ * `.localhost` proxy and was told on the next line to restart it. A command mocktown prints
+ * has to be the command mocktown wants run.
+ */
+function startCommand(tlds: string[], port: number, tls: boolean): string {
+  const sudo = port < PRIVILEGED_PORT_CEILING ? 'sudo ' : '';
+  const flag = port === (tls ? 443 : 80) ? '' : ` -p ${port}`;
+  return `${sudo}portless proxy start${flag}${tls ? '' : ' --no-tls'}${tlds.map((tld) => ` --tld ${tld}`).join('')}`;
+}
+
 async function ensureProxy(binary: string, settings: PortlessSettings): Promise<{ ok: boolean; reason: string }> {
   const port = discoverPort(settings) ?? settings.port;
   if (await listening(port)) return { ok: true, reason: `a portless proxy is already listening on :${port}` };
 
   if (port < PRIVILEGED_PORT_CEILING) {
-    const start = `portless proxy start${settings.tls ? '' : ' --no-tls'}`;
     return {
       ok: false,
       reason:
-        `nothing is listening on :${port}, and binding it needs root — run \`${start}\` yourself, or set ` +
-        `\`portless.port\` above ${PRIVILEGED_PORT_CEILING} in mocktown.json and mocktown will start the proxy without sudo`,
+        `nothing is listening on :${port}, and binding it needs root — run \`${startCommand(settings.tlds, port, settings.tls)}\` ` +
+        `yourself, or set \`portless.port\` above ${PRIVILEGED_PORT_CEILING} in mocktown.json and mocktown will start the proxy ` +
+        'for you. An unprivileged proxy cannot write `/etc/hosts` either, so names fall back to the `.localhost` spelling, which ' +
+        "needs no entry; the very first start still asks for sudo once to put portless's CA in the system trust store, unless " +
+        '`portless.tls` is false',
     };
   }
 
@@ -458,10 +474,7 @@ function whyUnusable(unusable: string[], served: string[], desired: string[], re
   // Built from what the proxy is *proven* to be — its port and its scheme — not from what
   // the project configured. A command that quietly moved a running proxy from :80 to :443,
   // or turned TLS back on, would be a worse outcome than the missing TLD it set out to fix.
-  const sudo = resolved.port < PRIVILEGED_PORT_CEILING ? 'sudo ' : '';
-  const scheme = resolved.tls ? '' : ' --no-tls';
-  const port = resolved.port === (resolved.tls ? 443 : 80) ? '' : ` -p ${resolved.port}`;
-  const restart = `portless proxy stop && ${sudo}portless proxy start${port}${scheme}${keep.map((tld) => ` --tld ${tld}`).join('')}`;
+  const restart = `portless proxy stop && ${startCommand(keep, resolved.port, resolved.tls)}`;
   return [
     `; nothing is handed out under .${unusable.join(', .')}`,
     missing.length
