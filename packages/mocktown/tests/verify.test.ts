@@ -256,3 +256,79 @@ test('a failure names the route, not only the one request that showed it', async
     server.stop(true);
   }
 });
+
+/**
+ * The escape hatch for a corpus that recorded an outage.
+ *
+ * A real upstream that was erroring when it was captured recorded its outage, and replay
+ * then holds the mock to reproducing it forever. The honest answer is not to make the mock
+ * serve a 500 by default, and it is not to leave a permanent red either — it is to write
+ * down that the recording is not evidence, with the reason, where a reviewer can see it.
+ */
+test('a recording declared not-evidence is held out of the replay, with its reason', async () => {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({ ok: true }) });
+  const target = { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' };
+  const outage = recording({
+    id: 'rec_outage',
+    path: '/v1/stats',
+    pathTemplate: '/v1/stats',
+    statusCode: 500,
+    responseBody: '{"Error":"upstream unavailable"}',
+  });
+
+  try {
+    // Without the rule this is a status-class failure the mock can never pass while it
+    // behaves correctly.
+    const before = await verifyRecordings([outage], target, new Scrubber());
+    expect(before.failed).toBe(1);
+    expect(before.failures[0]!.reason).toContain('status class differs');
+
+    const why = 'staging was erroring when this was captured';
+    const after = await verifyRecordings(
+      [outage],
+      { ...target, notEvidence: [{ service: 'api.example.test', path: '/v1/stats', status: 500, why }] },
+      new Scrubber(),
+    );
+
+    // Held out, not excused: an error body is no more evidence than the status it came
+    // with, so there is nothing left worth comparing.
+    expect(after.failed).toBe(0);
+    expect(after.passed).toBe(0);
+    expect(after.ignored).toEqual([{ recordingId: 'rec_outage', method: 'GET', pathTemplate: '/v1/stats', status: 500, why }]);
+
+    // `passed + failed` is what a caller must gate on. An all-exempt replay judged nothing,
+    // and a run that judged nothing must never read as a run that passed.
+    expect(after.passed + after.failed).toBe(0);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test('a not-evidence rule claims only what it names', async () => {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({ ok: true }) });
+  const target = { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' };
+  const rules = [{ service: 'api.example.test', path: '/v1/stats', method: 'GET', status: 500, why: 'captured during an outage' }];
+
+  try {
+    const result = await verifyRecordings(
+      [
+        recording({ id: 'a', path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 500 }),
+        // Same route, different status: a healthy recording of it is still evidence.
+        recording({ id: 'b', path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 200 }),
+        // Same route and status, different method.
+        recording({ id: 'c', method: 'POST', path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 500 }),
+        // A different route that also happened to 500 is a separate decision to make.
+        recording({ id: 'd', path: '/v1/other', pathTemplate: '/v1/other', statusCode: 500 }),
+      ],
+      { ...target, notEvidence: rules },
+      new Scrubber(),
+    );
+
+    expect(result.ignored.map((entry) => entry.recordingId)).toEqual(['a']);
+    expect(result.failed).toBe(2);
+    expect(result.failures.map((f) => f.recordingId).sort()).toEqual(['c', 'd']);
+    expect(result.passed).toBe(1);
+  } finally {
+    server.stop(true);
+  }
+});

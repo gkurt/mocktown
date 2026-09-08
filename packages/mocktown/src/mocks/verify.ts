@@ -31,6 +31,23 @@ export interface VerifyFailure {
   diff: string[];
 }
 
+/** A recorded exchange the project declared is not evidence, and the reason it gave. */
+export interface IgnoredExchange {
+  recordingId: string;
+  method: string;
+  pathTemplate: string;
+  status: number;
+  why: string;
+}
+
+export interface NotEvidenceRule {
+  service: string;
+  path: string;
+  method?: string | undefined;
+  status?: number | undefined;
+  why: string;
+}
+
 export interface VerifyResult {
   service: string;
   total: number;
@@ -40,7 +57,23 @@ export interface VerifyResult {
   skipped: number;
   /** Exchanges checked against the checked-in schema rather than against one recorded body. */
   schemaChecked: number;
+  /**
+   * Exchanges left out by a `verify.notEvidence` rule. Reported rather than deducted in
+   * silence: an exemption nobody sees is worse than the failure it hides.
+   */
+  ignored: IgnoredExchange[];
   failures: VerifyFailure[];
+}
+
+/** The first rule that claims this recording, or none. */
+function notEvidenceFor(recording: Recording, service: string, rules: NotEvidenceRule[] | undefined): NotEvidenceRule | undefined {
+  return rules?.find(
+    (rule) =>
+      rule.service === service &&
+      rule.path === recording.pathTemplate &&
+      (rule.method === undefined || rule.method.toUpperCase() === recording.method.toUpperCase()) &&
+      (rule.status === undefined || rule.status === recording.statusCode),
+  );
 }
 
 /** `{"a":{"b":[1]}}` -> `a.b[]:number` — the shape, with values deliberately discarded. */
@@ -96,10 +129,13 @@ export interface ReplayTarget {
    * shapes with the one body the corpus happened to record.
    */
   schemas?: SchemaMap | null;
+  /** Recordings this project has declared replay must not hold the mock to. */
+  notEvidence?: NotEvidenceRule[] | undefined;
 }
 
 export async function verifyRecordings(recordings: Recording[], target: ReplayTarget, scrubber: Scrubber): Promise<VerifyResult> {
   const failures: VerifyFailure[] = [];
+  const ignored: IgnoredExchange[] = [];
   let passed = 0;
   let skipped = 0;
   let schemaChecked = 0;
@@ -113,6 +149,21 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
     // Six of them in one corpus was a minute of dead time and a verify that timed out.
     if (recording.kind !== 'http') {
       skipped++;
+      continue;
+    }
+
+    // Checked before the request is built, not after the comparison: if the recording is
+    // not evidence then neither is the error body hanging off it, so there is nothing here
+    // worth replaying and no partial judgement worth forming.
+    const exempt = notEvidenceFor(recording, target.service, target.notEvidence);
+    if (exempt) {
+      ignored.push({
+        recordingId: recording.id,
+        method: recording.method,
+        pathTemplate: recording.pathTemplate,
+        status: recording.statusCode,
+        why: exempt.why,
+      });
       continue;
     }
 
@@ -230,6 +281,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
     failed: failures.length,
     skipped,
     schemaChecked,
+    ignored,
     failures,
   };
 }

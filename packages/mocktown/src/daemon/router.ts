@@ -356,14 +356,21 @@ export const router = os.router({
         inflateRecording(runtime.name, row),
       );
 
-      const result = await verifyRecordings(recordings, { baseUrl, service: issue.service }, runtime.currentScrubber);
+      const result = await verifyRecordings(
+        recordings,
+        { baseUrl, service: issue.service, notEvidence: runtime.resolved.file?.verify?.notEvidence },
+        runtime.currentScrubber,
+      );
       // An empty replay is not a passing replay. Closing an issue on zero evidence is worse
       // than leaving it open, because the queue then reads as work that was actually done.
-      const passed = result.total > 0 && result.failed === 0;
+      // Counted from what was actually judged, so a set that was entirely sockets or
+      // entirely exempted cannot close an issue by having nothing to say about it.
+      const judged = result.passed + result.failed;
+      const passed = judged > 0 && result.failed === 0;
       const reason =
-        result.total === 0
-          ? `verification found no recording to replay for ${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim()
-          : `verification failed: ${result.failed}/${result.total} replayed requests did not match`;
+        judged === 0
+          ? `verification found nothing to replay for ${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim()
+          : `verification failed: ${result.failed}/${judged} replayed requests did not match`;
       runtime.issues.setStatus(input.id, passed ? 'resolved' : 'reopened', passed ? input.note : reason);
 
       return { project: runtime.name, issue: toIssue(runtime.issues.get(input.id)!), verified: passed, verification: result };
@@ -412,7 +419,11 @@ export const router = os.router({
           });
         }
       }
-      const result = await verifyRecordings(recordings, { baseUrl, service: input.service, schemas }, runtime.currentScrubber);
+      const result = await verifyRecordings(
+        recordings,
+        { baseUrl, service: input.service, schemas, notEvidence: runtime.resolved.file?.verify?.notEvidence },
+        runtime.currentScrubber,
+      );
 
       // A failing replay is evidence, so it becomes work rather than console output.
       for (const failure of result.failures) {

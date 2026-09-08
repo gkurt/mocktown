@@ -154,6 +154,18 @@ export const VerifyResult = z.object({
   failed: z.number().int(),
   skipped: z.number().int().describe('Recordings replay cannot exercise — a socket session is not a request and a response'),
   schemaChecked: z.number().int().describe('Exchanges checked against the checked-in Zod schema rather than a single recorded body'),
+  ignored: z
+    .array(
+      z.object({
+        recordingId: z.string(),
+        method: z.string(),
+        pathTemplate: z.string(),
+        status: z.number().int(),
+        why: z.string(),
+      }),
+    )
+    .default([])
+    .describe('Exchanges a `verify.notEvidence` rule left out, each with the reason the project gave'),
   failures: z.array(
     z.object({
       recordingId: z.string(),

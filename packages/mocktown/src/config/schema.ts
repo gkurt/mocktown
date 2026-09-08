@@ -142,6 +142,38 @@ export const ProjectFile = z.object({
     .default({ agentsFile: false })
     .describe("What `env write` is allowed to touch. `.env.mocktown` is mocktown's own and gitignored; AGENTS.md is committed and yours"),
   /**
+   * Recorded exchanges the project has declared are not evidence.
+   *
+   * The corpus is a transcript, not a specification. A real upstream that was erroring when
+   * it was captured recorded its outage, and replay then holds the mock to reproducing it —
+   * so a mock that returns healthy data fails forever, and the honest fix is not to make it
+   * serve a 500 by default. This is where that judgement gets written down instead of
+   * living in a person's head or an issue's resolution note.
+   *
+   * The matched exchange leaves the replay entirely rather than having its status excused:
+   * if the recorded 500 is not evidence, neither is the error body attached to it. Every
+   * entry needs a `why` — an escape hatch nobody has to justify is how a suite rots — and
+   * mocktown reports what it skipped on every run, because a silent exemption is worse than
+   * the failure it hides.
+   */
+  verify: z
+    .object({
+      notEvidence: z
+        .array(
+          z.object({
+            service: z.string().describe('The service the recording belongs to'),
+            path: z.string().describe('Path template, e.g. /v1/orgs/{orgId}/stats/telemetry_graph'),
+            method: z.string().optional().describe('Restrict to one method; omit for any'),
+            status: z.number().int().optional().describe('Restrict to one recorded status; omit for any'),
+            why: z.string().min(1).describe('Why this recording is not evidence. Required — an unexplained exemption is how a suite rots'),
+          }),
+        )
+        .default([])
+        .describe('Recorded exchanges replay must not hold the mock to'),
+    })
+    .default({ notEvidence: [] })
+    .describe('What replay-verify does with recordings the project has judged unusable as evidence'),
+  /**
    * portless stable names (05-redirection.md). Off by default like drift, for a different
    * reason: portless binds 443 with sudo, edits `/etc/hosts` and puts a CA in the system
    * trust store. Opting into that is a person's decision, not a config default's.

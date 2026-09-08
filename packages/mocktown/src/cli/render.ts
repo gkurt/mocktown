@@ -156,8 +156,16 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
   ],
 
   'mocks.verify': (r) => [
-    `${r.result.passed}/${r.result.total - (r.result.skipped ?? 0)} replayed exchanges matched`,
+    `${r.result.passed}/${r.result.passed + r.result.failed} replayed exchanges matched`,
     ...(r.result.skipped ? [`${r.result.skipped} socket recordings skipped: replay compares one request to one response`] : []),
+    // Printed every run, never folded into the total: an exemption the reader cannot see is
+    // worse than the failure it replaced.
+    ...(r.result.ignored?.length
+      ? [
+          `${r.result.ignored.length} exchange${r.result.ignored.length === 1 ? '' : 's'} held out by verify.notEvidence:`,
+          ...[...new Set(r.result.ignored.map((i: any) => `  ${i.method} ${i.pathTemplate} (recorded ${i.status}) — ${i.why}`))],
+        ]
+      : []),
     // Which oracle ran is the difference between "matches a schema you reviewed" and
     // "matches whatever one recording happened to contain", so it has to be on screen.
     r.result.schemaChecked
