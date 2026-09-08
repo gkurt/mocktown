@@ -397,18 +397,18 @@ export const router = os.router({
       const judged = result.passed + result.failed;
       const passed = judged > 0 && result.failed === 0;
       const route = `${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim();
-      // A near-miss is *defined* by the corpus not containing the route the app asked for,
-      // so replay can never confirm a fix for one and "nothing to replay" is the structure
-      // of the issue rather than a mistake the caller made. Saying only that the replay was
-      // empty sends someone hunting for a recording that cannot exist.
+      // An empty replay means the corpus holds no recording of this route — which is often
+      // the whole reason the issue exists, the app having called something the recording
+      // session never reached. Replay cannot confirm a fix for a route it has no evidence
+      // of, and saying only that the replay was empty sends someone hunting for a recording
+      // that does not exist. Keyed on what the replay found rather than on the issue's type:
+      // the type says what went wrong, not whether there is anything to replay.
       const reason =
         judged > 0
           ? `verification failed: ${result.failed}/${judged} replayed requests did not match`
-          : issue.type === 'near-miss'
-            ? `nothing to replay for ${route}: a near-miss means the corpus never recorded this route, so replay cannot confirm the fix. ` +
-              `Prove it with \`mocktown mocks verify --service ${issue.service}\` — which checks the routes that *are* recorded still pass — ` +
-              'then close this with `--skip-verify` and a note saying what the new route was written against.'
-            : `verification found nothing to replay for ${route}`;
+          : `nothing to replay for ${route}: the corpus holds no recording of it, so replay cannot confirm the fix. ` +
+            `Prove it with \`mocktown mocks verify --service ${issue.service}\` — which checks the routes that *are* recorded still pass — ` +
+            'then close this with `--skip-verify` and a note saying what the fix was written against.';
       runtime.issues.setStatus(input.id, passed ? 'resolved' : 'reopened', passed ? input.note : reason);
 
       return { project: runtime.name, issue: toIssue(runtime.issues.get(input.id)!), verified: passed, verification: result };

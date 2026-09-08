@@ -4,7 +4,7 @@
  *
  * The template guess is the corpus's grouping key: every `/orders/8812` and
  * `/orders/9f3a` collapses to `/orders/{orderId}`, which is what an agent generating a
- * mock reasons about and what the issue engine compares against to spot a near-miss.
+ * mock reasons about, and what the issue engine compares against when nothing matched.
  */
 
 /** Headers that change every request and would only add noise to a diff. */

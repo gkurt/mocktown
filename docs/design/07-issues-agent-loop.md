@@ -11,17 +11,26 @@ can resolve without access to this design history.
 | Type | Trigger | Typical resolution |
 |---|---|---|
 | `unknown-service` | Request to a hostname with no registry entry (sealed mode wall-hit) | Register service → record or generate a provider; or allowlist passthrough |
-| `unmatched-request` | Known service, but no route/stub matches (new path, verb) | Agent extends the generated mock |
-| `near-miss` | Route matched structurally but a matcher failed (extra query param, changed header, body shape drift) | Agent widens matcher or updates response synthesis |
+| `unmatched-request` | Known service, but no route matches (new path, verb, or an unmocked socket channel) | Agent extends the generated mock, having read the ranked `nearest` candidates to decide between widening one and adding a route |
+| `handler-error` | A route matched exactly and its handler threw | Agent fixes the handler named under `matched` |
 | `state-violation` | Replay/test found stateful incoherence (created entity not readable) | Agent adds state backing to the mock |
 | `redirect-gap` | Seal run: SDK not pointed at mocks | Env var added / constructor option / code patch ([05-redirection.md](05-redirection.md)) |
 | `pinned-client` | TLS interception failed post-MITM | Documented out of scope; surfaced, not auto-resolved |
 | `provider-drift` | Recorded real API (re-record run) diverges from current provider behavior | Agent patches provider; humans review the diff |
 
-Each issue carries: the full scrubbed request, the nearest-matching existing behavior
-and *why* it didn't match (WireMock-style near-miss diagnosis), the suggested
+Each issue carries: the full scrubbed request, the nearest-matching existing behaviors
+and *why* each one didn't match (WireMock-style near-miss diagnosis), the suggested
 resolution type, and links to the relevant corpus rows. **An issue must be resolvable
 by an agent that has read nothing but the issue and the files it links.**
+
+**Diagnosis ranks, it does not rule.** There was a `near-miss` type for a while, assigned
+when the closest route's similarity score cleared a threshold, and its resolution was
+"widen the existing route rather than adding a second one". A score over path strings
+cannot tell one endpoint from two: on the corpus that retired it, seven issues for routes
+like `clustering/search` were all told to widen `clustering/graph`, a different endpoint
+with a different response. The candidates are now reported ranked, with their scores and
+the reasons each lost, and the agent decides. A threshold that is wrong is worse than no
+threshold, because it reads as a finding rather than a guess.
 
 ## Agent surfaces
 

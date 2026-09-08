@@ -161,7 +161,7 @@ export const issues = sqliteTable(
       enum: [
         'unknown-service',
         'unmatched-request',
-        'near-miss',
+        'handler-error',
         'state-violation',
         'redirect-gap',
         'pinned-client',
@@ -181,7 +181,7 @@ export const issues = sqliteTable(
     sessionId: text('session_id'),
     /** The full scrubbed request, so an issue is self-contained. */
     request: text('request', { mode: 'json' }).$type<unknown>(),
-    /** Nearest existing behavior and *why* it didn't match (WireMock-style near-miss). */
+    /** For an unmatched request, the nearest declared routes and why each one lost. */
     diagnosis: text('diagnosis', { mode: 'json' }).$type<unknown>(),
     suggestedResolution: text('suggested_resolution'),
     /** Corpus rows and files an agent should read; an issue links its own evidence. */

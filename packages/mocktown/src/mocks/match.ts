@@ -1,10 +1,23 @@
 /**
- * Route matching and near-miss diagnosis.
+ * Route matching, and why nothing matched.
  *
  * The diagnosis half is what makes 07-issues-agent-loop.md's promise achievable — "the
  * nearest-matching existing behavior and *why* it didn't match". An issue saying "no
  * route matched" tells an agent nothing; an issue saying "`GET /v1/orders/{orderId}`
  * matched the path but this request was a PATCH" tells it exactly what to widen.
+ *
+ * **It ranks; it does not rule.** This used to end in a verdict: score the closest route,
+ * and above a threshold call the issue a `near-miss` whose resolution was "widen the
+ * existing route rather than adding a second one". The score measures how similar two
+ * *strings* are, and no threshold on that can tell one endpoint from two. On the corpus
+ * that prompted this, `clustering/search` scored 12 against `clustering/graph` and every
+ * one of seven such issues was told to widen a route that had nothing to do with it —
+ * `search` and `graph` are different endpoints returning different shapes.
+ *
+ * So the candidates come back ranked, with their scores and the reasons each one lost,
+ * and the caller decides. A reader who can see that the best of them differs by a whole
+ * path segment needs no verdict from us; one who cannot is not helped by a confident
+ * wrong one.
  */
 import type { MockRoute, MockSocket } from '#src/mocks/types.ts';
 
@@ -39,26 +52,33 @@ export function matchRoute(routes: MockRoute[], method: string, path: string): R
   return null;
 }
 
-export interface NearMiss {
-  /** `unmatched-request` when nothing is close, `near-miss` when one route almost fit. */
-  kind: 'unmatched-request' | 'near-miss';
-  closest: { method: string; path: string; describe?: string } | null;
-  /** Human- and agent-readable reasons, most specific first. */
+/** One declared route, and how close it came. */
+export interface Candidate {
+  method: string;
+  path: string;
+  describe?: string | undefined;
+  /**
+   * Similarity, not confidence: +3 for the verb, +2 for the segment count, then +2 per
+   * literal segment that matched and +1 per `{param}`. Comparable between candidates for
+   * the same request and meaningless between requests, which is why nothing thresholds it.
+   */
+  score: number;
+  /** Why this one lost, most specific first. */
   reasons: string[];
+}
+
+export interface Diagnosis {
+  /** Best first. Empty when the mock declares no routes at all. */
+  nearest: Candidate[];
   suggestedResolution: string;
 }
 
-/**
- * Why nothing matched. Deliberately conservative about calling something a near miss:
- * a wrong verdict here sends an agent to widen a matcher that was never involved.
- */
-export function diagnose(routes: MockRoute[], method: string, path: string): NearMiss {
+/** Why nothing matched: every declared route, scored and ranked, with no verdict attached. */
+export function diagnose(routes: MockRoute[], method: string, path: string, limit = 3): Diagnosis {
   const wanted = segmentsOf(path);
   const upper = method.toUpperCase();
 
-  let best: { route: MockRoute; score: number; reasons: string[] } | null = null;
-
-  for (const route of routes) {
+  const scored: Candidate[] = routes.map((route) => {
     const template = segmentsOf(route.path);
     const reasons: string[] = [];
     let score = 0;
@@ -70,42 +90,29 @@ export function diagnose(routes: MockRoute[], method: string, path: string): Nea
       reasons.push(`path depth differs: route has ${template.length} segments, request had ${wanted.length}`);
     } else {
       score += 2;
-      const mismatched: string[] = [];
       for (let i = 0; i < template.length; i++) {
         const t = template[i]!;
         const w = wanted[i]!;
-        if (isParam(t)) {
-          score += 1;
-          continue;
-        }
-        if (t === w) {
-          score += 2;
-          continue;
-        }
-        mismatched.push(`segment ${i + 1}: route expects "${t}", request had "${w}"`);
+        if (isParam(t)) score += 1;
+        else if (t === w) score += 2;
+        else reasons.push(`segment ${i + 1}: route expects "${t}", request had "${w}"`);
       }
-      reasons.push(...mismatched);
     }
 
-    if (!best || score > best.score) best = { route, score, reasons };
-  }
+    return { method: route.method.toUpperCase(), path: route.path, describe: route.describe, score, reasons };
+  });
 
-  if (!best || best.score < 4) {
-    return {
-      kind: 'unmatched-request',
-      closest: best ? { method: best.route.method, path: best.route.path, describe: best.route.describe } : null,
-      reasons: best ? best.reasons : ['the mock declares no routes for this service'],
-      suggestedResolution: 'Add a route for this method and path template to the generated mock, using the corpus examples linked below.',
-    };
-  }
+  const nearest = scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path)).slice(0, limit);
 
-  // A route that shares the verb and the path shape failed on detail — that is drift in
-  // an existing route, and widening it beats duplicating it (07's house rules).
   return {
-    kind: 'near-miss',
-    closest: { method: best.route.method, path: best.route.path, describe: best.route.describe },
-    reasons: best.reasons.length ? best.reasons : ['the route matched structurally but the handler rejected the request'],
-    suggestedResolution: `Widen the existing \`${best.route.method.toUpperCase()} ${best.route.path}\` route rather than adding a second one.`,
+    nearest,
+    // One instruction, whatever the scores. Whether this is a route to add or an existing
+    // one to widen is a question about the API's shape, which `nearest` gives the reader
+    // what they need to answer and which no similarity score can answer for them.
+    suggestedResolution: nearest.length
+      ? 'Serve this method and path template from the generated mock — either by widening one of the `nearest` routes in the ' +
+        'diagnosis, if it turns out to be the same endpoint, or by adding a route of its own. The links show the corpus examples.'
+      : 'The mock declares no routes at all. Add one for this method and path template; the links show the corpus examples.',
   };
 }
 

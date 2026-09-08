@@ -846,7 +846,7 @@ export class ProjectRuntime {
     path: string;
     request: unknown;
     diagnosis: unknown;
-    kind: 'unmatched-request' | 'near-miss' | 'unknown-service';
+    kind: 'unmatched-request' | 'handler-error' | 'unknown-service';
     suggestedResolution: string;
     links?: string[];
   }): void {

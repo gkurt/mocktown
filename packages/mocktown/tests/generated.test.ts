@@ -69,7 +69,10 @@ beforeAll(async () => {
     `  seed: ({ state }) => {
     state.set("invoices", "inv_1", { id: "inv_1" });
   },
-  routes: [{ method: "GET", path: "/v1/invoices", describe: "List", handler: () => ({ status: 200, body: { ok: true } }) }],`,
+  routes: [
+    { method: "GET", path: "/v1/invoices", describe: "List", handler: () => ({ status: 200, body: { ok: true } }) },
+    { method: "GET", path: "/v1/boom", describe: "Throws", handler: () => { throw new Error("kaboom"); } },
+  ],`,
   );
 
   writeMock(
@@ -372,4 +375,24 @@ test('a mock that declares one of the built-in names wins', async () => {
   expect(merged.latencyMs).toBe(own.latencyMs);
   expect(merged.latencyMs!.default).toBe(25);
   expect(merged.errorRate).toBeDefined();
+});
+
+test('a handler that throws is its own kind of issue, not an unmatched request', async () => {
+  // This was filed as `near-miss` for a long time, which said the opposite of what
+  // happened: the route matched exactly, ran, and crashed. Nothing was near-missed, and
+  // "add the missing route" is the wrong instruction for a route that already exists.
+  const baseUrl = runtime.allBaseUrls().get(GOOD)!;
+
+  const response = await fetch(`${baseUrl}/v1/boom`, { headers: { host: GOOD } });
+  expect(response.status).toBe(500);
+
+  const issue = runtime.issues.list({ service: GOOD }).find((row) => row.pathTemplate === '/v1/boom' || row.path === '/v1/boom');
+  expect(issue).toBeDefined();
+  expect(issue!.type).toBe('handler-error');
+
+  // It names the route that ran, under a key that says so — `nearest` would be a lie here.
+  const diagnosis = issue!.diagnosis as { matched: { method: string; path: string }; reasons: string[] };
+  expect(diagnosis.matched.path).toBe('/v1/boom');
+  expect(diagnosis.reasons[0]).toContain('handler threw: kaboom');
+  expect(issue!.suggestedResolution).toContain('handler');
 });

@@ -301,8 +301,8 @@ Issues also exist as JSON under \`.mocktown/issues/\` if you prefer files to com
 | Type | What to do |
 |---|---|
 | \`unknown-service\` | Decide what the host is: \`emulator:<name>\` if it is one of the fourteen emulated services (house rule 2 — check this first), \`record\` to capture it, \`generated:<host>\` to hand-write a mock, or \`passthrough\` to allow it out — explicitly, never silently. |
-| \`unmatched-request\` | Add the missing route to the generated mock, using the linked corpus rows. |
-| \`near-miss\` | **Widen the existing route** named in the diagnosis. Do not add a second route that differs only in detail. |
+| \`unmatched-request\` | Serve the method and path template from the generated mock, using the linked corpus rows. The diagnosis carries \`nearest\`: the closest declared routes with their scores and why each one lost. **Read them before you write.** If one is genuinely the same endpoint with too narrow a template, widen it; if it is a different endpoint that merely looks similar, add a route of its own. The score measures string similarity, not sameness — \`clustering/search\` scores high against \`clustering/graph\` and is a different endpoint. |
+| \`handler-error\` | A route matched and its handler threw. The diagnosis names the route under \`matched\` and carries the message. Fix the handler; do not add a route. |
 | \`state-violation\` | A replay found stateful incoherence — something created was not readable back. Move the entity into \`ctx.state\`. |
 | \`redirect-gap\` | An SDK is not pointed at its mock. Apply the EKB recipe: env var, constructor option, or code patch. |
 | \`pinned-client\` | Out of scope by design. Surface it; do not try to defeat the pinning. |

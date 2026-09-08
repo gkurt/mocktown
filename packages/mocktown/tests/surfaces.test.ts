@@ -427,10 +427,10 @@ describe('issues as files', () => {
   });
 
   test('a resolved issue that recurs reopens rather than filing anew', () => {
-    const issueId = runtime.issues.file({ type: 'near-miss', service: 'b.test', method: 'GET', pathTemplate: '/y' });
+    const issueId = runtime.issues.file({ type: 'unmatched-request', service: 'b.test', method: 'GET', pathTemplate: '/y' });
     runtime.issues.setStatus(issueId, 'resolved');
     // A fix that did not hold is the same piece of work, with history.
-    expect(runtime.issues.file({ type: 'near-miss', service: 'b.test', method: 'GET', pathTemplate: '/y' })).toBe(issueId);
+    expect(runtime.issues.file({ type: 'unmatched-request', service: 'b.test', method: 'GET', pathTemplate: '/y' })).toBe(issueId);
     expect(runtime.issues.get(issueId)!.status).toBe('reopened');
   });
 

@@ -23,7 +23,7 @@ import { id } from '#src/util/id.ts';
 export type IssueType =
   | 'unknown-service'
   | 'unmatched-request'
-  | 'near-miss'
+  | 'handler-error'
   | 'state-violation'
   | 'redirect-gap'
   | 'pinned-client'

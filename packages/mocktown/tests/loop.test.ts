@@ -296,7 +296,13 @@ describe('phase 2 — the loop closes on a real project', () => {
     const issues = runtime.issues.list({ status: 'open' });
     const unmatched = issues.find((i) => i.pathTemplate === '/v1/invoices' && i.method === 'GET');
     expect(unmatched).toBeDefined();
-    expect(unmatched!.type).toBe('near-miss');
+    expect(unmatched!.type).toBe('unmatched-request');
+    // Ranked candidates, not a verdict: the reader sees what the scorer saw and decides
+    // whether the best of them is the same endpoint or a different one.
+    const nearest = (unmatched!.diagnosis as { nearest: { path: string; score: number; reasons: string[] }[] }).nearest;
+    expect(nearest.length).toBeGreaterThan(0);
+    expect(nearest[0]!.score).toBeGreaterThan(0);
+    expect(nearest.map((c) => c.score)).toEqual([...nearest.map((c) => c.score)].sort((a, b) => b - a));
     // Self-contained: the issue names the closest route and links the files to read.
     expect(JSON.stringify(unmatched!.diagnosis)).toContain('/v1/invoices');
     expect(unmatched!.links.some((l) => l.includes('index.ts'))).toBe(true);

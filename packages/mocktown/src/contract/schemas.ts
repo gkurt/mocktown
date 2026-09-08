@@ -63,7 +63,7 @@ export const IssueType = z
   .enum([
     'unknown-service',
     'unmatched-request',
-    'near-miss',
+    'handler-error',
     'state-violation',
     'redirect-gap',
     'pinned-client',

@@ -164,7 +164,7 @@ describe('serving a WebSocket channel', () => {
     expect(body.declared).toEqual(['/v1/rooms/{roomId}']);
 
     const issue = runtime.issues.list({ service: SERVICE }).at(0);
-    expect(issue?.type).toBe('near-miss');
+    expect(issue?.type).toBe('unmatched-request');
     expect(issue?.suggestedResolution).toContain('sockets');
   });
 });

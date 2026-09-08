@@ -35,7 +35,7 @@ export interface MockHostDeps {
     path: string;
     request: unknown;
     diagnosis: unknown;
-    kind: 'unmatched-request' | 'near-miss' | 'unknown-service';
+    kind: 'unmatched-request' | 'handler-error' | 'unknown-service';
     suggestedResolution: string;
     /** Overrides the caller's per-service defaults, for an event whose subject is not a service. */
     links?: string[];
@@ -226,15 +226,14 @@ export class MockHost {
         method: request.method,
         path: url.pathname,
         request: describeRequest(request, url, rawBody),
-        diagnosis: { closest: near.closest, reasons: near.reasons, profile },
-        kind: near.kind,
+        diagnosis: { nearest: near.nearest, profile },
+        kind: 'unmatched-request',
         suggestedResolution: near.suggestedResolution,
       });
       return json(501, {
         error: 'mocktown_unmatched',
         message: `${request.method} ${url.pathname} matched no route in the ${service} mock.`,
-        closest: near.closest,
-        reasons: near.reasons,
+        nearest: near.nearest,
       });
     }
 
@@ -294,8 +293,10 @@ export class MockHost {
         method: request.method,
         path: url.pathname,
         request: describeRequest(request, url, rawBody),
-        diagnosis: { closest: { method: match.route.method, path: match.route.path }, reasons: [`handler threw: ${message}`], profile },
-        kind: 'near-miss',
+        // The route matched exactly and the code behind it crashed. Filed as an unmatched
+        // request for a long time, which said the opposite of what happened.
+        diagnosis: { matched: { method: match.route.method, path: match.route.path }, reasons: [`handler threw: ${message}`], profile },
+        kind: 'handler-error',
         suggestedResolution: `Fix the \`${match.route.method.toUpperCase()} ${match.route.path}\` handler in the ${service} mock; it threw on a request the route claimed.`,
       });
       return json(500, { error: 'mocktown_mock_threw', message });
@@ -325,7 +326,7 @@ export class MockHost {
           reason: `the ${service} mock declares no WebSocket channel matching ${url.pathname}`,
           declared: (module.sockets ?? []).map((socket) => socket.path),
         },
-        kind: (module.sockets ?? []).length === 0 ? 'unmatched-request' : 'near-miss',
+        kind: 'unmatched-request',
         suggestedResolution:
           `Add a \`sockets\` entry for \`${url.pathname}\` to the ${service} mock. The recorded frames for this channel are ` +
           `in the corpus: \`mocktown recordings list --service ${service}\` shows the socket rows, and each one carries ` +
@@ -413,8 +414,8 @@ export class MockHost {
         method: 'GET',
         path: ws.data.request.path,
         request: { path: ws.data.request.path, headers: ws.data.request.headers },
-        diagnosis: { closest: { method: 'WS', path: ws.data.socket.path }, reasons: [`socket handler threw: ${message}`] },
-        kind: 'near-miss',
+        diagnosis: { matched: { method: 'WS', path: ws.data.socket.path }, reasons: [`socket handler threw: ${message}`] },
+        kind: 'handler-error',
         suggestedResolution: `Fix the \`sockets\` handler for \`${ws.data.socket.path}\` in the ${ws.data.service} mock; it threw on a live connection.`,
       });
       ws.close(1011, "mocktown: the mock's socket handler threw");
