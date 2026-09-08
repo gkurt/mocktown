@@ -13,6 +13,7 @@ import { captureEnv, type NoProxyPlan, planNoProxy } from '#src/capture/launch.t
 import { NoiseFilter, NoiseTally } from '#src/capture/noise.ts';
 import { templatePath } from '#src/capture/normalize.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
+import { writeProjectFileJsonSchema } from '#src/config/jsonschema.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, type ResolvedProject, resolveProject } from '#src/config/project.ts';
 import { FeedBus, summarize } from '#src/daemon/events.ts';
@@ -1214,7 +1215,12 @@ export class ProjectRuntime {
 
   ensureDirs(): void {
     mkdirSync(projectPaths(this.project.name).root, { recursive: true });
-    if (this.project.paths) mkdirSync(this.project.paths.issuesDir, { recursive: true });
+    if (!this.project.paths) return;
+    mkdirSync(this.project.paths.issuesDir, { recursive: true });
+    // Rewritten rather than created once: it describes the *installed* mocktown, so it is
+    // gitignored, which means a fresh clone has a `$schema` pointing at nothing until
+    // something puts it back. Doing it here makes that "any command", not a special one.
+    writeProjectFileJsonSchema(this.project.paths.schemaFile);
   }
 
   async shutdown(): Promise<void> {

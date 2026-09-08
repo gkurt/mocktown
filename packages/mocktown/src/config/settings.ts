@@ -31,9 +31,10 @@ export interface Setting {
  * Not every field is a knob. `project` is identity — renaming it in place would orphan the
  * data directory rather than rename anything. `services` has its own screen and its own
  * command. `scrub.rules` is a list of objects: a form field cannot express one, and pretending
- * otherwise would offer an edit that always fails validation.
+ * otherwise would offer an edit that always fails validation. `$schema` is the editor's
+ * business, and mocktown writes it.
  */
-const NOT_A_KNOB = new Set(['project', 'services', 'scrub.rules']);
+const NOT_A_KNOB = new Set(['$schema', 'project', 'services', 'scrub.rules']);
 
 interface Unwrapped {
   node: any;

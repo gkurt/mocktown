@@ -22,7 +22,8 @@ import { launch } from '#src/capture/launch.ts';
 import { coerceInput, kebab } from '#src/cli/coerce.ts';
 import { clientFor, ensureDaemon } from '#src/cli/daemon-client.ts';
 import { feedLine, renderResult } from '#src/cli/render.ts';
-import { projectPaths } from '#src/config/paths.ts';
+import { SCHEMA_REF, writeProjectFileJsonSchema } from '#src/config/jsonschema.ts';
+import { projectPaths, workspacePaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
 import { ProjectFile } from '#src/config/schema.ts';
 import { contract } from '#src/contract/index.ts';
@@ -192,8 +193,11 @@ program
       return;
     }
 
-    writeFileSync(file, `${JSON.stringify(ProjectFile.parse({ project }), null, 2)}\n`);
+    // `$schema` first, so an editor picks it up and the rest of the file gets completion
+    // and hover text as it is typed rather than validation after the fact.
+    writeFileSync(file, `${JSON.stringify({ $schema: SCHEMA_REF, ...ProjectFile.parse({ project }) }, null, 2)}\n`);
     mkdirSync(join(cwd, '.mocktown', 'issues'), { recursive: true });
+    writeProjectFileJsonSchema(workspacePaths(cwd).schemaFile);
 
     // Never committed: the recordings DB, the CA key, and .env.mocktown (it embeds local
     // ports — regenerate it rather than sharing it). 08-projects-config.md.
@@ -207,6 +211,7 @@ program
     console.log(`project: ${project}`);
     console.log(`  wrote ${file}`);
     console.log(`  data dir ${projectPaths(project).root}`);
+    console.log(`  wrote ${workspacePaths(cwd).schemaFile}`);
     if (missing.length) console.log(`  gitignored ${missing.join(', ')}`);
   });
 

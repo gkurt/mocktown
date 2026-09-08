@@ -64,6 +64,8 @@ export const workspacePaths = (repoRoot: string) => ({
   localDir: join(repoRoot, '.mocktown'),
   localConfig: join(repoRoot, '.mocktown', 'config.local.json'),
   issuesDir: join(repoRoot, '.mocktown', 'issues'),
+  /** Generated, gitignored: `mocktown.json`'s JSON Schema, for the editor. */
+  schemaFile: join(repoRoot, '.mocktown', 'mocktown.schema.json'),
   mocksDir: join(repoRoot, 'mocks'),
   seedsDir: join(repoRoot, 'seeds'),
   envFile: join(repoRoot, '.env.mocktown'),

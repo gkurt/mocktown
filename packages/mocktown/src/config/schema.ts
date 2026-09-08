@@ -33,8 +33,13 @@ export const ServiceConfig = z.object({
 
 /** `mocktown.json` — committed, so project identity travels with the code. */
 export const ProjectFile = z.object({
+  /** Written by `mocktown init`; the editor reads it to offer completion over this file. */
+  $schema: z.string().optional().describe("Path to this file's JSON Schema. Generated — see .mocktown/mocktown.schema.json"),
   project: z.string().min(1).describe('Project name'),
-  services: z.record(z.string(), ServiceConfig).default({}),
+  services: z
+    .record(z.string(), ServiceConfig)
+    .default({})
+    .describe('The dependency registry: which hostnames are mocked, and how each one is served'),
   /**
    * Hosts the app reaches without the front door — its own local services, typically. It
    * is the counterweight to dropping the blanket `localhost` bypass: with a `.localhost`
@@ -65,7 +70,10 @@ export const ProjectFile = z.object({
         .default([])
         .describe('Patterns to record even though a default covers them — e.g. "accounts.google.com" for a real OAuth flow'),
     })
-    .default({ ignoreNoise: true, ignore: [], keep: [] }),
+    .default({ ignoreNoise: true, ignore: [], keep: [] })
+    .describe(
+      'What the corpus refuses to hold. A recorded browser talks to its own vendor constantly, and none of it is evidence about a dependency',
+    ),
   sandbox: z
     .object({
       image: z.string().default('auto').describe('Base image the sandbox layer is built on; `auto` picks a sane default'),
@@ -73,7 +81,8 @@ export const ProjectFile = z.object({
       browser: z.boolean().default(true).describe('Ship headless Chromium in the sandbox image'),
       ports: z.array(z.string()).default([]).describe('Host port publications for the sandbox, e.g. "3000:3000"'),
     })
-    .default({ image: 'auto', browser: true, ports: [] }),
+    .default({ image: 'auto', browser: true, ports: [] })
+    .describe('The sealed container an agent works inside (04-sandbox.md)'),
   /** The flows a seal run exercises. A seal is only as good as this list (05-redirection.md). */
   seal: z
     .object({
@@ -82,7 +91,8 @@ export const ProjectFile = z.object({
         .default([])
         .describe('Commands a seal run executes inside the boundary. A seal proves only what these exercise'),
     })
-    .default({ flows: [] }),
+    .default({ flows: [] })
+    .describe('The flows a seal run exercises. A seal is only as good as this list (05-redirection.md)'),
   /**
    * Drift watch (07-issues-agent-loop.md). **Off by default, and it must stay that way:** a
    * drift run re-records against the *real* services, so it spends real quota and real
@@ -96,7 +106,10 @@ export const ProjectFile = z.object({
       services: z.array(z.string()).default([]).describe('Services to judge; empty means every service with a running provider'),
       flows: z.array(z.string()).default([]).describe('Commands that exercise the real dependencies; falls back to seal.flows when empty'),
     })
-    .default({ enabled: false, intervalHours: 24, services: [], flows: [] }),
+    .default({ enabled: false, intervalHours: 24, services: [], flows: [] })
+    .describe(
+      "Scheduled re-recording against the real services. Off by default and it must stay that way: a drift run spends real quota and needs the app's real credentials",
+    ),
   /**
    * Where the app under test is reachable while mocktown is serving. Nothing dispatches on
    * it and nothing breaks without it — it is the one URL every screen wants to link to and
@@ -106,7 +119,10 @@ export const ProjectFile = z.object({
     .object({
       url: z.string().nullable().default(null).describe('The app under test, e.g. http://localhost:5173'),
     })
-    .default({ url: null }),
+    .default({ url: null })
+    .describe(
+      'Where the app under test is reachable. Nothing dispatches on it — it is the one URL mocktown cannot derive, because the app is your process',
+    ),
   /**
    * What `env write` is allowed to touch. `.env.mocktown` is gitignored and mocktown's own
    * file, so writing it is unremarkable. `AGENTS.md` is neither: it is committed, hand-written
@@ -123,7 +139,8 @@ export const ProjectFile = z.object({
           'Let `env write` add its section to the workspace AGENTS.md. That file is committed; mocktown does not edit it uninvited',
         ),
     })
-    .default({ agentsFile: false }),
+    .default({ agentsFile: false })
+    .describe("What `env write` is allowed to touch. `.env.mocktown` is mocktown's own and gitignored; AGENTS.md is committed and yours"),
   /**
    * portless stable names (05-redirection.md). Off by default like drift, for a different
    * reason: portless binds 443 with sudo, edits `/etc/hosts` and puts a CA in the system
@@ -136,7 +153,10 @@ export const ProjectFile = z.object({
       port: z.number().int().default(443).describe('Preferred proxy port; the running proxy overrides it'),
       tls: z.boolean().default(true).describe('Preferred scheme; whichever the running proxy answers on wins'),
     })
-    .default({ enabled: false, tld: 'localhost', port: 443, tls: true }),
+    .default({ enabled: false, tld: 'localhost', port: 443, tls: true })
+    .describe(
+      'Stable `<service>.<project>.<tld>` names via portless (05-redirection.md). Off by default: portless binds 443 with sudo, edits /etc/hosts and puts a CA in the system trust store',
+    ),
   scrub: z
     .object({
       /** Extra project rules, appended to the defaults in 10-security.md. */
@@ -161,7 +181,10 @@ export const ProjectFile = z.object({
         .default(false)
         .describe('Redact email addresses too. Off by default because they are load-bearing for mock fidelity'),
     })
-    .default({ rules: [], entropyBackstop: true, redactEmails: false }),
+    .default({ rules: [], entropyBackstop: true, redactEmails: false })
+    .describe(
+      'What never reaches disk. Scrubbing happens before the corpus is written, so these rules decide what a recording can contain (10-security.md)',
+    ),
 });
 export type ProjectFile = z.infer<typeof ProjectFile>;
 

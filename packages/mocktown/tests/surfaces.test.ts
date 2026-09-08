@@ -29,6 +29,9 @@ const { captureEnv } = await import('#src/capture/launch.ts');
 const { RENDERERS } = await import('#src/cli/render.ts');
 const { coerceInput } = await import('#src/cli/coerce.ts');
 const { settingsOf, writeSetting } = await import('#src/config/settings.ts');
+const { projectFileJsonSchema, SCHEMA_REF } = await import('#src/config/jsonschema.ts');
+const { ProjectFile } = await import('#src/config/schema.ts');
+const { workspacePaths } = await import('#src/config/paths.ts');
 
 const workspace = join(root, 'app');
 let runtime: InstanceType<typeof ProjectRuntime>;
@@ -180,6 +183,84 @@ describe('mocktown env', () => {
     expect(section).toContain('export MOCKTOWN_PROJECT=surfaces-test');
     expect(section).toContain('untrusted input');
   });
+});
+
+describe("mocktown.json's JSON Schema", () => {
+  test('describes what someone writes, not what mocktown reads back', () => {
+    const schema = projectFileJsonSchema() as { required?: string[]; properties: Record<string, unknown> };
+
+    // The trap in generating this. Every field in `ProjectFile` has a default, so the
+    // *output* view marks them all required — and an editor would then light up a valid,
+    // minimal `{ "project": "x" }` with a wall of errors about keys nobody has to write.
+    expect(schema.required).toEqual(['project']);
+
+    // Every knob the settings screen offers has to be describable here too, or the two
+    // surfaces disagree about what the file may contain.
+    for (const key of ['services', 'portless', 'capture', 'env', 'app', 'scrub']) {
+      expect(Object.keys(schema.properties)).toContain(key);
+    }
+  });
+
+  test('every property carries the hover text an editor shows', () => {
+    // The prose explaining these groups lives in JSDoc comments, which Zod cannot see — so
+    // the richest text in the config schema reached nothing. `.describe()` is the only
+    // channel to a hover, and `portless` in particular has to say what enabling it costs
+    // before someone turns it on.
+    const properties = (projectFileJsonSchema() as { properties: Record<string, { description?: string }> }).properties;
+    const silent = Object.entries(properties)
+      .filter(([, node]) => !node.description)
+      .map(([key]) => key);
+    expect(silent).toEqual([]);
+  });
+
+  test('allows the `$schema` line mocktown itself writes', () => {
+    // Generated configs carry `$schema`. If the schema does not permit it, the first thing
+    // an editor flags is the line that told it where to look.
+    expect(Object.keys((projectFileJsonSchema() as { properties: Record<string, unknown> }).properties)).toContain('$schema');
+    expect(ProjectFile.safeParse({ $schema: SCHEMA_REF, project: 'x' }).success).toBe(true);
+  });
+
+  test('survives a settings write, which rewrites the file it sits in', () => {
+    const file = join(workspace, 'schema-ref.json');
+    writeFileSync(file, JSON.stringify({ $schema: SCHEMA_REF, project: 'surfaces-test' }, null, 2));
+
+    writeSetting(file, 'portless.enabled', 'true');
+
+    // `config set` edits the file rather than regenerating it from a parse, and this is the
+    // key that proves it: a rewrite would drop it and silently unhook the editor.
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    expect(raw.$schema).toBe(SCHEMA_REF);
+    expect(raw.portless.enabled).toBe(true);
+  });
+
+  test('`mocktown init` writes a config the schema is next to, and mocktown can read back', async () => {
+    const fresh = join(root, 'fresh-repo');
+    mkdirSync(fresh, { recursive: true });
+    const cli = join(import.meta.dir, '..', 'src', 'cli', 'index.ts');
+    const result = Bun.spawnSync(['bun', cli, 'init', 'fresh-project'], {
+      cwd: fresh,
+      env: { ...process.env, MOCKTOWN_CONFIG_HOME: join(root, 'config'), MOCKTOWN_DATA_HOME: join(root, 'data') },
+    });
+    expect(result.stderr.toString()).toBe('');
+
+    const written = JSON.parse(readFileSync(join(fresh, 'mocktown.json'), 'utf8'));
+    expect(written.$schema).toBe(SCHEMA_REF);
+    // Writing a config mocktown cannot read is the one failure `init` must never have.
+    expect(ProjectFile.safeParse(written).success).toBe(true);
+
+    // The reference has to resolve, or the editor reports a broken `$schema` on a file
+    // mocktown generated a second earlier.
+    const schemaPath = workspacePaths(fresh).schemaFile;
+    expect(schemaPath).toBe(join(fresh, SCHEMA_REF));
+    expect(JSON.parse(readFileSync(schemaPath, 'utf8')).title).toBe('mocktown.json');
+
+    // Gitignored, because it describes the installed version — so it must come back on its
+    // own, or a fresh clone keeps a `$schema` pointing at nothing.
+    expect(readFileSync(join(fresh, '.gitignore'), 'utf8')).toContain('.mocktown/');
+    rmSync(schemaPath);
+    new ProjectRuntime(resolveProject({ cwd: fresh })).ensureDirs();
+    expect(existsSync(schemaPath)).toBe(true);
+  }, 30_000);
 });
 
 describe('nested CLI flags', () => {
