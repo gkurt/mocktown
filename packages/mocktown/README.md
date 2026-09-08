@@ -298,6 +298,12 @@ on a machine where the preferred name cannot be reached. `mocktown env portless 
 what answered and what did not, with the fix for each — a TLD the proxy is not serving needs the
 proxy restarted, one it serves that does not resolve needs `portless hosts sync`.
 
+One override: while the proxy has no TLS, a `.localhost` spelling leads even if you preferred
+another. Browsers only keep a `Secure` cookie on a trustworthy origin, and over plain http
+that means `localhost` and its subdomains — so a session on `http://…mocktown` is dropped
+silently and the app bounces back to its login page. Start the proxy with TLS to get your
+preference back.
+
 The daemon's GUI is claimed the same way, as `ui.mocktown` (or `ui.mocktown.localhost`).
 `portless alias` takes a name and not a TLD, so the proxy serves that name under every TLD it
 has — including any you did not configure. What mocktown will not do is take the name from

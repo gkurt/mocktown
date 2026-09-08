@@ -18,7 +18,9 @@ process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
 process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 
 const { captureEnv } = await import('#src/capture/launch.ts');
-const { portlessBinary, portlessCaCerts, releasePortless, stableName, stableUrl, syncPortless } = await import('#src/redirect/portless.ts');
+const { portlessBinary, portlessCaCerts, rankTlds, releasePortless, stableName, stableUrl, syncPortless } = await import(
+  '#src/redirect/portless.ts'
+);
 
 const stateDir = join(root, 'state');
 const binDir = join(root, 'bin');
@@ -355,6 +357,27 @@ test('an unprivileged proxy is started for you; a privileged one is only ever re
     rmSync(join(stateDir, 'proxy.port'), { force: true });
     rmSync(join(stateDir, 'proxy.pid'), { force: true });
   }
+});
+
+test('without TLS, a TLD that cannot hold a session cookie does not lead', () => {
+  // The regression this exists for, and it produced no error anywhere. A `Secure` cookie —
+  // which every `SameSite=None` cookie must also be — is only storable on a potentially
+  // trustworthy origin, and over plain http that means `localhost` and its subdomains. So an
+  // app pointed at `http://api.proj.mocktown` signs in, gets a `Set-Cookie` the browser
+  // silently drops, and lands back on the login page. `.mocktown.localhost` is the same
+  // proxy and the same routes, and keeps the cookie.
+  expect(rankTlds(['mocktown', 'mocktown.localhost'], false)).toEqual(['mocktown.localhost', 'mocktown']);
+  expect(rankTlds(['mocktown', 'localhost'], false)).toEqual(['localhost', 'mocktown']);
+
+  // With TLS the origin is trustworthy either way, so the project's preference is the only
+  // thing that should decide — a rule that outlived its reason is just a surprise.
+  expect(rankTlds(['mocktown', 'mocktown.localhost'], true)).toEqual(['mocktown', 'mocktown.localhost']);
+
+  // Stable otherwise: this reorders nothing it does not have to.
+  expect(rankTlds(['mocktown.localhost', 'mocktown'], false)).toEqual(['mocktown.localhost', 'mocktown']);
+  expect(rankTlds(['a.localhost', 'b.localhost'], false)).toEqual(['a.localhost', 'b.localhost']);
+  // `notlocalhost` only ends with the word, not with the label.
+  expect(rankTlds(['notlocalhost', 'x.localhost'], false)).toEqual(['x.localhost', 'notlocalhost']);
 });
 
 test('the GUI gets a name under a TLD we own, and never squats one we borrowed', async () => {

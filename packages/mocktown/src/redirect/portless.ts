@@ -165,6 +165,32 @@ export function stableUrl(name: string, settings: PortlessSettings): string {
 /** The first entry, or `localhost` if a caller managed to pass an empty list. */
 export const primaryTld = (settings: PortlessSettings): string => settings.tlds[0] ?? 'localhost';
 
+/**
+ * Loopback names browsers treat as a secure context even over plain `http`.
+ *
+ * This is the rule that decides whether an app can hold a session. A `Secure` cookie — which
+ * any cookie marked `SameSite=None` must also be — is only storable on a potentially
+ * trustworthy origin, and over `http` that means `localhost` and its subdomains and nothing
+ * else. On an http proxy, `https://app.mocktown` does not exist and `http://app.mocktown`
+ * cannot keep the cookie, so the app signs in, gets a `Set-Cookie` the browser silently
+ * drops, and lands back on the login page with no error anywhere. `.mocktown.localhost`
+ * carries the same proxy and the same routes, and keeps the cookie.
+ */
+const trustworthyOverHttp = (tld: string) => tld === 'localhost' || tld.endsWith('.localhost');
+
+/**
+ * Proven TLDs in the order URLs should use them.
+ *
+ * Preference is the project's, except for one thing the project cannot be expected to know:
+ * without TLS, a TLD outside `.localhost` cannot hold a `Secure` cookie, so preferring it
+ * breaks login in a way that produces no error message. Ranking is stable otherwise — this
+ * only moves a working name ahead of one that would silently lose sessions.
+ */
+export function rankTlds(proven: string[], tls: boolean): string[] {
+  if (tls) return proven;
+  return [...proven.filter(trustworthyOverHttp), ...proven.filter((tld) => !trustworthyOverHttp(tld))];
+}
+
 export const stateDirOf = (settings: PortlessSettings) =>
   settings.stateDir ?? process.env.PORTLESS_STATE_DIR ?? join(homedir(), '.portless');
 
@@ -437,12 +463,21 @@ async function proveUsable(
       else proven.push(tld);
     }
 
-    const resolved: PortlessSettings = { ...base, tlds: proven, tls: live.tls };
+    const ranked = rankTlds(proven, live.tls);
+    const resolved: PortlessSettings = { ...base, tlds: ranked, tls: live.tls };
     const url = stableUrl(name, resolved);
+    // Only worth a sentence when the reordering actually happened, and then it is worth one:
+    // a person who configured `.mocktown` and is handed `.mocktown.localhost` deserves the
+    // reason rather than a mystery.
+    const demoted = proven[0] !== ranked[0] ? proven[0] : null;
     return {
       ok: true,
       reason:
         `proven: ${url} reached a mocktown listener on :${port} through the portless proxy` +
+        (demoted
+          ? `; .${demoted} is live but this proxy has no TLS, and a browser will not keep a \`Secure\` session cookie on it — ` +
+            `.${ranked[0]} is used for URLs instead. Start the proxy with TLS to prefer .${demoted}`
+          : '') +
         whyUnusable(unusable, found, settings.tlds, resolved),
       resolved,
       unusable,

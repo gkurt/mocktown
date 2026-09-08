@@ -171,6 +171,15 @@ Two further consequences, both deliberate:
     is served under both origins, so `apiBase` in the injected boot block is origin-relative
     — `connect-src 'self'` allows only the origin the page came from, and naming one would
     mean either guessing or reflecting a `Host` header into the page.
+  - **Without TLS, a TLD that cannot hold a session cookie does not lead.** A `Secure` cookie
+    — which every `SameSite=None` cookie must also be — is only storable on a potentially
+    trustworthy origin, and over plain `http` that means `localhost` and its subdomains and
+    nothing else. So on an http proxy, an app pointed at `http://api.proj.mocktown` signs in,
+    gets a `Set-Cookie` the browser silently drops, and lands back on the login page with no
+    error in any log. `.mocktown.localhost` is the same proxy and the same routes and keeps
+    the cookie, so it leads while TLS is off — the one case where mocktown overrides the
+    project's stated preference, because it is a fact about browsers the project cannot be
+    expected to encode. The reason says so, and says that TLS restores the preference.
   - **Off by default and never load-bearing.** portless binds 443 with sudo, edits
     `/etc/hosts` and installs a CA in the system trust store; that is a person's decision,
     not a config default's. Every failure degrades to loopback URLs with the reason attached.
