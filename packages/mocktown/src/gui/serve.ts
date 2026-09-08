@@ -19,6 +19,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 
 export interface BootData {
+  /** Origin-relative (`/api/v1`), so the page calls whichever origin served it. */
   apiBase: string;
   token: string;
   project: string;

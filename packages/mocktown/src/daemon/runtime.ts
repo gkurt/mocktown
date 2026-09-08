@@ -13,6 +13,7 @@ import { captureEnv, type NoProxyPlan, planNoProxy } from '#src/capture/launch.t
 import { NoiseFilter, NoiseTally } from '#src/capture/noise.ts';
 import { templatePath } from '#src/capture/normalize.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
+import { readDaemonState } from '#src/config/daemon.ts';
 import { writeProjectFileJsonSchema } from '#src/config/jsonschema.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, type ResolvedProject, resolveProject } from '#src/config/project.ts';
@@ -1161,6 +1162,9 @@ export class ProjectRuntime {
         settings: this.portlessSettings(),
         baseUrls: this.allBaseUrls(),
         projectCaPath: projectPaths(this.project.name).caCert,
+        // Read rather than held: the runtime is constructed by the daemon but does not own
+        // it, and the state file is the one place every client already agrees to look.
+        guiPort: readDaemonState()?.port ?? null,
       });
     } catch (error) {
       this.portless = unavailable(

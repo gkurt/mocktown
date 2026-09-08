@@ -155,6 +155,17 @@ Two further consequences, both deliberate:
     `portless hosts sync`. Unusable TLDs stay in the alias table and in `NO_PROXY` even though
     no URL is built from them — answering a `Host` that does arrive costs nothing, and one
     that starts resolving mid-session because someone ran `hosts sync` should not 501.
+  - **The daemon's own GUI gets a name too, but only under a TLD mocktown owns.** `ui` is a
+    label anyone might want, and the proxy is one process for the whole machine, so
+    `portless alias ui --force` under a borrowed TLD would take `ui.localhost` from whatever
+    already had it — for a dashboard that is not even project-scoped. Under `.mocktown` the
+    entire TLD is mocktown's, so `ui.mocktown` (or `ui.mocktown.localhost` on the fallback)
+    is ours to mint, and a proxy serving only someone else's TLD gets no GUI name at all. It
+    is released with the service names: the daemon stays reachable on loopback regardless,
+    and a name aimed at a dead port is the failure that release exists to prevent. The shell
+    is served under both origins, so `apiBase` in the injected boot block is origin-relative
+    — `connect-src 'self'` allows only the origin the page came from, and naming one would
+    mean either guessing or reflecting a `Host` header into the page.
   - **Off by default and never load-bearing.** portless binds 443 with sudo, edits
     `/etc/hosts` and installs a CA in the system trust store; that is a person's decision,
     not a config default's. Every failure degrades to loopback URLs with the reason attached.

@@ -14,6 +14,7 @@ import { contract } from 'mocktown/contract';
 import { useSyncExternalStore } from 'react';
 
 export interface Boot {
+  /** Origin-relative, so the shell works under loopback and under a portless name alike. */
   apiBase: string;
   token: string;
   project: string;
@@ -65,7 +66,10 @@ export const strandedToken = {
 export const useStranded = () => useSyncExternalStore(strandedToken.subscribe, strandedToken.get);
 
 const link = new OpenAPILink(contract, {
-  url: boot.apiBase,
+  // `OpenAPILink` calls `new URL(baseUrl)` with no base, which throws on a relative path, so
+  // the origin is supplied here rather than by the daemon — the browser is the only party
+  // that actually knows which one the page was loaded from.
+  url: new URL(boot.apiBase, location.origin).toString(),
   headers: () => ({ authorization: `Bearer ${boot.token}` }),
   fetch: async (request, init) => {
     const response = await fetch(request, init);

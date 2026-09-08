@@ -551,6 +551,7 @@ function renderPortless(r: any): string[] {
     ...(r.tlds?.length ? [`  TLDs  ${r.tlds.map((tld: string) => `.${tld}`).join('  ')}`] : []),
     ...(r.unusableTlds?.length ? [`  unusable  ${r.unusableTlds.map((tld: string) => `.${tld}`).join('  ')}`] : []),
     ...(r.names.length ? ['', ...r.names.map((n: any) => `  ${pad(n.service, 30)} ${n.url}`)] : []),
+    ...(r.gui ? ['', `  ${pad('the GUI', 30)} ${r.gui.url}`] : []),
     ...(r.caBundle ? ['', `  CA bundle  ${r.caBundle}`] : []),
   ];
 }

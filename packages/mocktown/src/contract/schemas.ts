@@ -254,6 +254,10 @@ export const PortlessStatus = z.object({
     .array(z.string())
     .describe('TLDs that were configured or served but did not answer — usually a missing /etc/hosts entry (`portless hosts sync`)'),
   names: z.array(z.object({ service: z.string(), name: z.string(), url: z.string() })),
+  gui: z
+    .object({ name: z.string(), url: z.string() })
+    .nullable()
+    .describe("The daemon's own dashboard under a stable name, claimed only under a TLD the project configured"),
 });
 export type PortlessStatus = z.infer<typeof PortlessStatus>;
 

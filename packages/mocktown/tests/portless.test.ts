@@ -350,6 +350,46 @@ test('an unprivileged proxy is started for you; a privileged one is only ever re
   }
 });
 
+test('the GUI gets a name under a TLD we own, and never squats one we borrowed', async () => {
+  // `ui` is a label anyone might want and the proxy is one process for the whole machine, so
+  // `alias ui --force` under someone else's TLD would take `ui.localhost` from whatever had
+  // it — for a dashboard that is not even project-scoped. Under `.mocktown` the TLD is ours.
+  const guiPort = providerPort;
+
+  // Borrowed: the config asked for `.borrowed-test`, the proxy is serving `.localhost`, and
+  // the services fall back to it — but a generic `ui` under a TLD nobody here owns does not
+  // get claimed just because the fallback worked.
+  const borrowed = await syncPortless(input({ guiPort, settings: { ...settings(), tlds: ['borrowed-test'] } }));
+  expect(borrowed.available).toBe(true);
+  expect(borrowed.tlds).toEqual(['localhost']);
+  expect(borrowed.gui).toBeNull();
+  expect(Object.keys(routes())).not.toContain('ui.localhost');
+  await releasePortless(borrowed, settings(), binDir);
+
+  // Ours: the proven TLD is one the project configured, so the name is ours to mint.
+  process.env.PORTLESS_STUB_TLD = 'mocktown.localhost';
+  writeFileSync(join(stateDir, 'proxy.port'), String(proxyPort));
+  try {
+    const owned = await syncPortless(input({ guiPort, settings: { ...settings(), tlds: ['mocktown.localhost'] } }));
+    expect(owned.gui).toEqual({ name: 'ui', url: `http://ui.mocktown.localhost:${proxyPort}` });
+    expect(Object.keys(routes())).toContain('ui.mocktown.localhost');
+
+    // And it reaches the daemon rather than a mock — the whole point of a name for the GUI.
+    providerHits = 0;
+    const response = await fetch(owned.gui!.url);
+    expect(await response.text()).toBe('provider');
+    expect(providerHits).toBe(1);
+
+    // Released with the services: a name pointing at a port nothing answers on is the
+    // failure this cleanup exists to prevent, and the daemon is on loopback regardless.
+    await releasePortless(owned, settings(), binDir);
+    expect(routes()).toEqual({});
+  } finally {
+    delete process.env.PORTLESS_STUB_TLD;
+    rmSync(join(stateDir, 'proxy.port'), { force: true });
+  }
+});
+
 test('a base URL with no port cannot be aliased, and says so per service', async () => {
   const status = await syncPortless(input({ baseUrls: new Map([['api.stripe.com', 'https://api.stripe.com']]) }));
   expect(status.available).toBe(false);

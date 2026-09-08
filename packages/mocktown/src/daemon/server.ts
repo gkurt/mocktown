@@ -8,12 +8,13 @@
  * exception — it is documentation containing no project data, and requiring a token to
  * read it would only make life harder for agents and `curl`.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { OpenAPIGenerator } from '@orpc/openapi';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { ORPCError, onError } from '@orpc/server';
 import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
+import { readDaemonState } from '#src/config/daemon.ts';
 import { daemonStateFile, globalConfigDir } from '#src/config/paths.ts';
 import { loadGlobalConfig } from '#src/config/project.ts';
 import { contract } from '#src/contract/index.ts';
@@ -110,6 +111,8 @@ function writeDaemonState(port: number, token: string): void {
   writeFileSync(daemonStateFile(), JSON.stringify(state, null, 2), { mode: 0o600 });
 }
 
+export { readDaemonState };
+
 export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHandle> {
   const port = options.port ?? (await findFreePort(4499));
   const token = options.token ?? crypto.randomUUID();
@@ -124,7 +127,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
       // Only computed where HTML is served: it reads the global config, and the API path
       // has no use for it.
       const bootFor = (project?: string) => ({
-        apiBase: `http://127.0.0.1:${port}/api/v1`,
+        // Origin-relative on purpose. The shell is reachable under more than one origin —
+        // loopback, and a portless name like `https://ui.mocktown` — and `connect-src 'self'`
+        // means the page may only call the origin it was served from. Naming that origin here
+        // would be the daemon guessing which one the browser used, or reflecting a `Host`
+        // header into the page; a relative base makes the browser answer it correctly.
+        apiBase: '/api/v1',
         token,
         project: project ?? loadGlobalConfig().defaultProject,
         home: homedir(),
@@ -186,15 +194,4 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonHa
       await server.stop(true);
     },
   };
-}
-
-/** How a client finds a running daemon. Returns null when none has been started. */
-export function readDaemonState(): { port: number; token: string; pid: number; contract?: string } | null {
-  const file = daemonStateFile();
-  if (!existsSync(file)) return null;
-  try {
-    return JSON.parse(readFileSync(file, 'utf8'));
-  } catch {
-    return null;
-  }
 }

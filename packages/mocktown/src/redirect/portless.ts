@@ -62,6 +62,22 @@ export interface PortlessName {
   url: string;
 }
 
+/**
+ * The daemon's own dashboard, under a name rather than a port. One label, not a
+ * `<thing>.<project>` pair like a service: there is one daemon on a machine and its GUI is
+ * not a project's, so `ui.mocktown` is the whole address.
+ */
+export interface PortlessGui {
+  name: string;
+  url: string;
+}
+
+/**
+ * A name anyone might want, which is why it is only ever claimed under a TLD the project
+ * asked for. See `claimGui`.
+ */
+const GUI_NAME = 'ui';
+
 export interface PortlessStatus {
   enabled: boolean;
   available: boolean;
@@ -92,11 +108,24 @@ export interface PortlessStatus {
    */
   unusableTlds: string[];
   names: PortlessName[];
+  /** The daemon's GUI under a stable name, or null when it was not claimed. */
+  gui: PortlessGui | null;
 }
 
 /** Nothing was proven, so no TLD is live and every one that was going to be tried is not. */
 export function unavailable(enabled: boolean, reason: string, binary: string | null = null, unusable: string[] = []): PortlessStatus {
-  return { enabled, available: false, reason, binary, caBundle: null, resolved: null, tlds: [], unusableTlds: unusable, names: [] };
+  return {
+    enabled,
+    available: false,
+    reason,
+    binary,
+    caBundle: null,
+    resolved: null,
+    tlds: [],
+    unusableTlds: unusable,
+    names: [],
+    gui: null,
+  };
 }
 
 /** PATH first, then the workspace's own `node_modules/.bin` — portless is often a devDependency. */
@@ -441,6 +470,33 @@ export interface SyncPortlessInput {
   baseUrls: Map<string, string>;
   /** The project CA, which the bundle must keep carrying for the front door. */
   projectCaPath: string;
+  /**
+   * The daemon's own port, so its GUI can have a name too. Null leaves it unclaimed — a
+   * client that does not know where the daemon is should not guess.
+   */
+  guiPort?: number | null;
+}
+
+/**
+ * Give the daemon's GUI a stable name, but only under a TLD this project configured.
+ *
+ * `ui` is a label anyone might want, and the portless proxy is one process for the whole
+ * machine: `portless alias ui --force` under a borrowed TLD would take `ui.localhost` from
+ * whatever already had it, for a dashboard that is not even project-scoped. Under
+ * `.mocktown` the entire TLD is mocktown's, so the name is ours to mint. A proxy serving
+ * only someone else's TLD therefore gets no GUI name — the same restart that makes
+ * `.mocktown` work is what makes `ui.mocktown` exist.
+ */
+async function claimGui(
+  binary: string,
+  guiPort: number | null | undefined,
+  resolved: PortlessSettings,
+  configured: string[],
+): Promise<{ gui: PortlessGui | null; failure: string | null }> {
+  if (!guiPort || !configured.includes(primaryTld(resolved))) return { gui: null, failure: null };
+  const registered = await alias(binary, GUI_NAME, guiPort, resolved);
+  if (!registered.ok) return { gui: null, failure: `${GUI_NAME} (the GUI): ${registered.output}` };
+  return { gui: { name: GUI_NAME, url: stableUrl(GUI_NAME, resolved) }, failure: null };
 }
 
 /**
@@ -488,6 +544,9 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
     names.push({ service, name, url: stableUrl(name, settings) });
   }
 
+  const claimed = await claimGui(binary, input.guiPort, settings, input.settings.tlds);
+  if (claimed.failure) failures.push(claimed.failure);
+
   // Partial success is still success for the services that got a name, but the ones that
   // did not have to be in the reason — silently leaving a service on a loopback URL is how
   // someone ends up debugging why one integration moved and another did not.
@@ -501,14 +560,19 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
     tlds: settings.tlds,
     unusableTlds: proof.unusable,
     names,
+    gui: claimed.gui,
   };
 }
 
 /** Give the names back when a serve session ends, so a stale name cannot point at a dead port. */
 export async function releasePortless(status: PortlessStatus, settings: PortlessSettings, workspace: string | null): Promise<void> {
-  if (!status.available || !status.names.length) return;
+  if (!status.available || !(status.names.length || status.gui)) return;
   const binary = status.binary ?? portlessBinary(workspace);
   if (!binary) return;
   const proven = status.resolved ?? settings;
   for (const entry of status.names) await unalias(binary, entry.name, proven).catch(() => {});
+  // The GUI name goes back with them. It outlives no session: the daemon it points at is
+  // reachable on loopback regardless, and a name aimed at a port nothing answers on is the
+  // failure mode this release exists to prevent.
+  if (status.gui) await unalias(binary, status.gui.name, proven).catch(() => {});
 }

@@ -100,7 +100,17 @@ test('the shell is served with an injected token and a same-origin CSP', async (
   const html = await response.text();
 
   // `home` is what lets the shell print `~/Work/repo`; a browser cannot work it out.
-  expect(boot(html)).toEqual({ apiBase: `${origin}/api/v1`, token: daemon.token, project: 'main', home: homedir() });
+  //
+  // `apiBase` is origin-relative and must stay that way: the same shell is served under
+  // loopback and under a portless name like `https://ui.mocktown`, and `connect-src 'self'`
+  // lets the page call only the origin it came from. An absolute base would name one of
+  // them and break the other.
+  expect(boot(html)).toEqual({ apiBase: '/api/v1', token: daemon.token, project: 'main', home: homedir() });
+
+  // The same page, asked for under a portless name, answers the same way — the boot block
+  // carries nothing origin-specific, so there is nothing to get wrong.
+  const named = await fetch(`${origin}/`, { headers: { host: 'ui.mocktown' } });
+  expect(boot(await named.text())).toMatchObject({ apiBase: '/api/v1', token: daemon.token });
   // Nothing in the build itself: the file on disk is worthless without the daemon.
   expect(Bun.file(join(shell, 'index.html')).text()).resolves.not.toContain('mocktown-boot');
 
