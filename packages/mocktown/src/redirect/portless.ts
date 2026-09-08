@@ -233,22 +233,28 @@ const unalias = (binary: string, name: string, settings: PortlessSettings) => po
  * Both shapes portless has shipped are accepted, and an unrecognised one degrades to the
  * configured value rather than failing, because a guess here is recoverable and a crash is not.
  */
-function routeHostnames(settings: PortlessSettings): string[] {
+function routeEntries(settings: PortlessSettings): { hostname: string; port: number | null }[] {
   const file = join(stateDirOf(settings), 'routes.json');
   if (!existsSync(file)) return [];
+  const port = (value: unknown) => (typeof value === 'number' && Number.isInteger(value) ? value : null);
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
     if (Array.isArray(parsed)) {
       return parsed
-        .map((row) => (typeof row === 'object' && row !== null ? (row as { hostname?: unknown }).hostname : undefined))
-        .filter((hostname): hostname is string => typeof hostname === 'string' && hostname.length > 0);
+        .map((row) => (typeof row === 'object' && row !== null ? (row as { hostname?: unknown; port?: unknown }) : {}))
+        .filter((row) => typeof row.hostname === 'string' && row.hostname.length > 0)
+        .map((row) => ({ hostname: row.hostname as string, port: port(row.port) }));
     }
-    if (typeof parsed === 'object' && parsed !== null) return Object.keys(parsed);
+    if (typeof parsed === 'object' && parsed !== null) {
+      return Object.entries(parsed).map(([hostname, value]) => ({ hostname, port: port(value) }));
+    }
     return [];
   } catch {
     return [];
   }
 }
+
+const routeHostnames = (settings: PortlessSettings): string[] => routeEntries(settings).map((route) => route.hostname);
 
 /**
  * The suffixes portless appended to a name we chose are the TLDs its proxy is serving.
@@ -486,14 +492,20 @@ export interface SyncPortlessInput {
 }
 
 /**
- * Give the daemon's GUI a stable name, but only under a TLD this project configured.
+ * Give the daemon's GUI a stable name.
  *
- * `ui` is a label anyone might want, and the portless proxy is one process for the whole
- * machine: `portless alias ui --force` under a borrowed TLD would take `ui.localhost` from
- * whatever already had it, for a dashboard that is not even project-scoped. Under
- * `.mocktown` the entire TLD is mocktown's, so the name is ours to mint. A proxy serving
- * only someone else's TLD therefore gets no GUI name — the same restart that makes
- * `.mocktown` work is what makes `ui.mocktown` exist.
+ * Two rules, and the second is the one that protects anybody else.
+ *
+ * `portless alias` takes a name, never a TLD — the proxy applies every TLD it is serving —
+ * so mocktown cannot claim `ui.mocktown` without also creating `ui.localhost` on a proxy
+ * that serves both. Refusing whenever a borrowed TLD is in the list would mean no GUI name
+ * at all for the common setup, which is worse than the tidiness it buys. So the check that
+ * matters is not *which* TLD but *whether the name is already someone's*: an existing `ui.*`
+ * route pointing at a port that is not the daemon's belongs to another tool, and
+ * `alias --force` would take it. That is the harm, and it is the thing declined.
+ *
+ * The first rule remains that the proven TLD has to be one this project configured, so a
+ * label as generic as `ui` is at least minted somewhere mocktown has a claim to.
  */
 async function claimGui(
   binary: string,
@@ -502,6 +514,19 @@ async function claimGui(
   configured: string[],
 ): Promise<{ gui: PortlessGui | null; failure: string | null }> {
   if (!guiPort || !configured.includes(primaryTld(resolved))) return { gui: null, failure: null };
+
+  const owner = routeEntries(resolved).find(
+    (route) => route.hostname.startsWith(`${GUI_NAME}.`) && route.port !== null && route.port !== guiPort,
+  );
+  if (owner) {
+    return {
+      gui: null,
+      failure:
+        `${GUI_NAME} (the GUI): ${owner.hostname} already points at :${owner.port}, which is not this daemon — ` +
+        'leaving it alone rather than taking a name something else is using',
+    };
+  }
+
   const registered = await alias(binary, GUI_NAME, guiPort, resolved);
   if (!registered.ok) return { gui: null, failure: `${GUI_NAME} (the GUI): ${registered.output}` };
   return { gui: { name: GUI_NAME, url: stableUrl(GUI_NAME, resolved) }, failure: null };

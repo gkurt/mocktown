@@ -370,6 +370,19 @@ test('the GUI gets a name under a TLD we own, and never squats one we borrowed',
   expect(Object.keys(routes())).not.toContain('ui.localhost');
   await releasePortless(borrowed, settings(), binDir);
 
+  // Occupied: something else already answers on a `ui.*` route at a different port. The
+  // proxy is shared, `alias --force` would take it, and portless applies every TLD it
+  // serves — so this, not the TLD, is the check that keeps mocktown out of someone's way.
+  const squatted = JSON.parse(readFileSync(routesFile, 'utf8'));
+  squatted.push({ hostname: 'ui.localhost', port: guiPort + 1, pid: 0 });
+  writeFileSync(routesFile, JSON.stringify(squatted));
+  const occupied = await syncPortless(input({ guiPort }));
+  expect(occupied.gui).toBeNull();
+  expect(occupied.reason).toContain('already points at');
+  expect(routes()['ui.localhost']).toBe(guiPort + 1);
+  await releasePortless(occupied, settings(), binDir);
+  writeFileSync(routesFile, '[]');
+
   // Ours: the proven TLD is one the project configured, so the name is ours to mint.
   process.env.PORTLESS_STUB_TLD = 'mocktown.localhost';
   writeFileSync(join(stateDir, 'proxy.port'), String(proxyPort));

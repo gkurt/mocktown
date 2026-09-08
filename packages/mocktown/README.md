@@ -296,9 +296,10 @@ on a machine where the preferred name cannot be reached. `mocktown env portless 
 what answered and what did not, with the fix for each — a TLD the proxy is not serving needs the
 proxy restarted, one it serves that does not resolve needs `portless hosts sync`.
 
-The daemon's GUI is claimed the same way, as `ui.mocktown` (or `ui.mocktown.localhost`). It is
-only claimed under a TLD `portless.tlds` asked for: `ui` is a name anyone might want, and the
-proxy is shared by the whole machine, so mocktown will not take it on a TLD it does not own.
+The daemon's GUI is claimed the same way, as `ui.mocktown` (or `ui.mocktown.localhost`).
+`portless alias` takes a name and not a TLD, so the proxy serves that name under every TLD it
+has — including any you did not configure. What mocktown will not do is take the name from
+something else: a `ui.*` route already pointing at another port is left alone and reported.
 
 ## Layout
 

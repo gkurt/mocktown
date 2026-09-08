@@ -155,13 +155,18 @@ Two further consequences, both deliberate:
     `portless hosts sync`. Unusable TLDs stay in the alias table and in `NO_PROXY` even though
     no URL is built from them — answering a `Host` that does arrive costs nothing, and one
     that starts resolving mid-session because someone ran `hosts sync` should not 501.
-  - **The daemon's own GUI gets a name too, but only under a TLD mocktown owns.** `ui` is a
-    label anyone might want, and the proxy is one process for the whole machine, so
-    `portless alias ui --force` under a borrowed TLD would take `ui.localhost` from whatever
-    already had it — for a dashboard that is not even project-scoped. Under `.mocktown` the
-    entire TLD is mocktown's, so `ui.mocktown` (or `ui.mocktown.localhost` on the fallback)
-    is ours to mint, and a proxy serving only someone else's TLD gets no GUI name at all. It
-    is released with the service names: the daemon stays reachable on loopback regardless,
+  - **The daemon's own GUI gets a name too, and takes it from nobody.** `ui.mocktown` — or
+    `ui.mocktown.localhost` when the preferred TLD is unreachable. `ui` is a label anyone
+    might want and the proxy is one process for the whole machine, but `portless alias` takes
+    a name and never a TLD: the proxy applies every TLD it is serving, so mocktown cannot
+    claim `ui.mocktown` without also creating `ui.localhost` on a proxy that serves both, and
+    refusing on that basis would mean no GUI name in the ordinary setup. So the check is not
+    which TLD but whether the name is already someone's: an existing `ui.*` route pointing at
+    a port that is not the daemon's belongs to another tool, `alias --force` would take it,
+    and that is what gets declined — reported as a failure, not swallowed. The weaker rule
+    also stands, that the proven TLD must be one the project configured, so a label this
+    generic is at least minted somewhere mocktown has a claim to. It is released with the
+    service names: the daemon stays reachable on loopback regardless,
     and a name aimed at a dead port is the failure that release exists to prevent. The shell
     is served under both origins, so `apiBase` in the injected boot block is origin-relative
     — `connect-src 'self'` allows only the origin the page came from, and naming one would
