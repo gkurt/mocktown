@@ -419,7 +419,9 @@ async function proveUsable(
     const url = stableUrl(name, resolved);
     return {
       ok: true,
-      reason: `proven: ${url} reached a mocktown listener on :${port} through the portless proxy${whyUnusable(unusable, found, settings)}`,
+      reason:
+        `proven: ${url} reached a mocktown listener on :${port} through the portless proxy` +
+        whyUnusable(unusable, found, settings.tlds, resolved),
       resolved,
       unusable,
     };
@@ -437,7 +439,7 @@ async function proveUsable(
  * The proxy is machine-wide and shared, so a config the running one predates is the ordinary
  * case, not an error — hence a sentence rather than a failure.
  */
-function whyUnusable(unusable: string[], served: string[], settings: PortlessSettings): string {
+function whyUnusable(unusable: string[], served: string[], desired: string[], resolved: PortlessSettings): string {
   if (!unusable.length) return '';
   // An unreadable routes file leaves `served` empty, and "your proxy is not serving this"
   // would then be a guess dressed as a diagnosis.
@@ -446,8 +448,14 @@ function whyUnusable(unusable: string[], served: string[], settings: PortlessSet
   // Additive, never replacing. The proxy is one process for the whole machine, so a command
   // listing only what this project wants would quietly unserve every name another project —
   // or the person's own app — is reachable under. Config first, since that is the preference.
-  const keep = [...settings.tlds, ...served.filter((tld) => !settings.tlds.includes(tld))];
-  const restart = `portless proxy start${keep.map((tld) => ` --tld ${tld}`).join('')}${settings.tls ? '' : ' --no-tls'}`;
+  const keep = [...desired, ...served.filter((tld) => !desired.includes(tld))];
+  // Built from what the proxy is *proven* to be — its port and its scheme — not from what
+  // the project configured. A command that quietly moved a running proxy from :80 to :443,
+  // or turned TLS back on, would be a worse outcome than the missing TLD it set out to fix.
+  const sudo = resolved.port < PRIVILEGED_PORT_CEILING ? 'sudo ' : '';
+  const scheme = resolved.tls ? '' : ' --no-tls';
+  const port = resolved.port === (resolved.tls ? 443 : 80) ? '' : ` -p ${resolved.port}`;
+  const restart = `portless proxy stop && ${sudo}portless proxy start${port}${scheme}${keep.map((tld) => ` --tld ${tld}`).join('')}`;
   return [
     `; nothing is handed out under .${unusable.join(', .')}`,
     missing.length

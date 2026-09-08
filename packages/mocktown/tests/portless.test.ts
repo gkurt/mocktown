@@ -257,8 +257,12 @@ test('the running proxy decides the tld and port, not the config that has drifte
     // is restarting it, not syncing a hosts file that was never the problem.
     expect(status.reason).toContain('the running proxy does not serve .stale');
     // Additive: the TLD this proxy is already serving stays in the command, because it is
-    // one process for the machine and narrowing it would unserve someone else's names.
-    expect(status.reason).toContain('portless proxy start --tld stale --tld mocktown.localhost');
+    // one process for the machine and narrowing it would unserve someone else's names. And
+    // the port and scheme come from the proxy that is running, not from the config that has
+    // drifted — a command that moved a live proxy off its port would be the worse bug.
+    expect(status.reason).toContain(
+      `portless proxy stop && portless proxy start -p ${proxyPort} --no-tls --tld stale --tld mocktown.localhost`,
+    );
     expect(status.names[0]!.url).toBe(`http://api-stripe-com.names.mocktown.localhost:${proxyPort}`);
     expect(Object.keys(routes())).toEqual(['api-stripe-com.names.mocktown.localhost']);
     await releasePortless(status, settings(), binDir);
