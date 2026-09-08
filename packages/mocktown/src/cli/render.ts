@@ -546,8 +546,10 @@ function renderPortless(r: any): string[] {
     `  stable names ${r.available ? 'available' : r.enabled ? 'unavailable' : 'off'}${r.binary ? `  (${r.binary})` : ''}`,
     `  ${r.reason}`,
     // Which TLDs are live is the question a second one exists to answer, and a URL only
-    // ever shows the first.
+    // ever shows the first. The ones that did not answer print beside them, because the
+    // useful fact is never that the fallback works — it is that the preferred name does not.
     ...(r.tlds?.length ? [`  TLDs  ${r.tlds.map((tld: string) => `.${tld}`).join('  ')}`] : []),
+    ...(r.unusableTlds?.length ? [`  unusable  ${r.unusableTlds.map((tld: string) => `.${tld}`).join('  ')}`] : []),
     ...(r.names.length ? ['', ...r.names.map((n: any) => `  ${pad(n.service, 30)} ${n.url}`)] : []),
     ...(r.caBundle ? ['', `  CA bundle  ${r.caBundle}`] : []),
   ];

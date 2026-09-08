@@ -248,12 +248,51 @@ test('the running proxy decides the tld and port, not the config that has drifte
     const status = await syncPortless(input({ settings: { ...settings(), tlds: ['stale'], port: 9 } }));
     expect(status.available).toBe(true);
     expect(status.resolved).toMatchObject({ port: proxyPort, tls: false });
-    // Discovered leads, so URLs follow the proxy; the configured one is kept behind it
-    // rather than dropped, because a Host that never arrives costs nothing and a missing
-    // fallback costs the feature.
-    expect(status.resolved?.tlds).toEqual(['mocktown.localhost', 'stale']);
+    // The configured name was asked and stayed silent, so it is reported as unusable rather
+    // than handed out — an `.env.mocktown` full of addresses that do not resolve is worse
+    // than one that admits the preferred spelling is unavailable.
+    expect(status.resolved?.tlds).toEqual(['mocktown.localhost']);
+    expect(status.unusableTlds).toEqual(['stale']);
+    // And says which of the two fixes applies: this proxy never served the name, so the fix
+    // is restarting it, not syncing a hosts file that was never the problem.
+    expect(status.reason).toContain('the running proxy does not serve .stale');
+    // Additive: the TLD this proxy is already serving stays in the command, because it is
+    // one process for the machine and narrowing it would unserve someone else's names.
+    expect(status.reason).toContain('portless proxy start --tld stale --tld mocktown.localhost');
     expect(status.names[0]!.url).toBe(`http://api-stripe-com.names.mocktown.localhost:${proxyPort}`);
     expect(Object.keys(routes())).toEqual(['api-stripe-com.names.mocktown.localhost']);
+    await releasePortless(status, settings(), binDir);
+    expect(routes()).toEqual({});
+  } finally {
+    delete process.env.PORTLESS_STUB_TLD;
+    rmSync(join(stateDir, 'proxy.port'), { force: true });
+  }
+});
+
+test('a preferred TLD that does not resolve falls back to the one that does', async () => {
+  // The reason `.mocktown.localhost` is in the default list at all. `.mocktown` is served by
+  // the proxy — it is in the routes file — but resolving it needs the `/etc/hosts` entry
+  // portless writes, and that is the step that fails in a devcontainer, on a locked-down
+  // machine, or when someone declines the prompt. Serving a name is not the same as being
+  // able to reach it, so the list is settled by asking rather than by what the proxy claims.
+  //
+  // Nothing arranges a hosts entry here, so `.mocktown` genuinely does not resolve, which is
+  // the condition itself rather than a simulation of it.
+  process.env.PORTLESS_STUB_TLD = 'mocktown,mocktown.localhost';
+  writeFileSync(join(stateDir, 'proxy.port'), String(proxyPort));
+  try {
+    const status = await syncPortless(input({ settings: { ...settings(), tlds: ['mocktown', 'mocktown.localhost'] } }));
+    expect(status.available).toBe(true);
+    expect(status.tlds).toEqual(['mocktown.localhost']);
+    expect(status.unusableTlds).toEqual(['mocktown']);
+    // The other fix: the proxy is serving it, so the missing piece is the hosts entry.
+    expect(status.reason).toContain('.mocktown is served but did not resolve');
+    expect(status.reason).toContain('portless hosts sync');
+    // The URL that reaches `.env.mocktown` is the one that answered, with no edit by anyone.
+    expect(status.names[0]!.url).toBe(`http://api-stripe-com.names.mocktown.localhost:${proxyPort}`);
+    // The alias still exists under both, because the proxy serves both — what changed is
+    // which spelling gets handed out, not which the proxy would deliver.
+    expect(Object.keys(routes()).sort()).toEqual(['api-stripe-com.names.mocktown', 'api-stripe-com.names.mocktown.localhost']);
     await releasePortless(status, settings(), binDir);
     expect(routes()).toEqual({});
   } finally {

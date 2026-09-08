@@ -80,16 +80,23 @@ export interface PortlessStatus {
    */
   resolved: PortlessSettings | null;
   /**
-   * What the proxy serves, flattened out of `resolved` for clients — the contract does not
+   * The TLDs that answered, flattened out of `resolved` for clients — the contract does not
    * carry the whole settings object, and "are both my TLDs actually live" is the question
    * this feature exists to answer.
    */
   tlds: string[];
+  /**
+   * Configured or discovered, asked, and silent. Reported rather than dropped because the
+   * useful thing to know is not that `.mocktown.localhost` works — it always does — but that
+   * `.mocktown` does not, and that `portless hosts sync` is the fix.
+   */
+  unusableTlds: string[];
   names: PortlessName[];
 }
 
-export function unavailable(enabled: boolean, reason: string, binary: string | null = null, tlds: string[] = []): PortlessStatus {
-  return { enabled, available: false, reason, binary, caBundle: null, resolved: null, tlds, names: [] };
+/** Nothing was proven, so no TLD is live and every one that was going to be tried is not. */
+export function unavailable(enabled: boolean, reason: string, binary: string | null = null, unusable: string[] = []): PortlessStatus {
+  return { enabled, available: false, reason, binary, caBundle: null, resolved: null, tlds: [], unusableTlds: unusable, names: [] };
 }
 
 /** PATH first, then the workspace's own `node_modules/.bin` — portless is often a devDependency. */
@@ -296,28 +303,39 @@ async function proveUsable(
   project: string,
   caBundle: string,
   settings: PortlessSettings,
-): Promise<{ ok: boolean; reason: string; resolved: PortlessSettings | null }> {
+): Promise<{ ok: boolean; reason: string; resolved: PortlessSettings | null; unusable: string[] }> {
   const nonce = id('probe');
   const name = stableName(project, `mocktown-probe-${nonce.slice(-8)}`);
   const port = await findFreePort();
   const server = Bun.serve({ port, hostname: '127.0.0.1', fetch: () => new Response(nonce) });
 
+  /** One request, and what to tell a person if it did not come back as ours. */
+  const ask = async (url: string, tls: boolean, ca: string | undefined): Promise<string | null> => {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(PROBE_ATTEMPT_MS), tls: tls && ca ? { ca } : undefined });
+      const body = await response.text();
+      if (body.trim() === nonce) return null;
+      return `${url} answered ${response.status} but not from our listener, so something else owns that name`;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return (
+        `${url} did not answer (${detail}). The proxy may not be running (\`portless proxy start\`), the CA may not be trusted ` +
+        `(\`portless trust\`), or the name may not resolve (\`portless hosts sync\`).`
+      );
+    }
+  };
+
   try {
     const registered = await alias(binary, name, port, settings);
-    if (!registered.ok) return { ok: false, reason: `\`portless alias\` failed: ${registered.output}`, resolved: null };
+    if (!registered.ok) return { ok: false, reason: `\`portless alias\` failed: ${registered.output}`, resolved: null, unusable: [] };
 
-    // Discovered first, then anything configured it did not mention. Replacing outright
-    // would be wrong in a way that is invisible: a proxy serving two TLDs may only record
-    // a route under one of them, and dropping the other from the alias table and NO_PROXY
-    // breaks the fallback exactly when the primary is the one that failed. A configured
-    // TLD the proxy is not serving costs nothing — it is a Host that never arrives — while
-    // the discovered one still leads, so URLs follow the proxy rather than a stale config.
+    // Configured order first, because that is the preference, then whatever the running proxy
+    // turned out to be serving that the config never mentioned — a proxy someone started by
+    // hand with a different `--tld` still works rather than reporting nothing. Which of these
+    // is actually reachable is not decided here; it is decided by asking, below.
     const found = discoverTlds(settings, name);
-    const discovered = {
-      tlds: [...found, ...settings.tlds.filter((tld) => !found.includes(tld))],
-      port: discoverPort(settings) ?? settings.port,
-      stateDir: settings.stateDir,
-    };
+    const candidates = [...settings.tlds, ...found.filter((tld) => !settings.tlds.includes(tld))];
+    const base = { port: discoverPort(settings) ?? settings.port, stateDir: settings.stateDir };
     // Verifying against the bundle we assembled is the point: if the app would not trust
     // this certificate, neither should this probe, and a pass here means the bundle is right.
     const ca = existsSync(caBundle) ? readFileSync(caBundle, 'utf8') : undefined;
@@ -325,37 +343,93 @@ async function proveUsable(
     // `portless alias` exits once the route is written, which is a moment before the running
     // proxy reloads it — fetching immediately gets the proxy's own 404 for an unknown name.
     // Every probe would fail on a working setup, so poll instead of trusting the exit code.
+    //
+    // Only until *something* answers, though. That first answer settles the scheme and proves
+    // the route is loaded; after it, a TLD that stays silent is silent for a reason that does
+    // not heal by waiting — no `/etc/hosts` entry, or a proxy not serving it — so the rest are
+    // decided in one pass rather than each paying the timeout.
     const deadline = Date.now() + PROBE_TIMEOUT_MS;
+    let live: { tld: string; tls: boolean } | null = null;
     let last = 'no attempt made';
-    while (Date.now() < deadline) {
+    while (!live && Date.now() < deadline) {
       // The scheme is the one thing portless does not write down, so it is settled the same
       // way as everything else here: by asking, starting with what the project configured.
       for (const tls of [settings.tls, !settings.tls]) {
-        const resolved: PortlessSettings = { ...discovered, tls };
-        const url = stableUrl(name, resolved);
-        try {
-          const response = await fetch(url, {
-            signal: AbortSignal.timeout(PROBE_ATTEMPT_MS),
-            tls: tls && ca ? { ca } : undefined,
-          });
-          const body = await response.text();
-          if (body.trim() === nonce)
-            return { ok: true, reason: `proven: ${url} reached a mocktown listener on :${port} through the portless proxy`, resolved };
-          last = `${url} answered ${response.status} but not from our listener, so something else owns that name`;
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          last =
-            `${url} did not answer (${detail}). The proxy may not be running (\`portless proxy start\`), the CA may not be trusted ` +
-            `(\`portless trust\`), or the name may not resolve (\`portless hosts sync\`).`;
+        for (const tld of candidates) {
+          const failure = await ask(stableUrl(name, { ...base, tlds: [tld], tls }), tls, ca);
+          if (!failure) {
+            live = { tld, tls };
+            break;
+          }
+          last = failure;
         }
+        if (live) break;
       }
-      await Bun.sleep(PROBE_POLL_MS);
+      if (!live) await Bun.sleep(PROBE_POLL_MS);
     }
-    return { ok: false, reason: last, resolved: null };
+    if (!live) return { ok: false, reason: last, resolved: null, unusable: candidates };
+
+    // Now classify the rest. `.mocktown` resolves only because portless wrote `/etc/hosts`,
+    // and that is the step that fails on a locked-down machine or when someone declines the
+    // prompt; `.mocktown.localhost` needs nothing. Handing out the first name without
+    // checking is how a person ends up with an `.env.mocktown` full of addresses that do not
+    // resolve, so the list that survives here is the list that answered.
+    const proven: string[] = [];
+    const unusable: string[] = [];
+    for (const tld of candidates) {
+      if (tld === live.tld) {
+        proven.push(tld);
+        continue;
+      }
+      const failure = await ask(stableUrl(name, { ...base, tlds: [tld], tls: live.tls }), live.tls, ca);
+      if (failure) unusable.push(tld);
+      else proven.push(tld);
+    }
+
+    const resolved: PortlessSettings = { ...base, tlds: proven, tls: live.tls };
+    const url = stableUrl(name, resolved);
+    return {
+      ok: true,
+      reason: `proven: ${url} reached a mocktown listener on :${port} through the portless proxy${whyUnusable(unusable, found, settings)}`,
+      resolved,
+      unusable,
+    };
   } finally {
     await unalias(binary, name, settings).catch(() => {});
     server.stop(true);
   }
+}
+
+/**
+ * Why a TLD did not answer, in the only two shapes that matter, because they have different
+ * fixes and telling them apart is the difference between a person restarting their proxy and
+ * a person running `hosts sync` at a proxy that was never serving the name to begin with.
+ *
+ * The proxy is machine-wide and shared, so a config the running one predates is the ordinary
+ * case, not an error — hence a sentence rather than a failure.
+ */
+function whyUnusable(unusable: string[], served: string[], settings: PortlessSettings): string {
+  if (!unusable.length) return '';
+  // An unreadable routes file leaves `served` empty, and "your proxy is not serving this"
+  // would then be a guess dressed as a diagnosis.
+  const missing = served.length ? unusable.filter((tld) => !served.includes(tld)) : [];
+  const silent = unusable.filter((tld) => !missing.includes(tld));
+  // Additive, never replacing. The proxy is one process for the whole machine, so a command
+  // listing only what this project wants would quietly unserve every name another project —
+  // or the person's own app — is reachable under. Config first, since that is the preference.
+  const keep = [...settings.tlds, ...served.filter((tld) => !settings.tlds.includes(tld))];
+  const restart = `portless proxy start${keep.map((tld) => ` --tld ${tld}`).join('')}${settings.tls ? '' : ' --no-tls'}`;
+  return [
+    `; nothing is handed out under .${unusable.join(', .')}`,
+    missing.length
+      ? ` — the running proxy does not serve .${missing.join(', .')}, so restart it with \`${restart}\`, which keeps the ` +
+        `${served.length === 1 ? 'name' : 'names'} it already serves`
+      : '',
+    silent.length
+      ? ` — .${silent.join(', .')} ${silent.length === 1 ? 'is' : 'are'} served but did not resolve, which usually means the ` +
+        '`/etc/hosts` entry is missing (`portless hosts sync`)'
+      : '',
+  ].join('');
 }
 
 export interface SyncPortlessInput {
@@ -394,7 +468,7 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
 
   const caBundle = writeCaBundle(input.project, [input.projectCaPath, ...portlessCaCerts(input.settings)]);
   const proof = await proveUsable(binary, input.project, caBundle, input.settings);
-  if (!proof.ok || !proof.resolved) return { ...unavailable(true, proof.reason, binary, input.settings.tlds), caBundle };
+  if (!proof.ok || !proof.resolved) return { ...unavailable(true, proof.reason, binary, proof.unusable), caBundle };
   const settings = proof.resolved;
 
   const names: PortlessName[] = [];
@@ -425,6 +499,7 @@ export async function syncPortless(input: SyncPortlessInput): Promise<PortlessSt
     caBundle,
     resolved: settings,
     tlds: settings.tlds,
+    unusableTlds: proof.unusable,
     names,
   };
 }

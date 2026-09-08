@@ -479,7 +479,7 @@ export class ProjectRuntime {
       // Every stable name must bypass: the app has to reach its own mock directly, or the
       // request for it would enter the front door and be denied as an unknown host. One
       // suffix per served TLD — a fallback TLD nobody excluded is a fallback that fails.
-      required: stable ? (stable.resolved?.tlds ?? this.portlessSettings().tlds).map((tld) => `.${tld}`) : undefined,
+      required: stable ? this.candidateTlds().map((tld) => `.${tld}`) : undefined,
     });
   }
 
@@ -787,13 +787,23 @@ export class ProjectRuntime {
    * person should be asked to build a mock for. Both spellings go in: the Host as sent, and
    * the form `loopbackAlias` leaves behind after stripping `.localhost`.
    */
+  /**
+   * Every TLD a request could plausibly arrive under: the ones that answered the probe, the
+   * ones that did not, and the ones the project configured. Deliberately wider than the list
+   * URLs are built from — that one is proven, because a name mocktown hands out has to work,
+   * while answering a `Host` costs nothing and refusing one is a 501 nobody can read. A
+   * `.mocktown` that starts resolving mid-session, because someone ran `portless hosts sync`
+   * after the probe, is exactly the case this covers.
+   */
+  private candidateTlds(): string[] {
+    const stable = this.portless;
+    return [...new Set([...(stable?.resolved?.tlds ?? []), ...(stable?.unusableTlds ?? []), ...this.portlessSettings().tlds])];
+  }
+
   private applyStableAliases(): void {
     const generated = this.providers.find((p) => p.kind === 'generated') as GeneratedProvider | undefined;
     if (!generated) return;
-    // What the proxy is actually serving, which is not necessarily what the project declared.
-    // Every TLD, not just the one URLs are built from: a request that arrives on the
-    // fallback spelling is the case the fallback exists for, and a 501 there defeats it.
-    const tlds = this.portless?.resolved?.tlds ?? this.portlessSettings().tlds;
+    const tlds = this.candidateTlds();
     const aliases = new Map<string, string>();
     const claim = (name: string, service: string) => {
       aliases.set(name, service);

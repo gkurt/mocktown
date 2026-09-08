@@ -289,10 +289,12 @@ registers a throwaway name and fetches it back through the proxy — before it c
 and reports the reason if it cannot. `mocktown env portless get` shows the verdict.
 
 `portless.tlds` is an ordered list, `["mocktown", "mocktown.localhost"]` by default. URLs are
-built from the first; the rest are served alongside it as fallbacks. The second one earns its
-place: `.mocktown` resolves only because portless writes `/etc/hosts`, and `.localhost`
-resolves to loopback whether or not that succeeded. Whatever the running proxy turns out to
-be serving is discovered and takes precedence over the config.
+built from the first one that *works*, not the first one configured: `.mocktown` resolves only
+because portless writes `/etc/hosts`, and `.localhost` resolves to loopback whether or not that
+succeeded. Each is probed through the proxy, so `.env.mocktown` picks up the fallback by itself
+on a machine where the preferred name cannot be reached. `mocktown env portless get` lists both
+what answered and what did not, with the fix for each — a TLD the proxy is not serving needs the
+proxy restarted, one it serves that does not resolve needs `portless hosts sync`.
 
 ## Layout
 

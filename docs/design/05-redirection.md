@@ -140,11 +140,21 @@ Two further consequences, both deliberate:
     same proxy reachable when the first cannot be arranged. portless takes a repeated `--tld`
     and serves them all, so the fallback costs one flag rather than a second proxy. The head
     of the list is the one URLs are built from, because `.env.mocktown` holds one value per
-    service; the rest are accepted as `Host`, aliased, and kept out of `NO_PROXY`. What the
-    running proxy is serving is read back from its routes file and leads the list, so a
-    config that has drifted is a preference rather than a duty — but a configured TLD the
-    proxy never mentions is kept behind it rather than dropped, since a `Host` that never
-    arrives costs nothing and a missing fallback costs the feature.
+    service; the rest are accepted as `Host`, aliased, and kept out of `NO_PROXY`.
+  - **Which TLD is usable is asked, not assumed.** Being served is not the same as being
+    reachable: `.mocktown` is in the proxy's routes and still fails to resolve until portless
+    has written `/etc/hosts`. So the probe asks every candidate — configured first, then any
+    the running proxy turned out to be serving that the config never mentioned — and the list
+    that survives is the list that answered, most preferred first. `.env.mocktown` therefore
+    carries `.mocktown` on a machine where the hosts entry exists and `.mocktown.localhost`
+    on one where it does not, with nothing for anyone to edit. The polling that covers the
+    proxy's reload lag runs only until *something* answers; after that a silent TLD is silent
+    for a reason that does not heal by waiting, so the rest are settled in one pass. The two
+    reasons it can be silent have different fixes and are reported apart: a TLD the proxy is
+    not serving needs the proxy restarted with it, a TLD it serves that does not resolve needs
+    `portless hosts sync`. Unusable TLDs stay in the alias table and in `NO_PROXY` even though
+    no URL is built from them — answering a `Host` that does arrive costs nothing, and one
+    that starts resolving mid-session because someone ran `hosts sync` should not 501.
   - **Off by default and never load-bearing.** portless binds 443 with sudo, edits
     `/etc/hosts` and installs a CA in the system trust store; that is a person's decision,
     not a config default's. Every failure degrades to loopback URLs with the reason attached.

@@ -249,11 +249,10 @@ export const PortlessStatus = z.object({
   reason: z.string().describe('How availability was proven, or exactly what stopped it'),
   binary: z.string().nullable(),
   caBundle: z.string().nullable().describe("PEM holding the project CA and portless's, for NODE_EXTRA_CA_CERTS"),
-  tlds: z
+  tlds: z.array(z.string()).describe('TLDs that answered the probe. First is the one URLs are built from; empty when nothing was proven'),
+  unusableTlds: z
     .array(z.string())
-    .describe(
-      'TLDs the running proxy turned out to be serving, or the configured ones when nothing has been proven. First is the one URLs use',
-    ),
+    .describe('TLDs that were configured or served but did not answer — usually a missing /etc/hosts entry (`portless hosts sync`)'),
   names: z.array(z.object({ service: z.string(), name: z.string(), url: z.string() })),
 });
 export type PortlessStatus = z.infer<typeof PortlessStatus>;
