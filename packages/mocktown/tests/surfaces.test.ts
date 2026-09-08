@@ -258,11 +258,12 @@ describe("mocktown.json's JSON Schema", () => {
     // `.mocktown/` says for itself what of it is committed, so the repo's own .gitignore
     // carries only the file that lives outside it.
     expect(readFileSync(join(fresh, '.gitignore'), 'utf8')).toContain('.env.mocktown');
-    const localIgnore = readFileSync(workspacePaths(fresh).localIgnore, 'utf8');
-    // Anchored, or `*` matches at every depth and re-ignores the files inside `mocks/`.
-    expect(localIgnore).toContain('/*');
-    expect(localIgnore).toContain('!/mocks/');
-    expect(localIgnore).toContain('!/panels/');
+    // Only what mocktown derives is named; the mocks, the panels and anything a person
+    // adds are committed without needing a rule.
+    const rules = readFileSync(workspacePaths(fresh).localIgnore, 'utf8')
+      .split('\n')
+      .filter((line) => line && !line.startsWith('#'));
+    expect(rules).toEqual(['/config.local.json', '/mocktown.schema.json', '/issues/']);
     rmSync(schemaPath);
     new ProjectRuntime(resolveProject({ cwd: fresh })).ensureDirs();
     expect(existsSync(schemaPath)).toBe(true);

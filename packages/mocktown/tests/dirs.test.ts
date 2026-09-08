@@ -10,8 +10,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const { workspacePaths, committedDirs, DEFAULT_DIRS } = await import('#src/config/paths.ts');
-const { renderLocalIgnore, localIgnoreMisses } = await import('#src/config/ignore.ts');
+const { workspacePaths, derivedPaths, DEFAULT_DIRS } = await import('#src/config/paths.ts');
+const { renderLocalIgnore } = await import('#src/config/ignore.ts');
 
 describe('dirs', () => {
   test('defaults put everything under .mocktown/', () => {
@@ -53,7 +53,10 @@ describe('.mocktown/.gitignore', () => {
     writeFileSync(join(paths.panelsDir, 'state.html'), '<p>state</p>\n');
     writeFileSync(join(paths.issuesDir, 'iss_1.json'), '{}\n');
     writeFileSync(paths.localConfig, '{}\n');
-    writeFileSync(paths.localIgnore, renderLocalIgnore(paths.localDir, committedDirs(paths)));
+    writeFileSync(join(paths.localDir, 'notes.md'), '# what the seed data means\n');
+    writeFileSync(paths.schemaFile, '{}\n');
+    const derived = derivedPaths(paths);
+    writeFileSync(paths.localIgnore, renderLocalIgnore(paths.localDir, derived.files, derived.dirs));
 
     const status = await Bun.$`git -C ${repo} status --porcelain --untracked-files=all`.text();
     const seen = status
@@ -65,21 +68,36 @@ describe('.mocktown/.gitignore', () => {
     // Hand-authored like the mocks, and swept into the ignore only because it shares a parent.
     expect(seen).toContain('.mocktown/panels/state.html');
     expect(seen).toContain('.mocktown/.gitignore');
+    // The point of naming the derived files rather than ignoring everything: a file
+    // mocktown has never heard of belongs to whoever put it there.
+    expect(seen).toContain('.mocktown/notes.md');
+
     expect(seen.some((path) => path.includes('issues'))).toBe(false);
     expect(seen.some((path) => path.includes('config.local.json'))).toBe(false);
+    expect(seen.some((path) => path.includes('mocktown.schema.json'))).toBe(false);
   }, 20_000);
 
-  test('a mocks directory outside .mocktown needs no line, and is not reported missing', () => {
-    const paths = workspacePaths('/repo', { mocks: 'mocks', panels: 'panels' });
-    const rendered = renderLocalIgnore(paths.localDir, committedDirs(paths));
-    expect(rendered).not.toContain('!/mocks/');
-    expect(rendered).not.toContain('!/panels/');
-    expect(localIgnoreMisses('/repo/.mocktown/.gitignore', paths.localDir, committedDirs(paths))).toEqual([]);
+  test('it names only what mocktown derives', () => {
+    const paths = workspacePaths('/repo');
+    const derived = derivedPaths(paths);
+    const lines = renderLocalIgnore(paths.localDir, derived.files, derived.dirs)
+      .split('\n')
+      .filter((line) => line && !line.startsWith('#'));
+
+    expect(lines).toEqual(['/config.local.json', '/mocktown.schema.json', '/issues/']);
   });
 
-  test('a moved directory inside .mocktown is reported until the line is there', () => {
-    const paths = workspacePaths('/repo', { mocks: '.mocktown/handwritten' });
-    expect(localIgnoreMisses('/repo/.mocktown/.gitignore', paths.localDir, committedDirs(paths))).toEqual(['handwritten', 'panels']);
-    expect(renderLocalIgnore(paths.localDir, committedDirs(paths))).toContain('!/handwritten/');
+  // Nothing has to be un-ignored, so moving a directory cannot silently stop it being
+  // tracked — the failure the previous ignore-everything form had to warn about.
+  test('a moved mocks directory needs no change to the ignore file', () => {
+    const moved = workspacePaths('/repo', { mocks: '.mocktown/handwritten' });
+    const derived = derivedPaths(moved);
+    expect(renderLocalIgnore(moved.localDir, derived.files, derived.dirs)).not.toContain('handwritten');
+  });
+
+  test('an issues directory moved outside .mocktown drops off the list', () => {
+    const paths = workspacePaths('/repo', { issues: 'tmp/issues' });
+    const derived = derivedPaths(paths);
+    expect(renderLocalIgnore(paths.localDir, derived.files, derived.dirs)).not.toContain('issues');
   });
 });

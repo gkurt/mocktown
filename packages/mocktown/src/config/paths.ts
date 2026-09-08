@@ -103,8 +103,11 @@ export const workspacePaths = (repoRoot: string, dirs: Partial<WorkspaceDirs> = 
 };
 
 /**
- * The hand-authored half of a workspace. Both are written by people (or by an agent on
- * their behalf) and are worth having on the next machine that clones the repo; issues and
- * the generated schema are derived and are not.
+ * What mocktown generates into `.mocktown/`, and would rather not see in a diff. Named
+ * here so `.mocktown/.gitignore` can list them and leave everything else alone — the
+ * mocks and panels are hand-authored, and so is whatever someone else keeps in there.
  */
-export const committedDirs = (paths: ReturnType<typeof workspacePaths>) => [paths.mocksDir, paths.panelsDir];
+export const derivedPaths = (paths: ReturnType<typeof workspacePaths>) => ({
+  files: [paths.localConfig, paths.schemaFile],
+  dirs: [paths.issuesDir],
+});

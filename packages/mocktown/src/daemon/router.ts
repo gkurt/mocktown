@@ -15,8 +15,8 @@ import { and, desc, eq } from 'drizzle-orm';
 import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
-import { localIgnoreMisses, writeLocalIgnore } from '#src/config/ignore.ts';
-import { committedDirs, projectPaths } from '#src/config/paths.ts';
+import { writeLocalIgnore } from '#src/config/ignore.ts';
+import { derivedPaths, projectPaths } from '#src/config/paths.ts';
 import { loadGlobalConfig } from '#src/config/project.ts';
 import { writeService } from '#src/config/services.ts';
 import { settingsOf, writeSetting } from '#src/config/settings.ts';
@@ -73,16 +73,6 @@ export const router = os.router({
       // Provider failures only. Anything a reader cannot put right from here is not a
       // warning: the registry is `services`, and a decision someone owes is an issue.
       const warnings = runtime.providerStatuses().flatMap((p) => p.warnings);
-
-      // The exception that earns its place: mocks git cannot see are mocks the next clone
-      // will not have, and the symptom shows up far from the cause. One line fixes it.
-      const paths = runtime.resolved.paths;
-      for (const missing of paths ? localIgnoreMisses(paths.localIgnore, paths.localDir, committedDirs(paths)) : []) {
-        warnings.push(
-          `${paths?.localIgnore} does not un-ignore ${missing}/, so nothing you write there is tracked by git. ` +
-            `Add \`!/${missing}/\` to it.`,
-        );
-      }
 
       return {
         project: runtime.name,
@@ -521,7 +511,7 @@ export const router = os.router({
       mkdirSync(paths.mocksDir, { recursive: true });
       // A project that predates `.mocktown/.gitignore` gets it the first time it scaffolds,
       // rather than only on an `init` it will never run again.
-      writeLocalIgnore(paths.localIgnore, paths.localDir, committedDirs(paths));
+      writeLocalIgnore(paths.localIgnore, paths.localDir, derivedPaths(paths).files, derivedPaths(paths).dirs);
       const { files, brief } = scaffoldMock(paths.mocksDir, corpus, { force: input.force });
       return { project: runtime.name, service: input.service, files, brief };
     }),

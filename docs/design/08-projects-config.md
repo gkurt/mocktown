@@ -52,12 +52,20 @@ ports (regenerate instead).
 
 `.mocktown/` decides for itself what of it is committed, via a `.mocktown/.gitignore`
 that `mocktown init` writes — so mocktown adds exactly one line (`.env.mocktown`) to a
-`.gitignore` that belongs to the project. That file is also the only form that works:
-git does not descend into an ignored directory, so a repo-level `.mocktown/` would make
-any later `!.mocktown/mocks/` unreachable, and the mocks would silently stop being
-tracked. `dirs` in `mocktown.json` moves any of the three directories; `mocktown.json`
-and `.env.mocktown` stay at the root, being the project's identity and a file loaded by
-name from a shell.
+`.gitignore` that belongs to the project. It is also the only form that works: git does
+not descend into an ignored directory, so a repo-level `.mocktown/` would make anything
+underneath it unreachable however the rules inside were written.
+
+**That file names what mocktown derives, and ignores nothing else.** Machine-local
+config, the generated JSON Schema, and the issue files mirrored from the database. The
+mocks, the panels, and whatever else someone keeps beside them are committed without
+needing a rule — an ignore-everything form silently swallows anything mocktown has not
+been taught about, and the loss shows up on someone else's clone rather than on the
+machine that caused it.
+
+`dirs` in `mocktown.json` moves any of the three directories; `mocktown.json` and
+`.env.mocktown` stay at the root, being the project's identity and a file loaded by name
+from a shell.
 
 ## Config layers (lowest to highest precedence)
 
@@ -80,7 +88,7 @@ name from a shell.
 <repo>/mocktown.json                    # committed identity + service registry
 <repo>/.env.mocktown                    # generated, gitignored
 <repo>/.mocktown/                       # one directory, `dirs`-configurable
-  ├─ .gitignore                         # generated: ignores all of the below but mocks/, panels/
+  ├─ .gitignore                         # generated: names the derived entries below, nothing else
   ├─ mocks/                             # committed — the agent loop's output
   ├─ panels/                            # committed — workspace GUI panels
   ├─ issues/*.json                       # mirrored from the database each session
