@@ -5,9 +5,33 @@
  * the contract has to carry it, which is what keeps agents and humans looking at the same
  * truth.
  */
+import { homedir } from 'node:os';
 import { shellAssignment } from '#src/env/generate.ts';
 
 const pad = (value: unknown, width: number) => String(value ?? '').padEnd(width);
+
+const HOME = homedir();
+
+/**
+ * `/Users/you/Work/repo` -> `~/Work/repo`, everywhere the human rendering prints a path.
+ * Applied to the finished line rather than at each call site, because the interesting
+ * paths — data dirs, workspaces, mock files, the CA bundle — are printed from two dozen
+ * places and a helper only reaches the ones someone remembered.
+ *
+ * The trailing slash is the whole guard: `~` for `/Users/gokhankurt` must not also claim
+ * `/Users/gokhankurt2`. `--json` is untouched and still carries the real path, which is
+ * what anything reading this output should be using.
+ */
+export const tilde = (line: string) => (HOME === '/' ? line : line.replaceAll(`${HOME}/`, '~/'));
+
+/**
+ * Commands whose output is pasted into a shell rather than read. `shellAssignment` quotes
+ * any path containing a space, and a `~` inside those quotes is a literal tilde that no
+ * shell expands — shortening here would hand out a variable that silently points nowhere.
+ * Whole commands rather than the assignment lines alone: the same paths appear in the prose
+ * around them, and a listing where one copy is shortened and another is not reads as a bug.
+ */
+const PASTEABLE = new Set(['env.get', 'env.write', 'record.start']);
 
 export function renderResult(path: string[], result: any): string[] {
   const lines: string[] = [];
@@ -17,13 +41,10 @@ export function renderResult(path: string[], result: any): string[] {
 
   const command = path.join('.');
   const custom = RENDERERS[command];
-  if (custom) {
-    lines.push(...custom(result));
-    return lines;
-  }
+  if (custom) lines.push(...custom(result));
+  else lines.push(...renderGeneric(result));
 
-  lines.push(...renderGeneric(result));
-  return lines;
+  return PASTEABLE.has(command) ? lines : lines.map(tilde);
 }
 
 export const RENDERERS: Record<string, (result: any) => string[]> = {

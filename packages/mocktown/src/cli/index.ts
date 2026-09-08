@@ -21,7 +21,7 @@ import type * as z from 'zod/v4';
 import { launch } from '#src/capture/launch.ts';
 import { coerceInput, kebab } from '#src/cli/coerce.ts';
 import { clientFor, ensureDaemon } from '#src/cli/daemon-client.ts';
-import { feedLine, renderResult } from '#src/cli/render.ts';
+import { feedLine, renderResult, tilde } from '#src/cli/render.ts';
 import { SCHEMA_REF, writeProjectFileJsonSchema } from '#src/config/jsonschema.ts';
 import { projectPaths, workspacePaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
@@ -210,9 +210,9 @@ program
 
     ensureRegistered(resolveProject({ cwd }));
     console.log(`project: ${project}`);
-    console.log(`  wrote ${file}`);
-    console.log(`  data dir ${projectPaths(project).root}`);
-    console.log(`  wrote ${workspacePaths(cwd).schemaFile}`);
+    console.log(tilde(`  wrote ${file}`));
+    console.log(tilde(`  data dir ${projectPaths(project).root}`));
+    console.log(tilde(`  wrote ${workspacePaths(cwd).schemaFile}`));
     if (missing.length) console.log(`  gitignored ${missing.join(', ')}`);
   });
 
@@ -326,7 +326,7 @@ program
     const project = resolveProject({ project: globals.project as string | undefined });
     const db = projectPaths(project.name).db;
     console.log(`project: ${project.name}`);
-    console.log(`  database ${db}`);
+    console.log(tilde(`  database ${db}`));
     // Studio runs under Node, which cannot use `bun:sqlite`, so it needs its own driver.
     // It is an optional dependency: a platform where it fails to build should lose the
     // viewer, not the product.
