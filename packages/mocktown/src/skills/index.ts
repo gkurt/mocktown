@@ -219,7 +219,8 @@ import * as z from 'zod/v4';
 
 export default defineMock({
   service: "<hostname>",
-  knobs: { latencyMs: { schema: z.number().int().min(0), default: 0, description: "…" } },
+  // \`latencyMs\` and \`errorRate\` are built in — declare only dials specific to this service.
+  knobs: { <name>: { schema: z.boolean(), default: false, description: "…" } },
   seed: ({ state, profile }) => { /* per-profile fixtures; empty-org gets nothing */ },
   routes: [
     { method: "GET", path: "/v1/things/{thingId}", describe: "…", handler: (req, ctx) => ({ status: 200, body: … }) },

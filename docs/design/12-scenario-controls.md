@@ -25,10 +25,25 @@ A knob is an agent-declared configuration parameter on a generated mock — e.g.
   `hash(sessionSeed, service, endpoint, profile, stableRequestIdentity)` — so the
   same GET for the same profile in the same session always lands on the same value,
   regardless of request ordering elsewhere.
+- **`latencyMs` and `errorRate` are built in.** They are properties of a network and a
+  server, not of any one service, so declaring them per-mock put a universal fact
+  where it could vary — and the scaffold printed the *declarations* while leaving the
+  enforcement to each generating agent, which is how one project ended up with three
+  identical hand-written wrappers and no way to notice a fourth mock that forgot. The
+  manifest lives in `scenario/knobs.ts` and the host applies both once, before the
+  handler runs. A mock that declares either name wins, the way a mock's own `OPTIONS`
+  route beats the reflected preflight. The injected 500 carries **no body**: an error
+  envelope is the service's own, and the host cannot know whether this one says
+  `Error`, `error` or RFC 7807.
+- **Replay is exempt from the built-ins.** A corpus replay asks whether the mock still
+  honours the contract, and injected chaos is not part of any contract. With these
+  built in rather than per-mock, one dial left turned would otherwise fail every
+  service at once. Knobs a *mock* declares are left alone — those are the service's own
+  behaviour, and neutralising them would change what is being verified.
 - **House rule for generating agents**: prefer *profile variation* (below) for
-  data-shape scenarios (empty vs. populated); use knobs for cross-cutting dials
-  (latency, error injection, volume scaling) and for overrides a human wants to turn
-  while watching the app.
+  data-shape scenarios (empty vs. populated); use knobs for dials specific to *this*
+  service (volume scaling, a dependency's failure mode) and for overrides a human wants
+  to turn while watching the app.
 
 ## Auth profiles (first-class)
 

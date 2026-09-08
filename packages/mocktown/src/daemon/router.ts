@@ -370,9 +370,24 @@ export const router = os.router({
         inflateRecording(runtime.name, row),
       );
 
+      // The same schema `mocks verify` uses. Closing an issue used to judge the exchange
+      // without it, so one exchange could pass one command and fail the other — and it was
+      // the stricter, corpus-only judgement that gated the queue.
+      const issueMocksDir = runtime.resolved.paths?.mocksDir;
+      let issueSchemas = null;
+      if (issueMocksDir) {
+        try {
+          issueSchemas = await loadSchemas(issueMocksDir, issue.service);
+        } catch (error) {
+          throw new ORPCError('CONFLICT', {
+            message: `the checked-in schema for "${issue.service}" could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
+
       const result = await verifyRecordings(
         recordings,
-        { baseUrl, service: issue.service, notEvidence: runtime.resolved.file?.verify?.notEvidence },
+        { baseUrl, service: issue.service, schemas: issueSchemas },
         runtime.currentScrubber,
       );
       // An empty replay is not a passing replay. Closing an issue on zero evidence is worse
@@ -442,11 +457,7 @@ export const router = os.router({
           });
         }
       }
-      const result = await verifyRecordings(
-        recordings,
-        { baseUrl, service: input.service, schemas, notEvidence: runtime.resolved.file?.verify?.notEvidence },
-        runtime.currentScrubber,
-      );
+      const result = await verifyRecordings(recordings, { baseUrl, service: input.service, schemas }, runtime.currentScrubber);
 
       // A failing replay is evidence, so it becomes work rather than console output.
       for (const failure of result.failures) {

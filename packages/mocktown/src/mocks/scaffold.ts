@@ -246,11 +246,10 @@ import { defineMock, z } from "mocktown/mock";
 export default defineMock({
   service: ${JSON.stringify(corpus.service)},
 
-  // Cross-cutting dials only. Data-shape scenarios belong in profiles, not knobs.
-  knobs: {
-    latencyMs: { schema: z.number().int().min(0).max(10_000), default: 0, description: "Artificial delay before responding." },
-    errorRate: { schema: z.number().min(0).max(1), default: 0, description: "Fraction of requests that fail with a 500." },
-  },
+  // Cross-cutting dials only, and only ones specific to THIS service — \`latencyMs\` and
+  // \`errorRate\` are built in and enforced by the host. Data-shape scenarios belong in
+  // profiles, not knobs.
+  knobs: {},
 
   // The seed IS the reset target. Every project needs at least \`default\` and \`empty-org\`.
   seed: ({ state, profile }) => {

@@ -164,10 +164,18 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     ...(r.result.skipped ? [`${r.result.skipped} socket recordings skipped: replay compares one request to one response`] : []),
     // Printed every run, never folded into the total: an exemption the reader cannot see is
     // worse than the failure it replaced.
-    ...(r.result.ignored?.length
+    ...(r.result.restated?.length
       ? [
-          `${r.result.ignored.length} exchange${r.result.ignored.length === 1 ? '' : 's'} held out by verify.notEvidence:`,
-          ...[...new Set(r.result.ignored.map((i: any) => `  ${i.method} ${i.pathTemplate} (recorded ${i.status}) — ${i.why}`))],
+          // Not a footnote: "this route no longer 500s" and "every route now 401s" are the
+          // same line in a pass count, and only one of them is good news.
+          `${r.result.restated.length} answered with a declared status the recording did not have:`,
+          ...[
+            ...new Set(
+              r.result.restated.map(
+                (e: any) => `  ${e.method} ${e.pathTemplate}: recorded ${e.recordedStatus}, mock returned ${e.actualStatus}`,
+              ),
+            ),
+          ],
         ]
       : []),
     // Which oracle ran is the difference between "matches a schema you reviewed" and

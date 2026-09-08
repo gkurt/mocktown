@@ -258,15 +258,16 @@ test('a failure names the route, not only the one request that showed it', async
 });
 
 /**
- * The escape hatch for a corpus that recorded an outage.
+ * The corpus that recorded an outage.
  *
  * A real upstream that was erroring when it was captured recorded its outage, and replay
- * then holds the mock to reproducing it forever. The honest answer is not to make the mock
- * serve a 500 by default, and it is not to leave a permanent red either — it is to write
- * down that the recording is not evidence, with the reason, where a reviewer can see it.
+ * used to hold the mock to reproducing it forever: the status was compared against the
+ * recording no matter what the author had checked in. The answer is not a second
+ * exemption mechanism — `schema.ts` is already keyed by route *and status*, so listing a
+ * status there is the project saying that status is part of the contract.
  */
-test('a recording declared not-evidence is held out of the replay, with its reason', async () => {
-  const server = Bun.serve({ port: 0, fetch: () => Response.json({ ok: true }) });
+test('a status the schema declares is a valid status, whichever one the corpus caught', async () => {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({ items: [] }) });
   const target = { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' };
   const outage = recording({
     id: 'rec_outage',
@@ -277,57 +278,86 @@ test('a recording declared not-evidence is held out of the replay, with its reas
   });
 
   try {
-    // Without the rule this is a status-class failure the mock can never pass while it
-    // behaves correctly.
+    // With no schema the recording is the only contract there is, so a healthy mock fails.
     const before = await verifyRecordings([outage], target, new Scrubber());
     expect(before.failed).toBe(1);
     expect(before.failures[0]!.reason).toContain('status class differs');
 
-    const why = 'staging was erroring when this was captured';
-    const after = await verifyRecordings(
-      [outage],
-      { ...target, notEvidence: [{ service: 'api.example.test', path: '/v1/stats', status: 500, why }] },
-      new Scrubber(),
-    );
+    const schemas = {
+      'GET /v1/stats': {
+        200: z.object({ items: z.array(z.unknown()) }),
+        500: z.object({ Error: z.string() }),
+      },
+    };
+    const after = await verifyRecordings([outage], { ...target, schemas }, new Scrubber());
 
-    // Held out, not excused: an error body is no more evidence than the status it came
-    // with, so there is nothing left worth comparing.
+    // Judged, not held out: the 200 body was checked against the 200 schema. That is the
+    // whole gain over an exemption, which would have compared nothing at all.
     expect(after.failed).toBe(0);
-    expect(after.passed).toBe(0);
-    expect(after.ignored).toEqual([{ recordingId: 'rec_outage', method: 'GET', pathTemplate: '/v1/stats', status: 500, why }]);
-
-    // `passed + failed` is what a caller must gate on. An all-exempt replay judged nothing,
-    // and a run that judged nothing must never read as a run that passed.
-    expect(after.passed + after.failed).toBe(0);
+    expect(after.passed).toBe(1);
+    expect(after.schemaChecked).toBe(1);
+    expect(after.restated).toEqual([
+      { recordingId: 'rec_outage', method: 'GET', pathTemplate: '/v1/stats', recordedStatus: 500, actualStatus: 200 },
+    ]);
   } finally {
     server.stop(true);
   }
 });
 
-test('a not-evidence rule claims only what it names', async () => {
-  const server = Bun.serve({ port: 0, fetch: () => Response.json({ ok: true }) });
-  const target = { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test' };
-  const rules = [{ service: 'api.example.test', path: '/v1/stats', method: 'GET', status: 500, why: 'captured during an outage' }];
+test('a status the schema does not declare fails, and the message names what it should return', async () => {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({ Error: 'boom' }, { status: 503 }) });
+  const schemas = { 'GET /v1/stats': { 200: z.object({ items: z.array(z.unknown()) }), 500: z.object({ Error: z.string() }) } };
 
   try {
     const result = await verifyRecordings(
-      [
-        recording({ id: 'a', path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 500 }),
-        // Same route, different status: a healthy recording of it is still evidence.
-        recording({ id: 'b', path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 200 }),
-        // Same route and status, different method.
-        recording({ id: 'c', method: 'POST', path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 500 }),
-        // A different route that also happened to 500 is a separate decision to make.
-        recording({ id: 'd', path: '/v1/other', pathTemplate: '/v1/other', statusCode: 500 }),
-      ],
-      { ...target, notEvidence: rules },
+      [recording({ path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 200, responseBody: '{"items":[]}' })],
+      { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test', schemas },
       new Scrubber(),
     );
 
-    expect(result.ignored.map((entry) => entry.recordingId)).toEqual(['a']);
-    expect(result.failed).toBe(2);
-    expect(result.failures.map((f) => f.recordingId).sort()).toEqual(['c', 'd']);
-    expect(result.passed).toBe(1);
+    expect(result.failed).toBe(1);
+    // Declaring the statuses is what makes this message possible: "status class differs"
+    // could only ever name the one the corpus happened to catch.
+    expect(result.failures[0]!.reason).toContain('does not declare');
+    expect(result.failures[0]!.reason).toContain('200, 500');
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("a declared status still has to satisfy that status's schema", async () => {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({ wrong: true }, { status: 500 }) });
+  const schemas = { 'GET /v1/stats': { 200: z.object({ items: z.array(z.unknown()) }), 500: z.object({ Error: z.string() }) } };
+
+  try {
+    const result = await verifyRecordings(
+      [recording({ path: '/v1/stats', pathTemplate: '/v1/stats', statusCode: 200, responseBody: '{"items":[]}' })],
+      { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test', schemas },
+      new Scrubber(),
+    );
+
+    // The status is legal; the body is not. Checked against 500's schema — the status that
+    // came back — rather than against 200's, which is what the recording had.
+    expect(result.failed).toBe(1);
+    expect(result.failures[0]!.reason).toContain('schema for GET /v1/stats 500');
+  } finally {
+    server.stop(true);
+  }
+});
+
+test('a route with no schema is still judged against the recording', async () => {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({ ok: true }, { status: 500 }) });
+
+  try {
+    const result = await verifyRecordings(
+      [recording({ path: '/v1/other', pathTemplate: '/v1/other', statusCode: 200, responseBody: '{"ok":true}' })],
+      // A schema for a *different* route must not license this one.
+      { baseUrl: `http://127.0.0.1:${server.port}`, service: 'api.example.test', schemas: { 'GET /v1/stats': { 500: z.unknown() } } },
+      new Scrubber(),
+    );
+
+    expect(result.failed).toBe(1);
+    expect(result.failures[0]!.reason).toContain('status class differs');
   } finally {
     server.stop(true);
   }

@@ -259,6 +259,29 @@ export class MockHost {
 
     const ctx = this.contextFor(service, profile, match.route.path, mockRequest);
 
+    // Latency and error injection are cross-cutting, so the host applies them once instead
+    // of every mock wrapping its own routes — see BUILT_IN_KNOBS. Before the handler runs:
+    // an injected failure is the request never reaching the route, which is what an
+    // upstream 500 is, and it must not leave half a state mutation behind.
+    //
+    // Replay is exempt. A corpus replay asks whether the mock still honours the contract,
+    // and injected chaos is not part of any contract — with these built in rather than
+    // per-mock, a dial left turned would otherwise fail every service at once and read as
+    // a fleet of broken mocks. The knobs a *mock* declares are left alone: those are the
+    // service's own behaviour, and neutralising them would change what is being verified.
+    if (!isReplay(request)) {
+      const latency = Number(ctx.knobs.latencyMs ?? 0);
+      if (latency > 0) await new Promise((resolve) => setTimeout(resolve, latency));
+
+      const errorRate = Number(ctx.knobs.errorRate ?? 0);
+      if (errorRate > 0 && ctx.prng.next() < errorRate) {
+        // No body. A mock's error envelope is the service's own — capital `Error` here, RFC
+        // 7807 there — and the host has no way to know which. Inventing one would put a
+        // shape in front of the app that its real dependency never sends.
+        return new Response(null, { status: 500, headers: { 'x-mocktown-injected': 'errorRate' } });
+      }
+    }
+
     try {
       const response = await match.route.handler(mockRequest, ctx);
       return toResponse(response);
@@ -563,6 +586,14 @@ function parseBody(raw: string, contentType: string): unknown {
   if (contentType.includes('x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(raw));
   return raw;
 }
+
+/**
+ * The header the replay harness sets on every request it makes. It only ever *disables*
+ * injected latency and failure, so a client that guessed it gains nothing but determinism.
+ */
+export const REPLAY_HEADER = 'x-mocktown-replay';
+
+const isReplay = (request: Request) => request.headers.get(REPLAY_HEADER) !== null;
 
 function toResponse(response: MockResponse): Response {
   const headers = new Headers(response.headers ?? {});

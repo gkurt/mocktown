@@ -354,6 +354,13 @@ const header = (service: string, generatedAt: string, total: number) => `/**
  * \`mocktown mocks schema\` will not overwrite it once it exists. Verification checks the
  * mock against *this*, so correcting a line here is how you overrule a recording.
  *
+ * **The status keys are the contract.** A status listed under a route is that route
+ * declaring it can answer that way, and replay accepts any status declared here whichever
+ * one the corpus happened to catch — so a service that was erroring during capture no
+ * longer holds its mock to reproducing the outage. Add the status you know the route
+ * returns; a status *not* listed is a verification failure, which is what makes the list
+ * worth keeping honest.
+ *
  * Expect to correct it, because the corpus is a witness and not a contract:
  *
  *   - It can be wrong. Scrubbing runs before anything reaches disk, so a redacted field

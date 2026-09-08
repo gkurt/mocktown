@@ -10,6 +10,17 @@
  * Resolution order, lowest to highest: manifest default, stored project value, profile
  * override. Profile overrides come last because a profile is a whole world of data and
  * should win over a dial someone left turned.
+ *
+ * **Latency and error injection are built in.** They were per-mock declarations, which put
+ * a fact true of every mock somewhere it could vary between them — and, worse, the scaffold
+ * printed the *declarations* while leaving each generating agent to invent the enforcement.
+ * Three mocks in one project each grew their own identical twenty-line wrapper; a fourth
+ * that forgot would have shipped two dials the GUI offers and no handler reads, which
+ * 12-scenario-controls.md is explicit is worse than not offering them. They are declared
+ * here and enforced once in the host, so neither half can go missing.
+ *
+ * A mock that declares one of these names itself still wins, the same way a mock that
+ * declares its own `OPTIONS` route keeps it: the built-ins are a floor, not a ceiling.
  */
 import { and, eq } from 'drizzle-orm';
 import * as z from 'zod/v4';
@@ -26,6 +37,28 @@ export interface ResolvedKnob {
   value: unknown;
 }
 
+/**
+ * The dials every mock has. Not the service's behaviour — a network and a server have
+ * these, and `api.example.com` does not have them any differently from `chat.example.com`.
+ */
+export const BUILT_IN_KNOBS: KnobManifest = {
+  latencyMs: {
+    schema: z.number().int().min(0).max(10_000),
+    default: 0,
+    description: 'Artificial delay before responding, in milliseconds.',
+  },
+  errorRate: {
+    schema: z.number().min(0).max(1),
+    default: 0,
+    description: 'Fraction of requests answered with a 500 instead of reaching the route.',
+  },
+};
+
+/** The built-ins plus whatever the mock declared, with the mock winning on a name clash. */
+export function withBuiltIns(manifest: KnobManifest | undefined): KnobManifest {
+  return { ...BUILT_IN_KNOBS, ...(manifest ?? {}) };
+}
+
 function storedValues(db: Db, service: string): Record<string, unknown> {
   const rows = db.select().from(schema.knobValues).where(eq(schema.knobValues.service, service)).all();
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
@@ -38,6 +71,7 @@ function profileOverrides(db: Db, service: string, profile: string): Record<stri
 
 /** The effective values a mock handler receives in `ctx.knobs`. */
 export function effectiveKnobs(db: Db, manifest: KnobManifest | undefined, service: string, profile: string): Record<string, unknown> {
+  manifest = withBuiltIns(manifest);
   const stored = storedValues(db, service);
   const overrides = profileOverrides(db, service, profile);
   const out: Record<string, unknown> = {};
@@ -52,6 +86,7 @@ export function effectiveKnobs(db: Db, manifest: KnobManifest | undefined, servi
 }
 
 export function describeKnobs(db: Db, manifest: KnobManifest | undefined, service: string, profile: string): ResolvedKnob[] {
+  manifest = withBuiltIns(manifest);
   const effective = effectiveKnobs(db, manifest, service, profile);
   return Object.entries(manifest ?? {}).map(([key, definition]) => ({
     key,
@@ -80,11 +115,12 @@ export function setKnobs(
   values: Record<string, unknown>,
   sessionId: string,
 ): KnobSetResult {
+  const withDefaults = withBuiltIns(manifest);
   const applied: Record<string, unknown> = {};
   const rejected: { key: string; reason: string }[] = [];
 
   for (const [key, raw] of Object.entries(values)) {
-    const definition = manifest?.[key];
+    const definition = withDefaults[key];
     if (!definition) {
       rejected.push({ key, reason: `the ${service} mock declares no knob named "${key}"` });
       continue;

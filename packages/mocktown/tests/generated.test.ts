@@ -322,3 +322,54 @@ test('browser chrome is answered, not filed', async () => {
   const missing = await fetch(`${baseUrl}/favicon.png`, { headers: { host: GOOD } });
   expect(missing.status).toBe(501);
 });
+
+/**
+ * `latencyMs` and `errorRate` are the host's, not each mock's.
+ *
+ * They used to be declarations the scaffold printed with no enforcement behind them, so
+ * every generating agent invented its own wrapper — three mocks in one real project, three
+ * identical copies, and nothing at all to catch the fourth that forgot. The mock below
+ * declares no knobs and wraps nothing.
+ */
+test('built-in knobs are offered and enforced without the mock declaring them', async () => {
+  const { setKnobs, BUILT_IN_KNOBS } = await import('#src/scenario/knobs.ts');
+  const baseUrl = runtime.allBaseUrls().get(GOOD)!;
+
+  const offered = runtime.describeKnobsFor(GOOD, 'default').map((knob) => knob.key);
+  expect(offered).toContain('latencyMs');
+  expect(offered).toContain('errorRate');
+
+  // Enforced, not merely offered: this is the half that used to be each agent's problem.
+  const knobs = runtime.knobManifest(GOOD);
+  expect(setKnobs(runtime.db, knobs, GOOD, { errorRate: 1 }, 'ses_test').rejected).toEqual([]);
+
+  const injected = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: GOOD } });
+  expect(injected.status).toBe(500);
+  expect(injected.headers.get('x-mocktown-injected')).toBe('errorRate');
+  // No invented error envelope: the host cannot know whether this service says `Error`,
+  // `error`, or RFC 7807, so it says nothing rather than something false.
+  expect(await injected.text()).toBe('');
+
+  // Replay is a contract check, and injected chaos is not part of any contract. Without
+  // this, one dial left turned fails every service at once.
+  const replayed = await fetch(`${baseUrl}/v1/invoices`, { headers: { host: GOOD, 'x-mocktown-replay': '1' } });
+  expect(replayed.status).toBe(200);
+  expect(await replayed.json()).toEqual({ ok: true });
+
+  setKnobs(runtime.db, knobs, GOOD, { errorRate: 0 }, 'ses_test');
+  expect(Object.keys(BUILT_IN_KNOBS).sort()).toEqual(['errorRate', 'latencyMs']);
+});
+
+test('a mock that declares one of the built-in names wins', async () => {
+  // The same precedence the host already gives a mock's own OPTIONS route: the built-ins
+  // are a floor, so a service with a genuine reason to bound latency differently can.
+  const { withBuiltIns } = await import('#src/scenario/knobs.ts');
+  const z = await import('zod/v4');
+
+  const own = { latencyMs: { schema: z.number().int().min(0).max(50), default: 25, description: 'This service is slow on purpose.' } };
+  const merged = withBuiltIns(own);
+
+  expect(merged.latencyMs).toBe(own.latencyMs);
+  expect(merged.latencyMs!.default).toBe(25);
+  expect(merged.errorRate).toBeDefined();
+});

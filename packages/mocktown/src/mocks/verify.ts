@@ -6,15 +6,32 @@
  * **What is compared, and why not more.** 06-emulation.md is explicit that verbatim
  * replay is not the bar — "emulator, not stub". A mock that returns a different order id
  * than the recording is correct; one that returns a body with no `id` field at all is
- * not. So verification compares the status class and the response *shape* — key paths and
- * value types — never the values themselves. Comparing values would fail every stateful
- * mock that is behaving exactly as designed, and the noise would train people to ignore
- * the harness.
+ * not. So verification compares the status and the response *shape* — key paths and value
+ * types — never the values themselves. Comparing values would fail every stateful mock
+ * that is behaving exactly as designed, and the noise would train people to ignore the
+ * harness.
+ *
+ * **The schema's status keys are the contract.** `schema.ts` is keyed by route *and
+ * status*, and its header has always promised that "correcting a line here is how you
+ * overrule a recording". That was only half true: the body was checked against the
+ * author's schema, but the status was still checked against whatever the corpus happened
+ * to catch. A route the schema declares can return 200 or 500 would fail replay whenever
+ * the mock answered with the other one — so a service that was erroring during capture
+ * held its mock to the outage forever.
+ *
+ * A route with a schema is therefore judged against it: a status the schema declares is a
+ * valid status, and the body is checked against *that* status's schema rather than the
+ * recording's. Answering with a declared status the recording did not have is not a
+ * failure, but it is not silent either — it is counted and listed, because "every route
+ * now 401s" and "this route no longer 500s" look identical from the pass count alone.
+ * A status the schema does *not* declare is a failure, and a sharper one than before,
+ * since the message can name what the route is supposed to return.
  *
  * Requests are replayed with fake credentials re-injected by the scrubber, so a mock sees
  * a correctly-shaped secret and no real one exists anywhere (10-security.md).
  */
 import type { Recording } from '#src/contract/schemas.ts';
+import { REPLAY_HEADER } from '#src/mocks/host.ts';
 import { parseJsonBody, type SchemaMap, schemaDiff, schemaKey } from '#src/mocks/schema.ts';
 import type { Scrubber } from '#src/scrub/scrubber.ts';
 
@@ -31,21 +48,17 @@ export interface VerifyFailure {
   diff: string[];
 }
 
-/** A recorded exchange the project declared is not evidence, and the reason it gave. */
-export interface IgnoredExchange {
+/**
+ * An exchange the mock answered with a status its schema declares, but not the one the
+ * recording caught. Its body was still checked — against the schema for the status that
+ * came back — so this is a pass, reported rather than deducted in silence.
+ */
+export interface RestatedExchange {
   recordingId: string;
   method: string;
   pathTemplate: string;
-  status: number;
-  why: string;
-}
-
-export interface NotEvidenceRule {
-  service: string;
-  path: string;
-  method?: string | undefined;
-  status?: number | undefined;
-  why: string;
+  recordedStatus: number;
+  actualStatus: number;
 }
 
 export interface VerifyResult {
@@ -57,23 +70,9 @@ export interface VerifyResult {
   skipped: number;
   /** Exchanges checked against the checked-in schema rather than against one recorded body. */
   schemaChecked: number;
-  /**
-   * Exchanges left out by a `verify.notEvidence` rule. Reported rather than deducted in
-   * silence: an exemption nobody sees is worse than the failure it hides.
-   */
-  ignored: IgnoredExchange[];
+  /** Passes where the mock answered with a declared status other than the recorded one. */
+  restated: RestatedExchange[];
   failures: VerifyFailure[];
-}
-
-/** The first rule that claims this recording, or none. */
-function notEvidenceFor(recording: Recording, service: string, rules: NotEvidenceRule[] | undefined): NotEvidenceRule | undefined {
-  return rules?.find(
-    (rule) =>
-      rule.service === service &&
-      rule.path === recording.pathTemplate &&
-      (rule.method === undefined || rule.method.toUpperCase() === recording.method.toUpperCase()) &&
-      (rule.status === undefined || rule.status === recording.statusCode),
-  );
 }
 
 /** `{"a":{"b":[1]}}` -> `a.b[]:number` — the shape, with values deliberately discarded. */
@@ -129,13 +128,11 @@ export interface ReplayTarget {
    * shapes with the one body the corpus happened to record.
    */
   schemas?: SchemaMap | null;
-  /** Recordings this project has declared replay must not hold the mock to. */
-  notEvidence?: NotEvidenceRule[] | undefined;
 }
 
 export async function verifyRecordings(recordings: Recording[], target: ReplayTarget, scrubber: Scrubber): Promise<VerifyResult> {
   const failures: VerifyFailure[] = [];
-  const ignored: IgnoredExchange[] = [];
+  const restated: RestatedExchange[] = [];
   let passed = 0;
   let skipped = 0;
   let schemaChecked = 0;
@@ -152,27 +149,14 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
       continue;
     }
 
-    // Checked before the request is built, not after the comparison: if the recording is
-    // not evidence then neither is the error body hanging off it, so there is nothing here
-    // worth replaying and no partial judgement worth forming.
-    const exempt = notEvidenceFor(recording, target.service, target.notEvidence);
-    if (exempt) {
-      ignored.push({
-        recordingId: recording.id,
-        method: recording.method,
-        pathTemplate: recording.pathTemplate,
-        status: recording.statusCode,
-        why: exempt.why,
-      });
-      continue;
-    }
-
     const query = new URLSearchParams(recording.query).toString();
     const url = `${target.baseUrl}${recording.path}${query ? `?${query}` : ''}`;
 
     // Placeholders become well-formed fakes: the mock sees a Stripe-key-shaped string
     // where a Stripe key belongs, without one ever having been stored.
-    const headers: Record<string, string> = { host: target.service };
+    // Tells the host this is a contract check, so built-in latency and error injection stay
+    // out of it — a dial someone left turned is not a reason for a mock to fail replay.
+    const headers: Record<string, string> = { host: target.service, [REPLAY_HEADER]: '1' };
     for (const [name, value] of Object.entries(recording.requestHeaders)) {
       const lower = name.toLowerCase();
       // Hop-by-hop and framing headers are the replay client's business, not ours.
@@ -212,62 +196,87 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
 
     const text = await response.text();
 
-    // Status class, not the exact code: a mock returning 201 where the recording had 200
-    // is fine; one returning 500 where the recording had 200 is not.
-    if (Math.floor(response.status / 100) !== Math.floor(recording.statusCode / 100)) {
+    const key = schemaKey(recording.method, recording.pathTemplate);
+    const declared = target.schemas?.[key];
+    const fail = (reason: string, diff: string[]) => {
       failures.push({
         recordingId: recording.id,
         method: recording.method,
         path: recording.path,
         pathTemplate: recording.pathTemplate,
-        reason: `status class differs (recorded ${recording.statusCode}, mock returned ${response.status})`,
+        reason,
         expectedStatus: recording.statusCode,
         actualStatus: response.status,
-        diff: [text.slice(0, 200)],
+        diff,
       });
+    };
+
+    if (declared) {
+      // The route has a checked-in contract, so that contract decides which statuses are
+      // legal — not whichever one the corpus happened to catch on the day.
+      if (!(response.status in declared)) {
+        const legal = Object.keys(declared).sort().join(', ');
+        fail(
+          `returned ${response.status}, which ${key} does not declare. Its schema declares ${legal}. ` +
+            `Add ${response.status} to schema.ts if the route really can answer that way, or fix the mock.`,
+          [text.slice(0, 200)],
+        );
+        continue;
+      }
+      if (response.status !== recording.statusCode) {
+        restated.push({
+          recordingId: recording.id,
+          method: recording.method,
+          pathTemplate: recording.pathTemplate,
+          recordedStatus: recording.statusCode,
+          actualStatus: response.status,
+        });
+      }
+    } else if (Math.floor(response.status / 100) !== Math.floor(recording.statusCode / 100)) {
+      // No schema for this route, so the recording is the only contract there is. Status
+      // class rather than the exact code: 201 where the recording had 200 is fine.
+      fail(`status class differs (recorded ${recording.statusCode}, mock returned ${response.status})`, [text.slice(0, 200)]);
       continue;
     }
 
-    // Whether the recording is JSON is decided by parsing it, not by its `content-type`:
-    // an API that serves JSON as `text/plain` used to skip body comparison altogether.
-    const expected = parseJsonBody(recording.responseBody);
-    if (expected !== undefined) {
-      const actual = parseJsonBody(text);
-      if (actual === undefined) {
-        failures.push({
-          recordingId: recording.id,
-          method: recording.method,
-          path: recording.path,
-          pathTemplate: recording.pathTemplate,
-          reason: 'recorded response was JSON, the mock returned something that does not parse as JSON',
-          expectedStatus: recording.statusCode,
-          actualStatus: response.status,
-          diff: [text.slice(0, 200)],
-        });
-        continue;
-      }
+    // Whether a body is JSON is decided by parsing it, not by its `content-type`: an API
+    // that serves JSON as `text/plain` used to skip body comparison altogether.
+    const actual = parseJsonBody(text);
+    const schema = declared?.[response.status];
 
+    if (schema) {
       // The author's schema wins wherever there is one. It was drafted from every
       // recording of this route rather than this one, and — more to the point — the author
-      // has had a chance to correct it, which no single recorded body can be.
-      const schema = target.schemas?.[schemaKey(recording.method, recording.pathTemplate)]?.[recording.statusCode];
-      const diff = schema ? schemaDiff(schema, actual) : shapeDiff(expected, actual);
-      if (schema) schemaChecked++;
-
-      if (diff.length > 0) {
-        failures.push({
-          recordingId: recording.id,
-          method: recording.method,
-          path: recording.path,
-          pathTemplate: recording.pathTemplate,
-          reason: schema
-            ? `response does not satisfy the schema for ${schemaKey(recording.method, recording.pathTemplate)} ${recording.statusCode}`
-            : 'response shape does not cover what the recording contained',
-          expectedStatus: recording.statusCode,
-          actualStatus: response.status,
-          diff: diff.slice(0, 20),
-        });
+      // has had a chance to correct it, which no single recorded body can be. Keyed on the
+      // status the mock actually returned, so a route that answered 200 where the corpus
+      // caught a 500 is held to the 200 shape rather than to the error envelope.
+      schemaChecked++;
+      if (actual === undefined) {
+        fail(`${key} declares a JSON body for ${response.status}; the mock returned something that does not parse as JSON`, [
+          text.slice(0, 200),
+        ]);
         continue;
+      }
+      const diff = schemaDiff(schema, actual);
+      if (diff.length > 0) {
+        fail(`response does not satisfy the schema for ${key} ${response.status}`, diff.slice(0, 20));
+        continue;
+      }
+    } else {
+      // No schema for this status, so the recorded body is the only contract there is —
+      // and it is only comparable when the mock answered the same way, which is guaranteed
+      // here because a restatement can only happen on a route that has a schema.
+      const expected = parseJsonBody(recording.responseBody);
+      if (expected !== undefined) {
+        if (actual === undefined) {
+          fail('recorded response was JSON, the mock returned something that does not parse as JSON', [text.slice(0, 200)]);
+          continue;
+        }
+        const diff = shapeDiff(expected, actual);
+        if (diff.length > 0) {
+          fail('response shape does not cover what the recording contained', diff.slice(0, 20));
+          continue;
+        }
       }
     }
 
@@ -281,7 +290,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
     failed: failures.length,
     skipped,
     schemaChecked,
-    ignored,
+    restated,
     failures,
   };
 }
