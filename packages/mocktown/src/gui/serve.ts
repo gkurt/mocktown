@@ -16,7 +16,7 @@
  *   too, because an image URL is an exfiltration channel like any other.
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 export interface BootData {
   /** Origin-relative (`/api/v1`), so the page calls whichever origin served it. */
@@ -42,19 +42,20 @@ export const PANEL_CSP =
  * The built shell, or null when it has not been built.
  *
  * Three places are tried, in order, and every one of them can legitimately be the answer:
- * an explicit override for a Vite dev build, package resolution for the day the shell is a
- * real dependency, and the sibling workspace directory for this repo — where `mocktown`
- * deliberately does *not* depend on the GUI, because the daemon must run and be useful with
+ * an explicit override for a Vite dev build, the copy carried inside this package, and the
+ * sibling workspace directory for this repo.
+ *
+ * The published package **bundles** the shell at `gui-dist/` (`scripts/prepack.mts` builds
+ * `@mocktown/gui` and copies it in) rather than depending on a second published package —
+ * one install, one version, and nothing for a consumer to opt into. In this repo that
+ * directory does not exist, so the sibling workspace build answers instead; `mocktown`
+ * still declares no dependency on the GUI, because the daemon must run and be useful with
  * no shell built at all.
  */
 export function guiDist(): string | null {
   const built = (dist: string) => (existsSync(join(dist, 'index.html')) ? dist : null);
   if (process.env.MOCKTOWN_GUI_DIST) return built(process.env.MOCKTOWN_GUI_DIST);
-  try {
-    return built(join(dirname(Bun.resolveSync('@mocktown/gui/package.json', import.meta.dir)), 'dist'));
-  } catch {
-    return built(join(import.meta.dir, '..', '..', '..', 'gui', 'dist'));
-  }
+  return built(join(import.meta.dir, '..', '..', 'gui-dist')) ?? built(join(import.meta.dir, '..', '..', '..', 'gui', 'dist'));
 }
 
 const escapeAttribute = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

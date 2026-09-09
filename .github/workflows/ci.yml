@@ -17,6 +17,10 @@ jobs:
       - run: bun check
       - run: bun run test
       - run: bun typecheck
-      # The GUI is served by the daemon rather than published, but a shell that does not
-      # build is still a broken surface — and nothing else would catch it.
-      - run: bun run gui:build
+      # Builds the tarball the way a release would, without publishing: `prepack` builds
+      # the shell, copies it in and regenerates the skill pack, then asserts each part
+      # landed. Covers the old `gui:build` step — a shell that does not build fails here —
+      # and catches the packaging failures that are otherwise invisible until a consumer
+      # installs: a file the `files` allowlist forgot, or a broken prepack.
+      - run: bun pm pack --dry-run
+        working-directory: packages/mocktown

@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CorpusExport } from '#src/mocks/corpus.ts';
-import houseRules from '../../../../skills/mocktown/house-rules.md' with { type: 'text' };
+import { PACK_FILES } from '#src/skills/pack.gen.ts';
 
 /**
  * The corpus is a sample of the contract, never the contract itself. Preflights are
@@ -36,7 +36,7 @@ const isPreflight = (route: { method: string }) => route.method.toUpperCase() ==
  *
  * The skill's `#` heading is dropped; the brief gives the section its own.
  */
-const HOUSE_RULES = houseRules.replace(/^#[^\n]*\n+/, '').trim();
+const HOUSE_RULES = PACK_FILES['house-rules.md']!.replace(/^#[^\n]*\n+/, '').trim();
 
 export interface ScaffoldResult {
   files: string[];

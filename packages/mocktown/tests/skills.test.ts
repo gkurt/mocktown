@@ -8,9 +8,10 @@
  * set of keys and reject outright when it carries anything else.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PACK_FILES } from '#src/skills/pack.gen.ts';
 
 const { SKILLS, SKILL_ENTRY, exportSkill, findSkill, skillFile, skillTopics } = await import('#src/skills/index.ts');
 
@@ -71,6 +72,31 @@ describe('the mocktown pack', () => {
         .sort(),
     ).toEqual([SKILL_ENTRY, 'fix-issues.md', 'generate-mock.md']);
     expect(bodies.filter((f) => f.text.includes('Never invent auth-shaped fields'))).toEqual([]);
+  });
+});
+
+/**
+ * The pack ships as `src/skills/pack.gen.ts` because a specifier pointing at the repo root
+ * cannot reach a published tarball (scripts/gen-skills.mts explains why). That buys a way
+ * for the two to disagree, and the failure is the quiet kind: an edited job file, a
+ * forgotten `bun run gen:skills`, and every surface serves the previous text while the
+ * markdown on disk reads correctly. Comparing them here is what makes `bun run test` the
+ * thing that catches it.
+ */
+describe('the generated pack', () => {
+  const packDir = join(import.meta.dir, '..', '..', '..', 'skills', 'mocktown');
+  const onDisk = Object.fromEntries(
+    readdirSync(packDir)
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => [name, readFileSync(join(packDir, name), 'utf8')]),
+  );
+
+  test('matches skills/mocktown/ file for file', () => {
+    expect(Object.keys(PACK_FILES).sort()).toEqual(Object.keys(onDisk).sort());
+    // Named per file, so a mismatch says which one to look at rather than dumping the pack.
+    for (const [name, text] of Object.entries(onDisk)) {
+      expect(PACK_FILES[name], `${name} is stale — run \`bun run gen:skills\``).toBe(text);
+    }
   });
 });
 

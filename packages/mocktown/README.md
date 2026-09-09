@@ -5,23 +5,32 @@ alive as the real services change.
 
 This package is the whole product as of phases 1–4: the daemon, the front door, the
 corpus, the providers, the issue engine, the sealed sandbox, drift watch, and the surfaces
-(CLI, HTTP API, MCP, and the GUI shell in `packages/gui`).
-Design rationale lives in [`docs/design`](../../docs/design/README.md) — read the file for
-the subsystem you are touching, not all of them.
+(CLI, HTTP API, MCP, and the GUI shell, which is built from `packages/gui` and ships inside
+this package).
+Design rationale lives in
+[`docs/design`](https://github.com/gkurt/mocktown/blob/main/docs/design/README.md) — read
+the file for the subsystem you are touching, not all of them.
 
-## Quick start
+## Install
 
-From the repo root, install and put `mocktown` on your PATH:
+```bash
+bun add -g mocktown
+```
+
+Mocktown runs on **Bun** — the CLI is TypeScript executed directly, so `bun` has to be the
+thing that installs and runs it. Additionally, the front door is Mockttp in a Node process,
+so a `node` binary has to be on the PATH of the shell that first starts the daemon — Bun
+alone is not enough. `MOCKTOWN_NODE=<path>` names one explicitly.
+
+Working on Mocktown itself instead? From the repo root:
 
 ```bash
 bun install && cd packages/mocktown && bun link
 ```
 
-The front door is Mockttp in a Node process, so a `node` binary has to be on the PATH of
-the shell that first starts the daemon — Bun alone is not enough. `MOCKTOWN_NODE=<path>`
-names one explicitly.
+## Quick start
 
-Then, in the app you want to mock:
+In the app you want to mock:
 
 ```bash
 mocktown init
@@ -309,8 +318,9 @@ mocktown ui
 — dashboard, live feed, issues, services, corpus, provider state, seal and sandbox, and
 panels. When portless has claimed a stable name it opens `http://ui.mocktown` and prints the
 loopback address beside it; `--loopback` forces the direct one. The bearer token is injected
-by the daemon as it serves the page, so the build on disk carries no capability. Build it
-first (once) with `bun run gui:build` from the repo root.
+by the daemon as it serves the page, so the build on disk carries no capability. The shell
+ships inside the published package; working from a checkout, build it first (once) with
+`bun run gui:build` from the repo root.
 
 A **panel** is one self-contained HTML file plus a manifest in `.mocktown/panels/`:
 

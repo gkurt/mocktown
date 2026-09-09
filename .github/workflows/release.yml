@@ -34,6 +34,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun i
 
+      # Publishes with npm (`npm` is Tegami's configured client) so the OIDC exchange
+      # happens — `bun publish` cannot do trusted publishing, which is why the client is
+      # not `bun`. Needs npm >= 11.5.1; node 24's bundled npm is older on some runner
+      # images, so it is pinned rather than assumed.
+      - run: npm install -g npm@latest
+
       - name: Version & publish
         run: bun run tegami ci
         env:

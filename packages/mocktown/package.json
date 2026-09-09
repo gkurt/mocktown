@@ -1,7 +1,6 @@
 {
   "name": "mocktown",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Record an app's outbound traffic, serve it back as stateful mocks, and keep them alive as the real services change.",
   "keywords": [
@@ -24,6 +23,9 @@
     "url": "https://github.com/gkurt/mocktown/issues"
   },
   "license": "MIT",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
   "author": {
     "name": "Gokhan Kurt",
     "url": "https://github.com/gkurt"
@@ -43,7 +45,8 @@
     "daemon": "bun src/daemon/index.ts",
     "test": "bun test",
     "typecheck": "tsc",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "prepack": "bun ../../scripts/prepack.mts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -66,5 +69,13 @@
   },
   "optionalDependencies": {
     "@libsql/client": "0.17.4"
-  }
+  },
+  "files": [
+    "src",
+    "drizzle",
+    "gui-dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
 }

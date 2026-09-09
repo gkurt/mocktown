@@ -16,22 +16,16 @@
  * GitHub with no checkout and no mocktown install. This module is a view onto those files,
  * not their home.
  *
- * They are `import`ed as text rather than read from disk: Bun inlines a
- * `with { type: 'text' }` import into the bundle, so the compiled single binary carries
- * the pack without a directory shipped beside it. The one cost of the root layout is that
- * these specifiers leave the package, so publishing `mocktown` to npm has to carry
- * `skills/` into the tarball — noted where the publish gate is, in `scripts/tegami.mts`.
+ * The text itself comes from `pack.gen.ts`, which `scripts/gen-skills.mts` writes from
+ * those files — inlined rather than read from disk, so the compiled single binary carries
+ * the pack without a directory shipped beside it. Generating it is what lets the pack keep
+ * the root layout *and* reach a published tarball: a specifier pointing at the repo root
+ * leaves the package, and npm cannot carry a path outside the package into the tarball.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as z from 'zod/v4';
-import applyRedirects from '../../../../skills/mocktown/apply-redirects.md' with { type: 'text' };
-import fixIssues from '../../../../skills/mocktown/fix-issues.md' with { type: 'text' };
-import generateMock from '../../../../skills/mocktown/generate-mock.md' with { type: 'text' };
-import houseRules from '../../../../skills/mocktown/house-rules.md' with { type: 'text' };
-import recordFlow from '../../../../skills/mocktown/record-flow.md' with { type: 'text' };
-import skillEntry from '../../../../skills/mocktown/SKILL.md' with { type: 'text' };
-import writePanel from '../../../../skills/mocktown/write-panel.md' with { type: 'text' };
+import { PACK_FILES } from '#src/skills/pack.gen.ts';
 
 /** The file every agent host reads first. The rest of a pack is reached from it. */
 export const SKILL_ENTRY = 'SKILL.md';
@@ -75,7 +69,14 @@ function frontmatter(text: string): z.infer<typeof Frontmatter> {
   return parsed.data;
 }
 
-const meta = frontmatter(skillEntry);
+/** A name the generator did not write is a bug here, not something to serve as empty. */
+function packFile(path: string): string {
+  const text = PACK_FILES[path];
+  if (text === undefined) throw new Error(`skill pack has no ${path} — run \`bun run gen:skills\``);
+  return text;
+}
+
+const meta = frontmatter(packFile(SKILL_ENTRY));
 
 export const SKILLS: Skill[] = [
   {
@@ -84,14 +85,14 @@ export const SKILLS: Skill[] = [
     summary: meta.description,
     // Entry first, then the jobs in the order SKILL.md routes them, then the shared law.
     files: [
-      { path: SKILL_ENTRY, text: skillEntry },
-      { path: 'record-flow.md', text: recordFlow },
-      { path: 'generate-mock.md', text: generateMock },
-      { path: 'fix-issues.md', text: fixIssues },
-      { path: 'apply-redirects.md', text: applyRedirects },
-      { path: 'write-panel.md', text: writePanel },
-      { path: 'house-rules.md', text: houseRules },
-    ],
+      SKILL_ENTRY,
+      'record-flow.md',
+      'generate-mock.md',
+      'fix-issues.md',
+      'apply-redirects.md',
+      'write-panel.md',
+      'house-rules.md',
+    ].map((path) => ({ path, text: packFile(path) })),
   },
 ];
 

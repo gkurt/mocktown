@@ -13,6 +13,7 @@ bun run fix        # Lint + format + autofix
 bun run checks     # Everything: check + typecheck + test
 bun run gui:build  # Build the GUI shell the daemon serves
 bun run gui:dev    # Vite dev server for the shell (needs MOCKTOWN_GUI_DIST or a built shell)
+bun run gen:skills # Regenerate the inlined skill pack after editing skills/mocktown/
 ```
 
 Prefer these scripts over ad-hoc commands. Do not prefix them with `bun run` when
@@ -32,6 +33,7 @@ bun run db:generate    # Regenerate Drizzle migrations after editing src/db/sche
 packages/mocktown/     The product: daemon, front door, corpus, providers, surfaces
 packages/gui/          The GUI shell: a Vite/React SPA served by the daemon
 skills/                The shipped agent skill, at the root so `skills add` finds it
+scripts/               Repo tooling: release config, skill-pack codegen, the publish prepack
 spikes/                Throwaway investigations, kept for their FINDINGS.md
 docs/design/           Per-subsystem design docs — the source of truth for intent
 ```
@@ -54,7 +56,7 @@ docs/design/           Per-subsystem design docs — the source of truth for int
 | `drift/` | Drift watch: re-recording the flows against the real services and diffing. |
 | `redirect/` | The portless seam — stable local names, wrapped and optional. |
 | `gui/` | Serving the shell (token injection, CSP) and the panels. |
-| `cli/`, `mcp/`, `skills/` | The three agent/human surfaces, all clients of the daemon API. `skills/index.ts` only *serves* the pack: the pack itself is `skills/mocktown/` at the repo root, imported from there as text. |
+| `cli/`, `mcp/`, `skills/` | The three agent/human surfaces, all clients of the daemon API. `skills/index.ts` only *serves* the pack: the pack itself is `skills/mocktown/` at the repo root, inlined into `skills/pack.gen.ts` by `scripts/gen-skills.mts`. |
 | `db/` | Drizzle schema and client; migrations in `packages/mocktown/drizzle/`. |
 | `config/` | Project resolution, config schema, on-disk paths. |
 
@@ -123,14 +125,34 @@ When you change user-facing behavior, update it in the same change: the subsyste
 `docs/design/`, `packages/mocktown/README.md`, and the shipped skill in `skills/mocktown/`
 (repo root) when the change affects what an agent is told to do — the job's own file, and
 `SKILL.md` only if the set of arguments changed. The skill directory is the one copy of the
-house rules: `mocks/scaffold.ts` imports `skills/mocktown/house-rules.md` into every
-`BRIEF.md` rather than keeping its own list.
+house rules: `mocks/scaffold.ts` pulls `house-rules.md` into every `BRIEF.md` rather than
+keeping its own list.
+
+Editing anything under `skills/mocktown/` means running `bun run gen:skills` in the same
+change — the daemon serves the inlined `src/skills/pack.gen.ts`, not the markdown, and
+`tests/skills.test.ts` fails when the two disagree.
 Documentation must not go stale.
 
 ## Changelogs
 
 Releases are managed by [Tegami](https://tegami.fuma-nama.dev) (config in
 `scripts/tegami.mts`). When asked to commit with a changelog entry, run
-`bun run tegami` or add a `.tegami/*.md` file directly. Each entry has
-`packages:` frontmatter (package + bump type) and a body with at least one
-heading. Keep entries concise — user-facing changes only, no implementation detail.
+`bun run tegami` or add a `.tegami/*.md` file directly. Keep entries concise —
+user-facing changes only, no implementation detail.
+
+`packages:` is a **map**, not a list. A list matches no package and versions nothing
+while still reporting success, so the whole release silently does nothing:
+
+```md
+---
+packages:
+  mocktown: minor
+---
+
+### Added
+
+- What a user can now do.
+```
+
+`mocktown` is the only publishable package — `@mocktown/gui` is private and rides
+along in its tarball, and `spikes/*` are never versioned.

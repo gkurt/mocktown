@@ -6,6 +6,10 @@ out
 dist
 *.tgz
 
+# assembled by scripts/prepack.mts at publish time, never committed
+packages/mocktown/gui-dist
+packages/mocktown/LICENSE
+
 # code coverage
 coverage
 *.lcov
