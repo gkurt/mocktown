@@ -1,32 +1,32 @@
 core:changelogs:
-  - content: "---\npackages:\n  mocktown:\n    type: minor\n---\n\n### Added\n\nFirst release. Mocktown records an app's outbound traffic, serves it back as stateful\nmocks, and keeps those mocks alive as the real services change.\n\n- **Record.** `mocktown record -- <cmd>` runs your app through a capture proxy and writes\n  every exchange to a corpus. Secrets are scrubbed *before* anything reaches disk, so the\n  corpus you can browse is the corpus that exists. Browsers, HAR imports and WebSockets are\n  covered too, and the recorder filters the browser's own vendor traffic out of the corpus.\n- **Mock.** `mocktown mocks scaffold` turns the corpus into a brief and a module stub for a\n  coding agent to fill in — mocks are stateful modules, not verbatim replay. `mocktown\n  skills install` gives the agent the prompt pack for the job.\n- **Never reach production by accident.** In serve mode anything without a mock hits a deny\n  wall and becomes a self-contained issue in the queue, rather than quietly reaching the\n  real API.\n- **Seal.** `mocktown sandbox up` builds a network whose only route out is the front door;\n  `mocktown seal verify` runs your flows inside it and stamps the result, exiting non-zero\n  when the verdict is anything but sealed — so it works as a CI step.\n- **Drift watch.** Opt in and Mocktown re-records your flows against the real services and\n  files issues for what diverged.\n- **Four surfaces, one daemon.** A CLI, a local HTTP API, an MCP server and a GUI — the\n  shell ships with the package, so `mocktown ui` works on a fresh install.\n\nMocktown runs on Bun, and needs a real `node` on the PATH for the capture proxy.\n"
-    filename: initial-release.md
+  - content: "---\npackages:\n  mocktown:\n    type: minor\n---\n\n### Added\n\n- **A dark scheme in the GUI.** `theme` in the shell's header picks `system`, `light` or\n  `dark`; `system` is the default and follows the OS. The choice is remembered and applies\n  before the first paint. Panels follow the shell — the scheme is passed in their query\n  string alongside the project.\n- **Real dials for scenario knobs.** A knob whose schema declares a range is now a slider,\n  a boolean is a switch, and one with a fixed set of values is a select — picked from the\n  knob's own schema, so a mock gains a proper control by declaring one. Project settings\n  are a form with each setting's description under its control, instead of a table with an\n  input in one column.\n\n### Changed\n\n- **Clicking a row in Issues or Services opens a drawer** rather than unfolding the detail\n  underneath the table, so the list stays where it was while you read.\n- **Dashboard widgets have a fixed height and scroll inside themselves**, so one busy\n  service no longer decides the height of the page.\n- **Scrollable areas fade at the edge you can still scroll toward**, and their scrollbar\n  stays out of the way until you reach for it.\n"
+    filename: gui-dials-dark-drawers.md
     v: 0.0.0
 core:packages:
   - id: npm:@mocktown/root
     updated: false
+  - id: npm:spike-03-emulate
+    updated: false
+  - id: npm:spike-04-container-seal
+    updated: false
+  - id: npm:spike-02-orpc-bun
+    updated: false
+  - id: npm:spike-05-scrubber
+    updated: false
+  - id: npm:spike-01-mockttp-bun
+    updated: false
   - changelogIds:
-      - initial-release.md
+      - gui-dials-dark-drawers.md
     id: npm:mocktown
     updated: true
-  - id: npm:spike-03-emulate
-    updated: false
   - id: npm:@mocktown/gui
     updated: true
-  - id: npm:spike-02-orpc-bun
-    updated: false
-  - id: npm:spike-04-container-seal
-    updated: false
-  - id: npm:spike-01-mockttp-bun
-    updated: false
-  - id: npm:spike-05-scrubber
-    updated: false
 npm:packages:
   - id: npm:@mocktown/root
-  - id: npm:mocktown
   - id: npm:spike-03-emulate
-  - id: npm:@mocktown/gui
-  - id: npm:spike-02-orpc-bun
   - id: npm:spike-04-container-seal
-  - id: npm:spike-01-mockttp-bun
+  - id: npm:spike-02-orpc-bun
   - id: npm:spike-05-scrubber
+  - id: npm:spike-01-mockttp-bun
+  - id: npm:mocktown
+  - id: npm:@mocktown/gui
