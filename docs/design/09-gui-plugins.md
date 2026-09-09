@@ -48,7 +48,8 @@ packaging.
 - **shadcn components are deliberately not vendored yet.** The five primitives the shell
   needs are hand-written and marked `TODO(registry)` where the house `@gkurt`
   shadcn-on-Base-UI registry should replace them — the swap wants a real dialog or combobox
-  to justify it, not a table wrapper.
+  to justify it, not a table wrapper. *Partly superseded 2026-09-09: the registry's
+  `scroll-utils` are vendored and DialKit owns the inputs — see below.*
 - **The project comes from the daemon and `?project=` overrides it.**
   [08-projects-config.md](08-projects-config.md)'s rule is that the resolved project is
   always visible, not that the GUI owns resolution.
@@ -81,6 +82,87 @@ packaging.
   project, and that is the one operation that acts across projects and cannot be undone; its
   safety comes from typing the project's name, which belongs in a terminal
   ([08-projects-config.md](08-projects-config.md)).
+
+*Amended 2026-09-09 — the inputs, the schemes, and where a row's detail goes:*
+
+- **DialKit owns the dials and the inputs** (`packages/gui/src/dials.tsx`). Only the
+  individual controls are mounted, which the package exports for exactly this; `DialRoot`,
+  the preset menu and the timeline dock stay behind, and the `--dial-*` tokens are rebound
+  to this app's palette in `styles.css`. What it buys is the part that is tedious and easy
+  to get subtly wrong: a slider you can drag, scroll, arrow-key and type a number into, a
+  select with a positioned keyboard-driven popup, an autosizing text field — behind one
+  labelled row shape, so a `mocktown.json` setting, a scenario knob and a service's provider
+  all read as the same kind of control.
+
+  The Settings page is what made the case. Both halves of it were four-column tables with an
+  input wedged into the second column, which is the wrong shape twice over: a knob declaring
+  `minimum` and `maximum` — `latencyMs: 0–10000` is the canonical one — was a box to type
+  JSON into rather than something to sweep, and the description, the only text that says what
+  a knob *does*, was competing for width with the value it describes. The control is picked
+  from the knob's own JSON Schema, so a mock that declares a bounded number gets a slider
+  with no edit to the GUI ([12-scenario-controls.md](12-scenario-controls.md)'s "render their
+  forms from the manifest", finally meant literally).
+
+- **The controls commit; they are not live.** Every change on these screens is an API call
+  that writes to a committed file or to project state, so the wrappers decide when a gesture
+  is finished — a text dial on Enter, a slider a beat after the last movement rather than on
+  every frame of a drag. Each holds the value it sent until the daemon reports the same one
+  back; dropping it at commit time put the *old* value on screen for the length of the round
+  trip, which reads as the control refusing what was just done to it.
+
+- **A row's detail is a drawer, not an expanded row.** An expansion put the detail *below*
+  the table: the row that opened it was pushed off screen by the thing it opened, every other
+  row moved under the cursor, and an issue's diagnosis relaid out the page each time one was
+  clicked. A drawer leaves the list where it was, so clicking down a queue compares issues
+  instead of relayouting around them. It is a native `<dialog>` — modality, the top layer,
+  focus containment, inert background and Escape are all platform behaviour, and being in the
+  top layer is also what keeps it out of the containment the scroll fades create on the page
+  behind it.
+
+  Services joined Issues in using one. Its provider is the single decision on that screen —
+  it decides whether a service records, denies or reaches the real world — and a `<select>`
+  in a table cell read as one more column of data rather than as the one control there that
+  changes what the front door does.
+
+- **There is a light and a dark scheme, and following the OS stays a choice.** The palette is
+  still written once with `light-dark()`; the setting only changes `color-scheme`, so native
+  widgets follow it too and there is no second copy of the tokens. `system` is the absence of
+  the attribute, and it is the default — a two-state toggle can only ever leave a reader
+  pinned to one scheme.
+
+  The stored value is applied by `public/theme.js`, a plain blocking script ahead of the
+  bundle: every module is deferred, so by the time the bundle runs the page has painted once
+  in the OS's scheme, and it cannot be inlined either, because the shell is served under
+  `script-src 'self'`.
+
+  **A panel gets the scheme in its query string**, next to the project. `color-scheme` does
+  not cross a frame boundary — an iframe inherits the property but the document inside still
+  resolves `prefers-color-scheme` against the OS — so a shell pinned to dark was framing a
+  white panel. The shell reaching into the frame's document to fix that would be the shell
+  knowing something about what a panel is; a query parameter is the convention a panel
+  already reads the project from.
+
+- **Scrollable regions fade at the edge and hide their scrollbar.** The registry's
+  `scroll-utils` are vendored at `packages/gui/src/scroll-utils.css`: a thin bar that is
+  transparent until the region is hovered or focused, and a mask that fades whichever edge
+  can still be scrolled toward. The fade is pure CSS (`animation-timeline: scroll(self)`), so
+  it costs no scroll handler and degrades to no mask where scroll-driven animations are
+  missing.
+
+- **Dashboard widgets are capped and scroll inside themselves.** Three of them grow without
+  limit — the feed, the service table, the provider list — so one busy recording session
+  decided the height of the whole page and left the seal state below the fold. One cap for
+  every card rather than a number per card: matching heights are the point of a grid. The cap
+  brings the fade's paint containment with it, which makes a capped card the wrong place for
+  a dial, whose popup would be clipped to the card instead of escaping it.
+
+- **No stylesheet in the build may reach off the machine.** DialKit's stylesheet opens with
+  an `@import` for a Google-hosted font, which this shell may not fetch — it is served under
+  a CSP with no external origin, so the request is refused and logged on every load, and a
+  tool whose premise is that nothing leaves the machine silently has no business asking
+  Google for a font. `vite.config.ts` strips remote `@import`s from any stylesheet in the
+  build and says which, so the next dependency that ships one is caught by the build rather
+  than by a console refusal.
 
 ### The token is injected, never bundled
 

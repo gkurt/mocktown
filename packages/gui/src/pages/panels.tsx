@@ -7,13 +7,22 @@
  * external origins in it, so a panel cannot take scrubbed traffic off this machine. It runs
  * with `allow-same-origin` because it needs the API, which also means the sandbox attribute
  * is not the boundary here — the CSP is (gui/serve.ts).
+ *
+ * The scheme goes in the query string beside the project, because `color-scheme` does not
+ * cross a frame boundary: an iframe inherits it as a property but the embedded document
+ * still resolves `prefers-color-scheme` against the OS, so a shell pinned to dark was
+ * framing a white panel. Reaching into the frame's document to fix that would be the shell
+ * knowing something about what a panel is; a query parameter is the convention panels
+ * already read the project from.
  */
 import { useState } from 'react';
 import { usePanels } from '../hooks.ts';
+import { useScheme } from '../theme.ts';
 import { Badge, Card, Empty, Failure, Muted, Path, Pending } from '../ui.tsx';
 
 export function Panels({ project }: { project: string }) {
   const panels = usePanels(project);
+  const scheme = useScheme();
   const [open, setOpen] = useState<string | null>(null);
 
   if (panels.error) return <Failure error={panels.error} />;
@@ -60,7 +69,7 @@ export function Panels({ project }: { project: string }) {
           <iframe
             key={active.url}
             title={active.name}
-            src={`${active.url}?project=${encodeURIComponent(project)}`}
+            src={`${active.url}?project=${encodeURIComponent(project)}&scheme=${scheme}`}
             sandbox="allow-scripts allow-same-origin"
             className="h-[70vh] w-full rounded border border-line bg-raised"
           />

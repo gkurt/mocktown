@@ -18,7 +18,9 @@
     "@orpc/openapi-client": "1.15.0",
     "@tanstack/react-query": "5.102.8",
     "@tanstack/react-router": "1.170.32",
+    "dialkit": "^2.0.1",
     "mocktown": "workspace:*",
+    "motion": "^13.2.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

@@ -4,6 +4,7 @@
  * and React's default escaping is what enforces it).
  */
 import { useState } from 'react';
+import { Choice, Dials } from '../dials.tsx';
 import { type FeedEvent, useFeed } from '../hooks.ts';
 import { Badge, Card, Empty, Failure, Muted } from '../ui.tsx';
 
@@ -54,19 +55,14 @@ export function Feed({ project }: { project: string }) {
     <Card
       title="Live feed"
       action={
-        // TODO(registry): the registry's `select` once this grows a second filter.
-        <select
-          className="rounded border border-line bg-raised px-1 py-0.5"
-          value={kind ?? ''}
-          onChange={(event) => setKind((event.target.value || undefined) as FeedEvent['kind'] | undefined)}
-        >
-          <option value="">every kind</option>
-          {KINDS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+        <Dials row>
+          <Choice
+            label="kind"
+            value={kind ?? ''}
+            options={[{ value: '', label: 'every kind' }, ...KINDS.map((kind) => ({ value: kind, label: kind }))]}
+            onChange={(next) => setKind(KINDS.find((option) => option === next))}
+          />
+        </Dials>
       }
     >
       <FeedLines project={project} kind={kind} />

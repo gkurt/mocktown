@@ -81,7 +81,9 @@ export function Profiles({ project }: { project: string }) {
           {/* The point of minting is skipping the login UI entirely, so what is shown is the
               header value itself rather than the token it wraps. */}
           <div className="flex items-start gap-2">
-            <pre className="grow overflow-x-auto rounded border border-line bg-base p-2 font-mono text-[12px]">{minted.header}</pre>
+            <pre className="grow scrollable scrollable-transition scroll-fade-inline rounded border border-line bg-surface p-2 font-mono text-[12px]">
+              {minted.header}
+            </pre>
             <Copy value={minted.header} label="the Authorization header" />
           </div>
           <p className="mt-2">

@@ -10,7 +10,7 @@ panels and iframes them, and a panel reads the same public API every other clien
 { "name": "Stripe state", "service": "api.stripe.com", "entry": "stripe-state.html" }
 ```
 
-## The two conventions
+## The three conventions
 
 1. **The daemon injects your credentials.** `<meta name="mocktown-boot">` carries
    `{ apiBase, token, project }`. Read it, never hard-code anything:
@@ -26,6 +26,18 @@ panels and iframes them, and a panel reads the same public API every other clien
    `new URLSearchParams(location.search).get('project') ?? boot.project`. Every API call
    takes `project`.
 
+3. **It passes its colour scheme there too** — `scheme` is `system`, `light` or `dark`.
+   Declare `color-scheme: light dark` and pin it when the shell has been pinned; `system`
+   needs nothing, because that is what the declaration already does:
+
+   ```js
+   const scheme = new URLSearchParams(location.search).get('scheme');
+   if (scheme === 'light' || scheme === 'dark') document.documentElement.style.colorScheme = scheme;
+   ```
+
+   A panel is an iframe and `color-scheme` does not cross that boundary, so a panel that
+   skips this is a white rectangle in a dark shell.
+
 Start from the shipped example rather than a blank file: `mocktown panels list` shows the
 built-in `provider-state` panel and the path to it. Copying it into
 `.mocktown/panels/` overrides the built-in of the same name.
@@ -36,6 +48,9 @@ built-in `provider-state` panel and the path to it. Copying it into
   `default-src 'none'; connect-src 'self'` — no CDN script, no web font, no remote image.
   Not a style preference: the data you can read is scrubbed third-party traffic, and an
   image URL exfiltrates as well as a `fetch` does. Inline your CSS and JS.
+- **Take your colours from the scheme, not from a palette.** `light-dark()`, the system
+  colours (`Canvas`, `CanvasText`) and `color-mix(… currentColor …)` all follow the scheme
+  above on their own. A hard-coded `#fff` is a panel that only works in one of the two.
 - **Render API data as text, never as markup.** Everything you display came from a third
   party's response. Build nodes and set `textContent`; do not concatenate response values
   into `innerHTML`.

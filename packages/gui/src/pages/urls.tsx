@@ -78,7 +78,7 @@ export function Urls({ project }: { project: string }) {
         {variables.length === 0 ? (
           <Empty>No redirection variables yet.</Empty>
         ) : (
-          <pre className="overflow-x-auto rounded border border-line bg-base p-2 font-mono text-[12px] leading-5">
+          <pre className="scrollable scrollable-transition scroll-fade-inline rounded border border-line bg-surface p-2 font-mono text-[12px] leading-5">
             {variables.map(([name, value]) => `${name}=${value}`).join('\n')}
           </pre>
         )}

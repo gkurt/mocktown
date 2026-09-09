@@ -12,6 +12,7 @@ import { createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvide
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { boot, useStranded } from './api.ts';
+import { Choice, Dials } from './dials.tsx';
 import { useProjects } from './hooks.ts';
 import { Corpus } from './pages/corpus.tsx';
 import { Dashboard } from './pages/dashboard.tsx';
@@ -24,6 +25,7 @@ import { Services } from './pages/services.tsx';
 import { Settings } from './pages/settings.tsx';
 import { State } from './pages/state.tsx';
 import { Urls } from './pages/urls.tsx';
+import { SCHEMES, setScheme, useScheme } from './theme.ts';
 import { Button } from './ui.tsx';
 import './styles.css';
 
@@ -92,21 +94,36 @@ function Switcher({ project, onPick }: { project: string; onPick: (project: stri
   const names = known.includes(project) ? known : [project, ...known];
 
   return (
-    <label className="ml-auto flex items-center gap-2">
-      <span className="text-muted">project</span>
-      <select
-        className="w-56 rounded border border-line bg-raised px-1 py-0.5 font-mono"
-        value={project}
-        onChange={(event) => onPick(event.target.value)}
-      >
-        {names.map((name) => (
-          <option key={name} value={name}>
-            {name}
-            {name === projects.data?.default ? '  (default)' : ''}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Choice
+      label="project"
+      value={project}
+      onChange={onPick}
+      options={names.map((name) => ({ value: name, label: name === projects.data?.default ? `${name} (default)` : name }))}
+    />
+  );
+}
+
+/**
+ * The scheme, as a setting rather than a two-state switch: `system` is a real choice and the
+ * default, and a toggle can only ever leave a reader pinned to one of the other two. It
+ * lives in the shell's header because it applies to the whole shell, not to a project — and
+ * for the same reason it is the one control here that writes to `localStorage` instead of to
+ * the daemon (theme.ts).
+ */
+function SchemePicker() {
+  const scheme = useScheme();
+
+  return (
+    <Choice
+      label="theme"
+      value={scheme}
+      // Spelled as pairs, not bare strings: DialKit title-cases a bare option, and nothing
+      // else on this screen is capitalised.
+      options={SCHEMES.map((scheme) => ({ value: scheme, label: scheme }))}
+      // Narrowed rather than cast: the options come from `SCHEMES`, so anything else arriving
+      // here is a bug in the control and `system` is the safe answer to it.
+      onChange={(next) => setScheme(SCHEMES.find((scheme) => scheme === next) ?? 'system')}
+    />
   );
 }
 
@@ -132,7 +149,10 @@ function Chrome() {
             </Link>
           ))}
         </nav>
-        <Switcher project={project} onPick={(next) => navigate({ to: '.', search: { project: next } })} />
+        <Dials row className="ml-auto">
+          <SchemePicker />
+          <Switcher project={project} onPick={(next) => navigate({ to: '.', search: { project: next } })} />
+        </Dials>
       </header>
       <main className="p-4">
         <Outlet />

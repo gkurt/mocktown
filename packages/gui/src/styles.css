@@ -1,8 +1,11 @@
 @import "tailwindcss";
+@import "./scroll-utils.css";
 
 /*
- * One palette, both schemes, no theme toggle: this is a local tool in a terminal-adjacent
- * workflow, so it follows the OS.
+ * One palette, both schemes. The tokens are written once with `light-dark()` and the scheme
+ * is chosen by `color-scheme` alone, so the override below is three declarations rather than
+ * a second copy of the palette — and native widgets (scrollbars, date pickers, the `select`
+ * popup) follow it for free, which a class-swapped palette would not give.
  */
 @theme {
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -16,10 +19,140 @@
   --color-bad: light-dark(oklch(0.53 0.19 25), oklch(0.72 0.17 25));
 }
 
+/*
+ * No attribute means "follow the OS", which is both the default and a real choice a reader
+ * can go back to — a two-state toggle can only ever leave them pinned to one scheme.
+ */
 html {
   color-scheme: light dark;
 }
 
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 body {
   @apply bg-surface text-ink text-[13px] leading-relaxed antialiased;
+}
+
+/*
+ * The scrollbar thumb, spelled out per scheme rather than with `light-dark()`: this one is a
+ * registered custom property (`@property` in scroll-utils.css, so it can be transitioned),
+ * and a registered property is resolved before `color-scheme` is.
+ */
+:root {
+  --scrollbar-color: oklch(0 0 0 / 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --scrollbar-color: oklch(1 0 0 / 0.25);
+  }
+}
+
+:root[data-theme="dark"] {
+  --scrollbar-color: oklch(1 0 0 / 0.25);
+}
+
+/*
+ * DialKit, wearing this app's palette.
+ *
+ * The controls ship as a self-contained dev panel, which is the one thing they must not look
+ * like here — they are the product's inputs. So the panel chrome is left unused and only the
+ * `--dial-*` tokens are rebound, which keeps every control's behaviour (drag, scroll, arrow
+ * keys, the number editor) and none of its colour. `data-theme` is passed straight through,
+ * because DialKit's three states are the same three this app has.
+ *
+ * The `[data-theme]` in the selector is there for specificity: DialKit's own light and
+ * system rules are `.dialkit-root[data-theme=…]`, so an override has to out-specify them
+ * rather than merely follow them.
+ */
+.dials.dialkit-root[data-theme] {
+  --dial-surface: color-mix(in oklab, var(--color-line) 45%, transparent);
+  --dial-surface-hover: color-mix(in oklab, var(--color-line) 70%, transparent);
+  --dial-surface-active: var(--color-line);
+  --dial-surface-subtle: color-mix(in oklab, var(--color-line) 30%, transparent);
+
+  --dial-text-root: var(--color-ink);
+  --dial-text-section: var(--color-muted);
+  --dial-text-label: var(--color-muted);
+  --dial-text-focus: var(--color-ink);
+  --dial-text-primary: var(--color-ink);
+  --dial-text-secondary: var(--color-muted);
+  --dial-text-tertiary: var(--color-muted);
+
+  --dial-border: var(--color-line);
+  --dial-border-hover: var(--color-muted);
+  --dial-focus-ring: var(--color-muted);
+
+  --dial-glass-bg: var(--color-raised);
+  --dial-dropdown-bg: var(--color-raised);
+  --dial-radius: 0.25rem;
+  /* 36px is a panel row. This app is 13px and dense, and a dial has to sit in a card next to
+     a table without becoming the tallest thing on the screen. */
+  --dial-row-height: 30px;
+  font-family: inherit;
+}
+
+/*
+ * Every dial lays its label and its value out with `space-between`, which needs a width to
+ * distribute — and a dial dropped into a card header is sized by its content, so the label
+ * and the value ran together ("themeSystem"). A floor gives the gap somewhere to come from.
+ * A form row is already wider than this, so it changes nothing there.
+ */
+.dials > * {
+  min-width: 12rem;
+}
+
+/*
+ * The drawer is a native `<dialog>`: modality, the top layer, focus containment and Escape
+ * are all things the platform already does correctly and a hand-rolled panel gets wrong.
+ * `allow-discrete` is what lets `display` and `overlay` take part in the transition, so it
+ * animates out as well as in instead of vanishing.
+ */
+.drawer {
+  transition:
+    translate 200ms ease,
+    opacity 200ms ease,
+    display 200ms allow-discrete,
+    overlay 200ms allow-discrete;
+  translate: 100% 0;
+  opacity: 0;
+}
+
+.drawer[open] {
+  translate: 0 0;
+  opacity: 1;
+}
+
+@starting-style {
+  .drawer[open] {
+    translate: 100% 0;
+    opacity: 0;
+  }
+}
+
+.drawer::backdrop {
+  background-color: oklch(0 0 0 / 0.3);
+  transition:
+    background-color 200ms ease,
+    display 200ms allow-discrete,
+    overlay 200ms allow-discrete;
+}
+
+@starting-style {
+  .drawer[open]::backdrop {
+    background-color: oklch(0 0 0 / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer,
+  .drawer::backdrop {
+    transition: none;
+  }
 }

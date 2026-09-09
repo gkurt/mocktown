@@ -2,6 +2,12 @@
  * The dashboard 09-gui-plugins.md asks for: resolved project, services and provider
  * status, seal state, the live feed and the issue queue — every one of them rendered from
  * an API response, with no derived state of its own.
+ *
+ * Every widget here is capped and scrolls inside itself (`scroll` on Card). A dashboard is
+ * read by glancing, and three of these grow without limit — the feed, the service table and
+ * the provider list — so one busy recording session decided the height of the page and left
+ * the seal state a screen and a half below the fold. Capped, the grid keeps its shape and
+ * each widget's overflow is its own problem; the scroll fade is what says there is more.
  */
 import { Link } from '@tanstack/react-router';
 import { useIssues, usePortless, useSeal, useStatus } from '../hooks.ts';
@@ -21,7 +27,7 @@ export function Dashboard({ project }: { project: string }) {
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      <Card title="Front door">
+      <Card title="Front door" scroll>
         <dl className="grid grid-cols-[9rem_1fr] gap-y-1">
           <dt>
             <Muted>state</Muted>
@@ -68,7 +74,7 @@ export function Dashboard({ project }: { project: string }) {
         )}
       </Card>
 
-      <Card title="Seal">
+      <Card title="Seal" scroll>
         {seal.error ? (
           <Failure error={seal.error} />
         ) : !seal.data ? (
@@ -95,7 +101,7 @@ export function Dashboard({ project }: { project: string }) {
         )}
       </Card>
 
-      <Card title="Services">
+      <Card title="Services" scroll>
         {services.length === 0 ? (
           <Empty>No services yet. Record something and they appear here.</Empty>
         ) : (
@@ -114,7 +120,7 @@ export function Dashboard({ project }: { project: string }) {
         )}
       </Card>
 
-      <Card title="Providers">
+      <Card title="Providers" scroll>
         {providers.length === 0 ? (
           <Empty>Nothing is serving. `mocktown serve start` brings providers up.</Empty>
         ) : (
@@ -145,6 +151,7 @@ export function Dashboard({ project }: { project: string }) {
 
       <Card
         title="Live feed"
+        scroll
         action={
           <Link to="/feed" className="underline">
             all events
@@ -156,6 +163,7 @@ export function Dashboard({ project }: { project: string }) {
 
       <Card
         title="Open issues"
+        scroll
         action={
           <Link to="/issues" className="underline">
             queue

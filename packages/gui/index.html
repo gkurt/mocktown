@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mocktown</title>
     <!--
+      Blocking, and ahead of the bundle: it applies the stored colour scheme before the first
+      paint, which a deferred module script cannot do.
+    -->
+    <script src="/theme.js"></script>
+    <!--
       No token here. The daemon injects a `mocktown-boot` meta element as it serves this
       file (gui/serve.ts), so a build sitting on disk carries no capability.
     -->

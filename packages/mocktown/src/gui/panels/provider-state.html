@@ -8,9 +8,10 @@
       SDK, no external network. It reads the same public API every other client reads. Copy
       it into `.mocktown/panels/`, edit it, and that is the whole plugin model.
 
-      Two conventions a panel relies on:
+      Three conventions a panel relies on:
         1. `<meta name="mocktown-boot">` is injected by the daemon: API base and token.
         2. The shell passes the project in the query string.
+        3. It passes its colour scheme there too — `system`, `light` or `dark`.
     -->
     <style>
       :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
@@ -26,8 +27,17 @@
   <body>
     <div id="root" class="muted">loading…</div>
     <script>
+      const params = new URLSearchParams(location.search);
+
+      // A panel is an iframe, and `color-scheme` does not cross that boundary: a reader who
+      // pinned the shell to dark while the OS says light would get a white panel in a dark
+      // shell. `system` is left alone — that is what `color-scheme: light dark` above
+      // already does.
+      const scheme = params.get('scheme');
+      if (scheme === 'light' || scheme === 'dark') document.documentElement.style.colorScheme = scheme;
+
       const boot = JSON.parse(document.querySelector('meta[name="mocktown-boot"]').content);
-      const project = new URLSearchParams(location.search).get('project') ?? boot.project;
+      const project = params.get('project') ?? boot.project;
       const root = document.getElementById('root');
 
       const api = async (path) => {

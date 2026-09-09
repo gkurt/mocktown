@@ -11,72 +11,57 @@
  * The settings list is not written out here. It comes from the same Zod schema that defines
  * `mocktown.json`, so a knob added to the schema appears on this screen with its description
  * and its default and no edit to this file.
+ *
+ * This is the page that made the shell adopt DialKit (dials.tsx). Both halves used to be
+ * four-column tables with an input wedged into the second column, which is the wrong shape
+ * twice over: a knob declaring `minimum` and `maximum` is a slider and was rendered as a box
+ * to type JSON into, and the description — the only thing that says what a knob *does* —
+ * was competing for width with the value it describes. A control row with its explanation
+ * underneath is a form, which is what this always was.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api.ts';
+import { Choice, Dials, Range, Switch, TextDial } from '../dials.tsx';
 import { useConfig, useKnobs, useStatus } from '../hooks.ts';
-import { Badge, Card, Cell, Empty, Failure, Muted, Path, Pending, Table } from '../ui.tsx';
+import { Badge, Card, Empty, Failure, Muted, Path, Pending } from '../ui.tsx';
 
 type Setting = Awaited<ReturnType<typeof api.config.get>>['settings'][number];
+type Knob = Awaited<ReturnType<typeof api.knobs.get>>['knobs'][number];
 
-const input = 'rounded border border-line bg-raised px-1 py-0.5 font-mono disabled:opacity-50';
+/** The slice of JSON Schema a knob's manifest can offer that changes which control it gets. */
+type Shape = { type?: string; enum?: unknown[]; minimum?: number; maximum?: number; multipleOf?: number } | null;
+
+/** A control and the line of prose that explains it. */
+const Dial = ({ children, note }: { children: React.ReactNode; note: React.ReactNode }) => (
+  <div>
+    {children}
+    <p className="mt-0.5 px-3 text-muted">{note}</p>
+  </div>
+);
 
 /**
  * Values travel as JSON text end to end. Parsing them into form state and back would mean
  * two representations to keep honest, and the moment they disagree the form silently writes
  * something the user did not type — so the text is the state, and only the widget changes.
  */
-function Field({ setting, disabled, onCommit }: { setting: Setting; disabled: boolean; onCommit: (value: string) => void }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const text = draft ?? setting.value;
-
+function SettingDial({ setting, onCommit }: { setting: Setting; onCommit: (value: string) => void }) {
   if (setting.type === 'boolean') {
-    return (
-      <input
-        type="checkbox"
-        className="size-4 accent-good"
-        checked={setting.value === 'true'}
-        disabled={disabled}
-        onChange={(event) => onCommit(String(event.target.checked))}
-      />
-    );
+    return <Switch label={setting.key} checked={setting.value === 'true'} onChange={(checked) => onCommit(String(checked))} />;
   }
 
   if (setting.choices.length) {
     return (
-      <select
-        className={input}
+      <Choice
+        label={setting.key}
         value={JSON.parse(setting.value) ?? ''}
-        disabled={disabled}
-        onChange={(e) => onCommit(JSON.stringify(e.target.value))}
-      >
-        {setting.choices.map((choice) => (
-          <option key={choice} value={choice}>
-            {choice}
-          </option>
-        ))}
-      </select>
+        options={setting.choices.map((choice) => ({ value: choice, label: choice }))}
+        onChange={(next) => onCommit(JSON.stringify(next))}
+      />
     );
   }
 
-  // Enter commits and blur does not: a list of hostnames is easy to half-type, and losing
-  // focus should not be what decides a value is finished.
-  return (
-    <input
-      className={`${input} w-full`}
-      value={text}
-      disabled={disabled}
-      spellCheck={false}
-      onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') setDraft(null);
-        if (event.key !== 'Enter') return;
-        onCommit(text);
-        setDraft(null);
-      }}
-    />
-  );
+  return <TextDial label={setting.key} value={setting.value} onCommit={onCommit} />;
 }
 
 function ProjectSettings({ project }: { project: string }) {
@@ -91,42 +76,43 @@ function ProjectSettings({ project }: { project: string }) {
   if (!config.data) return <Pending what="the settings" />;
 
   const data = config.data;
-  const changed = data.settings.filter((s) => s.value !== s.default).length;
+  const changed = data.settings.filter((setting) => setting.value !== setting.default).length;
 
   return (
     <Card title="Project settings" action={<Badge tone={changed ? 'good' : 'plain'}>{changed} changed</Badge>}>
-      {data.file ? (
-        <p className="mb-2">
-          <Muted>
-            Committed to <Path>{data.file}</Path>. A text field commits on Enter; Escape reverts it.
-          </Muted>
-        </p>
-      ) : (
+      {!data.file ? (
         <Empty>This project has no workspace, so there is no mocktown.json to edit. Run `mocktown init` in the repo first.</Empty>
+      ) : (
+        <>
+          <p className="mb-2">
+            <Muted>
+              Committed to <Path>{data.file}</Path>. A text field commits on Enter; Escape reverts it.
+            </Muted>
+          </p>
+          {/* Gated while a write is in flight, because each of these edits a committed file.
+              Safe to do with pointer events here and not on the knobs below: nothing on this
+              half is a slider, so there is no drag for a mid-gesture gate to cut short. */}
+          <Dials className={set.isPending ? 'pointer-events-none opacity-60' : ''}>
+            {data.settings.map((setting) => (
+              <Dial
+                key={setting.key}
+                note={
+                  <>
+                    {setting.value === setting.default ? null : (
+                      <>
+                        <span className="text-good">changed</span> · default <span className="font-mono">{setting.default}</span> ·{' '}
+                      </>
+                    )}
+                    {setting.description || '—'}
+                  </>
+                }
+              >
+                <SettingDial setting={setting} onCommit={(value) => set.mutate({ key: setting.key, value })} />
+              </Dial>
+            ))}
+          </Dials>
+        </>
       )}
-
-      <Table head={['setting', 'value', 'default', 'what it does']}>
-        {data.settings.map((setting) => (
-          <tr key={setting.key}>
-            <Cell mono className="whitespace-nowrap align-top">
-              {setting.value === setting.default ? setting.key : <strong className="font-medium">{setting.key}</strong>}
-            </Cell>
-            {/* The widest column by design: `capture.ignore` is a long array of hostnames and
-                editing one through a keyhole is how the wrong entry gets deleted. */}
-            <Cell className="w-2/5 align-top">
-              <Field
-                setting={setting}
-                disabled={set.isPending || !data.file}
-                onCommit={(value) => set.mutate({ key: setting.key, value })}
-              />
-            </Cell>
-            <Cell mono className="align-top">
-              <Muted>{setting.value === setting.default ? '—' : setting.default}</Muted>
-            </Cell>
-            <Cell className="align-top">{setting.description || <Muted>—</Muted>}</Cell>
-          </tr>
-        ))}
-      </Table>
 
       {set.error && (
         <div className="mt-2">
@@ -134,6 +120,75 @@ function ProjectSettings({ project }: { project: string }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * One knob, as whatever control its manifest describes.
+ *
+ * A bounded number is the case worth having DialKit for: `latency.ms: 0–2000` is a thing you
+ * sweep to find where the app breaks, and typing 250 then 500 then 750 into a text box is
+ * not sweeping. Everything unbounded or structured stays text, because a slider with no
+ * ends is a worse text box.
+ */
+function KnobDial({ knob, onCommit }: { knob: Knob; onCommit: (value: unknown) => void }) {
+  const shape = knob.jsonSchema as Shape;
+  const type = shape?.type;
+
+  if (type === 'boolean') return <Switch label={knob.key} checked={knob.value === true} onChange={onCommit} />;
+
+  if ((type === 'number' || type === 'integer') && shape?.minimum !== undefined && shape.maximum !== undefined) {
+    return (
+      <Range
+        label={knob.key}
+        value={typeof knob.value === 'number' ? knob.value : Number(knob.default ?? shape.minimum)}
+        min={shape.minimum}
+        max={shape.maximum}
+        step={shape.multipleOf ?? (type === 'integer' ? 1 : undefined)}
+        onCommit={onCommit}
+      />
+    );
+  }
+
+  // `z.enum([…])` reaches here as a string with an `enum` list, which is a set of choices
+  // rather than something to type — and typing one of two words correctly is the reader's
+  // problem to have, not the form's to create.
+  if (Array.isArray(shape?.enum)) {
+    const options = shape.enum.map((option) => ({ value: String(option), label: String(option) }));
+    return <Choice label={knob.key} value={String(knob.value ?? '')} options={options} onChange={onCommit} />;
+  }
+
+  if (type === 'string') return <TextDial label={knob.key} value={String(knob.value ?? '')} onCommit={onCommit} />;
+
+  // Anything else — an object, an array, an unbounded number — is edited as the JSON it is.
+  return <JsonDial knob={knob} onCommit={onCommit} />;
+}
+
+/**
+ * A knob with no simpler shape, edited as JSON text. The parse failure is shown rather than
+ * swallowed: a missing bracket is the reader's typo, and a control that quietly declines to
+ * commit looks like a broken form.
+ */
+function JsonDial({ knob, onCommit }: { knob: Knob; onCommit: (value: unknown) => void }) {
+  const [invalid, setInvalid] = useState<string | null>(null);
+
+  return (
+    <>
+      <TextDial
+        label={knob.key}
+        value={JSON.stringify(knob.value)}
+        onCommit={(raw) => {
+          try {
+            const parsed = JSON.parse(raw);
+            setInvalid(null);
+            onCommit(parsed);
+          } catch (failure) {
+            setInvalid(failure instanceof Error ? failure.message : String(failure));
+          }
+        }}
+      />
+      {invalid && <p className="mt-0.5 px-3 text-bad">{invalid}</p>}
+    </>
   );
 }
 
@@ -151,46 +206,20 @@ function ServiceKnobs({ project, service }: { project: string; service: string }
 
   return (
     <Card title={service} action={<Badge>{knobs.data.knobs.length} knobs</Badge>}>
-      <Table head={['knob', 'value', 'default', 'what it does']}>
-        {knobs.data.knobs.map((knob) => {
-          const type = (knob.jsonSchema as { type?: string } | null)?.type;
-          const json = JSON.stringify(knob.value);
-          return (
-            <tr key={knob.key}>
-              <Cell mono className="whitespace-nowrap align-top">
-                {knob.key}
-              </Cell>
-              <Cell className="align-top">
-                {type === 'boolean' ? (
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-good"
-                    checked={knob.value === true}
-                    disabled={set.isPending}
-                    onChange={(event) => set.mutate({ [knob.key]: event.target.checked })}
-                  />
-                ) : (
-                  <input
-                    className={`${input} w-40`}
-                    defaultValue={type === 'string' ? String(knob.value ?? '') : json}
-                    disabled={set.isPending}
-                    spellCheck={false}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter') return;
-                      const raw = (event.target as HTMLInputElement).value;
-                      set.mutate({ [knob.key]: type === 'string' ? raw : JSON.parse(raw) });
-                    }}
-                  />
-                )}
-              </Cell>
-              <Cell mono className="align-top">
-                <Muted>{JSON.stringify(knob.default)}</Muted>
-              </Cell>
-              <Cell className="align-top">{knob.description || <Muted>—</Muted>}</Cell>
-            </tr>
-          );
-        })}
-      </Table>
+      <Dials>
+        {knobs.data.knobs.map((knob) => (
+          <Dial
+            key={knob.key}
+            note={
+              <>
+                default <span className="font-mono">{JSON.stringify(knob.default)}</span> · {knob.description || '—'}
+              </>
+            }
+          >
+            <KnobDial knob={knob} onCommit={(value) => set.mutate({ [knob.key]: value })} />
+          </Dial>
+        ))}
+      </Dials>
       <p className="mt-2">
         <Muted>
           Values are project state, not config: they take effect at once and every change is journaled, so a run stays replayable.
@@ -210,7 +239,7 @@ export function Settings({ project }: { project: string }) {
   // The provider is asked what it loaded, not the registry what it was told. A module in
   // `mocks/` is served whether or not the registry entry says `generated:`, and reading the
   // registry here hid every knob on a project whose services are still marked `record`.
-  const generated = (status.data?.providers ?? []).filter((p) => p.kind === 'generated').flatMap((p) => p.services);
+  const generated = (status.data?.providers ?? []).filter((provider) => provider.kind === 'generated').flatMap((p) => p.services);
 
   return (
     <div className="flex flex-col gap-4">

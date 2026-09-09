@@ -7,14 +7,24 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { boot } from './api.ts';
 
-export function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+/**
+ * `scroll` caps the body and scrolls it, for a card whose content has no natural length —
+ * a feed, a queue, a route list. Without it a dashboard's height is decided by whichever
+ * widget happened to have the most rows, and the rest of the grid is dragged along with it.
+ * One cap for every card rather than a per-card number: matching heights is the point.
+ *
+ * The fade brings paint containment with it, which makes the card a containing block for
+ * anything positioned `fixed` inside it — so a capped card is the wrong place for a dial,
+ * whose popup would be clipped to the card instead of escaping it.
+ */
+export function Card({ title, action, scroll, children }: { title: string; action?: ReactNode; scroll?: boolean; children: ReactNode }) {
   return (
     <section className="rounded-lg border border-line bg-raised">
       <header className="flex items-center justify-between gap-3 border-b border-line px-3 py-2">
         <h2 className="font-medium">{title}</h2>
         {action}
       </header>
-      <div className="p-3">{children}</div>
+      <div className={`p-3 ${scroll ? 'max-h-72 scrollable scrollable-transition scroll-fade' : ''}`}>{children}</div>
     </section>
   );
 }
@@ -22,7 +32,7 @@ export function Card({ title, action, children }: { title: string; action?: Reac
 /** TODO(registry): replace with the registry's `data-table` once sorting or paging is wanted. */
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="scrollable scrollable-transition scroll-fade-inline">
       <table className="w-full border-collapse">
         <thead>
           <tr className="text-muted">
@@ -42,6 +52,44 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
 export const Cell = ({ children, mono, className = '' }: { children?: ReactNode; mono?: boolean; className?: string }) => (
   <td className={`border-b border-line px-2 py-1 align-top ${mono ? 'font-mono' : ''} ${className}`}>{children}</td>
 );
+
+/**
+ * A table row that opens something — a drawer, in every current use. Give the table a
+ * leading `''` column for the caret this renders.
+ *
+ * The whole row takes a click, because a row that opens a detail view and only accepts the
+ * click on one word of itself is a target the reader has to aim at. The caret is a real
+ * `<button>` rather than a `role` on the `<tr>`: relabelling a row as a button takes the
+ * row-and-cell semantics away from everything inside it, and the row was already the thing
+ * a screen reader wanted to read. So the button carries the name and the keyboard, and the
+ * row carries the pointer.
+ *
+ * The caret also has to exist for its own sake — the affordance is the only thing that says
+ * a row does anything at all, and a table that silently opens a drawer on click is a table
+ * nobody clicks.
+ */
+export function RowButton({
+  label,
+  onOpen,
+  selected,
+  children,
+}: {
+  label: string;
+  onOpen: () => void;
+  selected?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <tr onClick={onOpen} className={`cursor-pointer hover:bg-line/40 focus-within:bg-line/40 ${selected ? 'bg-line/30' : ''}`}>
+      <Cell className="w-0">
+        <button type="button" onClick={onOpen} aria-label={`Open ${label}`} className="px-1 text-muted hover:text-ink">
+          {selected ? '▾' : '▸'}
+        </button>
+      </Cell>
+      {children}
+    </tr>
+  );
+}
 
 const TONES = {
   good: 'text-good border-good/40 bg-good/10',
@@ -192,5 +240,79 @@ export function Copy({ value, label }: { value: string; label?: string }) {
     >
       {state === 'done' ? 'copied' : state === 'failed' ? 'blocked' : 'copy'}
     </button>
+  );
+}
+
+/**
+ * A drawer for one row's detail, built on the native `<dialog>`.
+ *
+ * It replaces the expanding row this shell used to have. An expansion put the detail *below*
+ * the table, which meant the row that opened it was pushed off screen by the thing it
+ * opened, every other row moved under the cursor, and a payload the size of an issue's
+ * diagnosis reflowed the page each time one was clicked. A drawer leaves the list exactly
+ * where it was and puts the detail beside it, so clicking down a list of issues compares
+ * them instead of relayouting around them.
+ *
+ * `<dialog>` rather than a positioned `<div>`: modality, the top layer, focus containment,
+ * inert background and Escape are all platform behaviour, and a hand-rolled panel gets some
+ * subset of them wrong. Being in the top layer is also what keeps a drawer out of the
+ * `scroll-fade` containment on the page behind it. Clicking the backdrop closes, because a
+ * click that lands on a modal's backdrop has already targeted the dialog element itself.
+ *
+ * TODO(registry): the house registry's `sheet`, once it is vendored — same shape, same
+ * `<dialog>` underneath.
+ */
+export function Drawer({
+  open,
+  title,
+  action,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: ReactNode;
+  action?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const frame = useRef<HTMLDialogElement>(null);
+
+  // `showModal()` is a method, not an attribute, so the open state has to be pushed at the
+  // element. Rendering `open` instead would give a non-modal dialog: no backdrop, no top
+  // layer, no Escape.
+  useEffect(() => {
+    const dialog = frame.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  return (
+    <dialog
+      ref={frame}
+      onClose={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      className="drawer my-0 mr-0 ml-auto h-dvh max-h-dvh w-[min(38rem,100vw)] max-w-none border-line border-l bg-raised p-0 text-ink"
+    >
+      <div className="flex h-full flex-col">
+        <header className="flex items-center justify-between gap-3 border-line border-b px-3 py-2">
+          <h2 className="min-w-0 truncate font-medium">{title}</h2>
+          <span className="flex shrink-0 items-center gap-2">
+            {action}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="rounded border border-line px-2 py-1 leading-none text-muted hover:bg-line/40"
+            >
+              ✕
+            </button>
+          </span>
+        </header>
+        <div className="min-h-0 grow scrollable scrollable-transition scroll-fade p-3">{children}</div>
+      </div>
+    </dialog>
   );
 }

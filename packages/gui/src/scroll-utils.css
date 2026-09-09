@@ -1,0 +1,369 @@
+/*
+ * Vendored from the house `@gkurt` registry (`scroll-utils`). Tailwind v4 utilities, so they
+ * have to be imported after `@import "tailwindcss"`:
+ *
+ * - `scrollable` — a thin scrollbar that is transparent until the element is hovered,
+ *   focused or active. Pair it with `scrollable-transition` to fade rather than snap, and
+ *   with `scrollable-always` to pin the bar visible.
+ * - `scroll-fade` / `scroll-fade-inline` / `scroll-fade-both` — a scroll-driven mask that
+ *   fades the edge you can still scroll toward, and only that edge. It is pure CSS
+ *   (`animation-timeline: scroll(self)`), which is why it costs no scroll handler and why it
+ *   degrades to no mask at all where scroll-driven animations are missing.
+ *
+ * The colour comes from `--scrollbar-color`, set once in styles.css.
+ */
+
+@property --scrollbar-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+/* Non-inherited so transitions on a parent don't invalidate descendants'
+   style via `scrollbar-color` (which is an inherited property). */
+@property --scrollbar-thumb {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+@property --scrollbar-size {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 7px;
+}
+
+@property --scroll-fade-mask-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 32px;
+}
+
+@property --scroll-fade-scrollbar-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-block-padding-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-block-padding-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-top-mask-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-bottom-mask-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-inline-padding-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-inline-padding-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-left-mask-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-right-mask-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-block-scrollbar-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-inline-scrollbar-size {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@utility scrollable {
+  overflow: auto;
+  scrollbar-width: thin;
+  --scrollbar-thumb: var(--scrollbar-color, transparent);
+  scrollbar-color: var(--scrollbar-thumb, transparent) transparent;
+
+  &::-webkit-scrollbar {
+    border-radius: 8px;
+    width: var(--scrollbar-size, 7px);
+    height: var(--scrollbar-size, 7px);
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border-radius: 8px;
+    background: var(--scrollbar-color, transparent);
+  }
+
+  &::-webkit-scrollbar-corner {
+    background-color: transparent;
+  }
+
+  /* Hide the scrollbar until the element is interacted with. Add the
+     companion `scrollable-always` class to force the bar to stay visible. */
+  &:not(.scrollable-always):not(:hover):not(:focus):not(:focus-within):not(:active) {
+    --scrollbar-thumb: transparent;
+  }
+
+  /* scrollbar-color inherits; pin children to a stable value so a parent's
+     transition doesn't ripple through the subtree. :where keeps specificity
+     at 0 so a nested .scrollable can still take over. */
+  & > :where(*) {
+    scrollbar-color: var(--scrollbar-color, transparent) transparent;
+  }
+}
+
+@utility scrollable-transition {
+  transition: --scrollbar-thumb 160ms;
+}
+
+@utility scroll-fade {
+  @supports (scrollbar-width: thin) {
+    --scroll-fade-scrollbar-size: 11px;
+  }
+
+  @supports (animation-timeline: scroll()) {
+    contain: layout paint style;
+    will-change: scroll-position, mask;
+    mask-image:
+      linear-gradient(
+        to bottom,
+        black 0,
+        black var(--scroll-fade-block-padding-start, 0px),
+        transparent var(--scroll-fade-block-padding-start, 0px),
+        black calc(var(--scroll-fade-block-padding-start, 0px) + var(--scroll-fade-top-mask-size, 0px)),
+        black calc(100% - var(--scroll-fade-block-padding-end, 0px) - var(--scroll-fade-bottom-mask-size, 0px)),
+        transparent calc(100% - var(--scroll-fade-block-padding-end, 0px)),
+        black calc(100% - var(--scroll-fade-block-padding-end, 0px)),
+        black 100%
+      ),
+      linear-gradient(to left, black var(--scroll-fade-scrollbar-size, 0px), transparent var(--scroll-fade-scrollbar-size, 0px));
+    mask-composite: add;
+    mask-size:
+      calc(100% - var(--scroll-fade-scrollbar-size, 0px)) 100%,
+      100% 100%;
+    mask-repeat: no-repeat;
+    mask-position:
+      top left,
+      top right;
+    animation:
+      scroll-fade-top,
+      scroll-fade-bottom reverse;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self);
+    animation-range:
+      0 var(--scroll-fade-mask-size, 32px),
+      calc(100% - var(--scroll-fade-mask-size, 32px)) 100%;
+    animation-duration: 0.1s;
+  }
+}
+
+@utility scroll-fade-inline {
+  @supports (scrollbar-width: thin) {
+    --scroll-fade-scrollbar-size: 11px;
+  }
+
+  @supports (animation-timeline: scroll()) {
+    contain: layout paint style;
+    will-change: scroll-position, mask;
+    mask-image:
+      linear-gradient(
+        to right,
+        black 0,
+        black var(--scroll-fade-inline-padding-start, 0px),
+        transparent var(--scroll-fade-inline-padding-start, 0px),
+        black calc(var(--scroll-fade-inline-padding-start, 0px) + var(--scroll-fade-left-mask-size, 0px)),
+        black calc(100% - var(--scroll-fade-inline-padding-end, 0px) - var(--scroll-fade-right-mask-size, 0px)),
+        transparent calc(100% - var(--scroll-fade-inline-padding-end, 0px)),
+        black calc(100% - var(--scroll-fade-inline-padding-end, 0px)),
+        black 100%
+      ),
+      linear-gradient(to top, black var(--scroll-fade-scrollbar-size, 0px), transparent var(--scroll-fade-scrollbar-size, 0px));
+    mask-composite: add;
+    mask-size:
+      100% calc(100% - var(--scroll-fade-scrollbar-size, 0px)),
+      100% 100%;
+    mask-repeat: no-repeat;
+    mask-position:
+      top left,
+      bottom left;
+    animation:
+      scroll-fade-left,
+      scroll-fade-right reverse;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self inline);
+    animation-range:
+      0 var(--scroll-fade-mask-size, 32px),
+      calc(100% - var(--scroll-fade-mask-size, 32px)) 100%;
+    animation-duration: 0.1s;
+  }
+}
+
+@utility scroll-fade-both {
+  @supports (scrollbar-width: thin) {
+    --scroll-fade-scrollbar-size: 11px;
+  }
+
+  @supports (animation-timeline: scroll()) {
+    contain: layout paint style;
+    will-change: scroll-position, mask;
+    mask-image:
+      linear-gradient(to left, black var(--scroll-fade-block-scrollbar-size, 0px), transparent var(--scroll-fade-block-scrollbar-size, 0px)),
+      linear-gradient(
+        to top,
+        black var(--scroll-fade-inline-scrollbar-size, 0px),
+        transparent var(--scroll-fade-inline-scrollbar-size, 0px)
+      ),
+      /* Sticky-band guards: keep the top/bottom and left/right padding bands
+         fully opaque so the perpendicular fade can't cut into them (and the
+         overlapping corners stay consistent with the rest of the band). The
+         fades below then only act on the content interior. */
+      linear-gradient(
+        to bottom,
+        black var(--scroll-fade-block-padding-start, 0px),
+        transparent var(--scroll-fade-block-padding-start, 0px),
+        transparent calc(100% - var(--scroll-fade-block-padding-end, 0px)),
+        black calc(100% - var(--scroll-fade-block-padding-end, 0px))
+      ),
+      linear-gradient(
+        to right,
+        black var(--scroll-fade-inline-padding-start, 0px),
+        transparent var(--scroll-fade-inline-padding-start, 0px),
+        transparent calc(100% - var(--scroll-fade-inline-padding-end, 0px)),
+        black calc(100% - var(--scroll-fade-inline-padding-end, 0px))
+      ),
+      linear-gradient(
+        to bottom,
+        black 0,
+        black var(--scroll-fade-block-padding-start, 0px),
+        transparent var(--scroll-fade-block-padding-start, 0px),
+        black calc(var(--scroll-fade-block-padding-start, 0px) + var(--scroll-fade-top-mask-size, 0px)),
+        black calc(100% - var(--scroll-fade-block-padding-end, 0px) - var(--scroll-fade-bottom-mask-size, 0px)),
+        transparent calc(100% - var(--scroll-fade-block-padding-end, 0px)),
+        black calc(100% - var(--scroll-fade-block-padding-end, 0px)),
+        black 100%
+      ),
+      linear-gradient(
+        to right,
+        black 0,
+        black var(--scroll-fade-inline-padding-start, 0px),
+        transparent var(--scroll-fade-inline-padding-start, 0px),
+        black calc(var(--scroll-fade-inline-padding-start, 0px) + var(--scroll-fade-left-mask-size, 0px)),
+        black calc(100% - var(--scroll-fade-inline-padding-end, 0px) - var(--scroll-fade-right-mask-size, 0px)),
+        transparent calc(100% - var(--scroll-fade-inline-padding-end, 0px)),
+        black calc(100% - var(--scroll-fade-inline-padding-end, 0px)),
+        black 100%
+      );
+    mask-composite: add, add, add, add, intersect;
+    mask-size:
+      100% 100%,
+      100% 100%,
+      calc(100% - var(--scroll-fade-block-scrollbar-size, 0px)) calc(100% - var(--scroll-fade-inline-scrollbar-size, 0px)),
+      calc(100% - var(--scroll-fade-block-scrollbar-size, 0px)) calc(100% - var(--scroll-fade-inline-scrollbar-size, 0px)),
+      calc(100% - var(--scroll-fade-block-scrollbar-size, 0px)) calc(100% - var(--scroll-fade-inline-scrollbar-size, 0px)),
+      calc(100% - var(--scroll-fade-block-scrollbar-size, 0px)) calc(100% - var(--scroll-fade-inline-scrollbar-size, 0px));
+    mask-repeat: no-repeat;
+    mask-position:
+      top right,
+      bottom left,
+      top left,
+      top left,
+      top left,
+      top left;
+    animation:
+      scroll-fade-top,
+      scroll-fade-bottom reverse,
+      scroll-fade-left,
+      scroll-fade-right reverse,
+      scroll-fade-has-block-scroll,
+      scroll-fade-has-inline-scroll;
+    animation-fill-mode: both;
+    animation-timeline: scroll(self), scroll(self), scroll(self inline), scroll(self inline), scroll(self), scroll(self inline);
+    animation-range:
+      0 var(--scroll-fade-mask-size, 32px),
+      calc(100% - var(--scroll-fade-mask-size, 32px)) 100%,
+      0 var(--scroll-fade-mask-size, 32px),
+      calc(100% - var(--scroll-fade-mask-size, 32px)) 100%,
+      0 100%,
+      0 100%;
+    animation-duration: 0.1s;
+  }
+}
+
+@keyframes scroll-fade-top {
+  from {
+    --scroll-fade-top-mask-size: 0px;
+  }
+  to {
+    --scroll-fade-top-mask-size: var(--scroll-fade-mask-size, 32px);
+  }
+}
+
+@keyframes scroll-fade-bottom {
+  from {
+    --scroll-fade-bottom-mask-size: 0px;
+  }
+  to {
+    --scroll-fade-bottom-mask-size: var(--scroll-fade-mask-size, 32px);
+  }
+}
+
+@keyframes scroll-fade-left {
+  from {
+    --scroll-fade-left-mask-size: 0px;
+  }
+  to {
+    --scroll-fade-left-mask-size: var(--scroll-fade-mask-size, 32px);
+  }
+}
+
+@keyframes scroll-fade-right {
+  from {
+    --scroll-fade-right-mask-size: 0px;
+  }
+  to {
+    --scroll-fade-right-mask-size: var(--scroll-fade-mask-size, 32px);
+  }
+}
+
+@keyframes scroll-fade-has-block-scroll {
+  from,
+  to {
+    --scroll-fade-block-scrollbar-size: var(--scroll-fade-scrollbar-size, 0px);
+  }
+}
+
+@keyframes scroll-fade-has-inline-scroll {
+  from,
+  to {
+    --scroll-fade-inline-scrollbar-size: var(--scroll-fade-scrollbar-size, 0px);
+  }
+}
