@@ -27,6 +27,28 @@ Then, in the app you want to mock:
 mocktown init
 ```
 
+If a coding agent is going to do the work, give it the skill:
+
+```bash
+mocktown skills install
+```
+
+That writes the pack into `.mocktown/skills/` and hands the directory to
+[`skills`](https://github.com/vercel-labs/skills), which knows where each agent looks —
+`.claude/skills/mocktown/` for Claude Code. The pack lives at this repo's root, so the same
+installer reaches it without mocktown installed at all:
+
+```bash
+npx skills add gkurt/mocktown
+```
+
+It is one skill with the job as its argument:
+`/mocktown generate-mock`, `/mocktown fix-issues`, `/mocktown record-flow`,
+`/mocktown apply-redirects`, `/mocktown write-panel`. `--agent claude-code` picks the target
+rather than being asked, `--global` installs for every project, and re-running it is how a
+newer pack lands. Without an installer, `mocktown skills export` writes the same directory
+and `mocktown skills get --name mocktown --topic <job>` prints one file.
+
 Record a run, then look at what it captured:
 
 ```bash
@@ -45,11 +67,13 @@ that exists. `mocktown scrub audit` re-scans it with the current rules.
 1. `mocktown record -- <cmd>` captures real traffic through the front door.
 2. `mocktown mocks scaffold --service <host>` writes a `BRIEF.md` and a module stub from
    the corpus.
-3. A coding agent fills in the module — `mocktown skills get --name generate-mock` is the
-   prompt pack for exactly that job.
+3. A coding agent fills in the module — `mocktown skills install` puts the `mocktown`
+   skill where the agent will find it, and `/mocktown generate-mock` is the prompt pack
+   for exactly that job.
 4. `mocktown serve start --sealed` serves it — a mock you have written takes over the
    service the recorder discovered, without a registry edit. Anything unserved is **denied
-   loudly** and filed: `mocktown issues list`.
+   loudly** and filed: `mocktown issues list --status outstanding` — open plus the ones
+   whose last fix failed verification.
 5. `mocktown mocks verify --service <host>` replays the corpus against the mock,
    comparing status class and response *shape* — never values.
 
@@ -147,8 +171,8 @@ mocktown record stop
 
 The **first** agent-browser command launches the browser and fixes its proxy and its trust
 for every command after it — `agent-browser close` before a differently configured run, or
-you drive the previous one and record nothing. `mocktown skills get --name record-flow` is
-this page written for an agent.
+you drive the previous one and record nothing. `/mocktown record-flow` is this page written
+for an agent.
 
 ### What is not recorded
 
@@ -335,7 +359,7 @@ something else: a `ui.*` route already pointing at another port is left alone an
 | `src/db/` | Drizzle schema and the per-project SQLite client |
 | `src/sandbox/` | The container engine seam, the generated images, the topology, the escape-attempt harness |
 | `src/seal/` | Seal certification and its staleness-aware stamp |
-| `src/skills/` | The prompt packs shipped for the recurring agent jobs |
+| `src/skills/` | Serving the shipped skill — the pack itself is `skills/mocktown/` at the repo root |
 | `src/drift/` | Drift watch: the re-record run and the daemon-side schedule |
 | `src/redirect/` | The portless seam — stable local names, wrapped and optional |
 | `src/gui/` | Serving the shell and the panels, plus the built-in panels themselves |

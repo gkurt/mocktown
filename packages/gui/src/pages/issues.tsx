@@ -7,10 +7,15 @@ import { useState } from 'react';
 import { useIssues } from '../hooks.ts';
 import { Badge, Card, Cell, Empty, Failure, Muted, Path, Pending, Table } from '../ui.tsx';
 
-const STATUSES = ['open', 'verifying', 'reopened', 'resolved'] as const;
+/**
+ * `outstanding` leads and is the default: it is open-or-reopened, and picking `open`
+ * instead hides the issues whose fix just failed verification — the ones a reader opening
+ * this page is most likely looking for.
+ */
+const STATUSES = ['outstanding', 'open', 'verifying', 'reopened', 'resolved'] as const;
 
 export function Issues({ project }: { project: string }) {
-  const [status, setStatus] = useState<(typeof STATUSES)[number] | undefined>('open');
+  const [status, setStatus] = useState<(typeof STATUSES)[number] | undefined>('outstanding');
   const [open, setOpen] = useState<string | null>(null);
   const issues = useIssues(project, status);
 

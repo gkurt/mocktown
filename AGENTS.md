@@ -31,6 +31,7 @@ bun run db:generate    # Regenerate Drizzle migrations after editing src/db/sche
 ```
 packages/mocktown/     The product: daemon, front door, corpus, providers, surfaces
 packages/gui/          The GUI shell: a Vite/React SPA served by the daemon
+skills/                The shipped agent skill, at the root so `skills add` finds it
 spikes/                Throwaway investigations, kept for their FINDINGS.md
 docs/design/           Per-subsystem design docs — the source of truth for intent
 ```
@@ -53,7 +54,7 @@ docs/design/           Per-subsystem design docs — the source of truth for int
 | `drift/` | Drift watch: re-recording the flows against the real services and diffing. |
 | `redirect/` | The portless seam — stable local names, wrapped and optional. |
 | `gui/` | Serving the shell (token injection, CSP) and the panels. |
-| `cli/`, `mcp/`, `skills/` | The three agent/human surfaces, all clients of the daemon API. |
+| `cli/`, `mcp/`, `skills/` | The three agent/human surfaces, all clients of the daemon API. `skills/index.ts` only *serves* the pack: the pack itself is `skills/mocktown/` at the repo root, imported from there as text. |
 | `db/` | Drizzle schema and client; migrations in `packages/mocktown/drizzle/`. |
 | `config/` | Project resolution, config schema, on-disk paths. |
 
@@ -119,8 +120,11 @@ subsystem you are touching, not all of them.
 ## Documentation
 
 When you change user-facing behavior, update it in the same change: the subsystem's file in
-`docs/design/`, `packages/mocktown/README.md`, and the prompt packs in
-`packages/mocktown/src/skills/index.ts` when the change affects what an agent is told to do.
+`docs/design/`, `packages/mocktown/README.md`, and the shipped skill in `skills/mocktown/`
+(repo root) when the change affects what an agent is told to do — the job's own file, and
+`SKILL.md` only if the set of arguments changed. The skill directory is the one copy of the
+house rules: `mocks/scaffold.ts` imports `skills/mocktown/house-rules.md` into every
+`BRIEF.md` rather than keeping its own list.
 Documentation must not go stale.
 
 ## Changelogs

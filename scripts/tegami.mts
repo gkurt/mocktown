@@ -6,7 +6,10 @@
 // `mocktown`'s version stands in for the whole release.
 //
 // `packages/mocktown` is still `private: true`, so Tegami versions it and writes
-// changelogs but skips the npm publish. Drop that field to start publishing.
+// changelogs but skips the npm publish. Drop that field to start publishing — and when
+// you do, the tarball has to carry the repo-root `skills/` directory: the daemon imports
+// those markdown files as text (`packages/mocktown/src/skills/index.ts`), and specifiers
+// that leave the package resolve in the repo but not in a published install.
 
 import { tegami } from 'tegami';
 import { runCli } from 'tegami/cli';

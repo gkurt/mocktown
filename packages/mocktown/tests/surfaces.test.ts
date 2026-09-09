@@ -281,7 +281,7 @@ describe("mocktown.json's JSON Schema", () => {
     const rules = readFileSync(workspacePaths(fresh).localIgnore, 'utf8')
       .split('\n')
       .filter((line) => line && !line.startsWith('#'));
-    expect(rules).toEqual(['/config.local.json', '/mocktown.schema.json', '/issues/']);
+    expect(rules).toEqual(['/config.local.json', '/mocktown.schema.json', '/issues/', '/skills/']);
     rmSync(schemaPath);
     new ProjectRuntime(resolveProject({ cwd: fresh })).ensureDirs();
     expect(existsSync(schemaPath)).toBe(true);

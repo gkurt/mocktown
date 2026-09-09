@@ -37,7 +37,7 @@ import { setKnobs } from '#src/scenario/knobs.ts';
 import { listProfiles, mintProfileSession } from '#src/scenario/profiles.ts';
 import { certifySeal } from '#src/seal/certify.ts';
 import { configHash, currentCommit, latestStamp, stalenessOf } from '#src/seal/stamp.ts';
-import { findSkill, SKILLS } from '#src/skills/index.ts';
+import { exportSkill, findSkill, SKILLS, type Skill, skillFile, skillTopics } from '#src/skills/index.ts';
 import { id } from '#src/util/id.ts';
 
 const os = implement(contract);
@@ -62,12 +62,18 @@ function toIssue(row: typeof schema.issues.$inferSelect) {
   return { ...row };
 }
 
+function skillOr404(name: string): Skill {
+  const skill = findSkill(name);
+  if (skill) return skill;
+  throw new ORPCError('NOT_FOUND', { message: `no skill "${name}" — available: ${SKILLS.map((s) => s.name).join(', ')}` });
+}
+
 export const router = os.router({
   status: {
     get: os.status.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
       const recordings = runtime.db.select().from(schema.recordings).all().length;
-      const openIssues = runtime.issues.list({ status: 'open' }).length;
+      const outstandingIssues = runtime.issues.list({ status: 'outstanding' }).length;
       const services = runtime.services().map(toService);
 
       // Provider failures only. Anything a reader cannot put right from here is not a
@@ -88,7 +94,7 @@ export const router = os.router({
         services,
         providers: runtime.providerStatuses(),
         recordings,
-        openIssues,
+        outstandingIssues,
         session: runtime.session,
         warnings,
       };
@@ -794,7 +800,7 @@ export const router = os.router({
         // restart and says something true even when the scheduler is not running.
         nextRunAt: config.enabled ? nextRunAt(last?.startedAt ?? null, config.intervalHours) : null,
         lastRun: last ? { ...last } : null,
-        openDriftIssues: runtime.issues.list({ status: 'open', type: 'provider-drift' }).length,
+        outstandingDriftIssues: runtime.issues.list({ status: 'outstanding', type: 'provider-drift' }).length,
       };
     }),
 
@@ -854,16 +860,51 @@ export const router = os.router({
   skills: {
     list: os.skills.list.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      return { project: runtime.name, skills: SKILLS.map(({ name, version, summary }) => ({ name, version, summary })) };
+      const skills = SKILLS.map((skill) => ({
+        name: skill.name,
+        version: skill.version,
+        summary: skill.summary,
+        topics: skillTopics(skill),
+      }));
+      return { project: runtime.name, skills };
     }),
 
     get: os.skills.get.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
-      const skill = findSkill(input.name);
-      if (!skill) {
-        throw new ORPCError('NOT_FOUND', { message: `no skill "${input.name}" — available: ${SKILLS.map((s) => s.name).join(', ')}` });
+      const skill = skillOr404(input.name);
+      const file = skillFile(skill, input.topic);
+      if (!file) {
+        throw new ORPCError('NOT_FOUND', {
+          message: `skill "${skill.name}" has no "${input.topic}" — its arguments are: ${skillTopics(skill).join(', ')}`,
+        });
       }
-      return { project: runtime.name, skill };
+      return {
+        project: runtime.name,
+        skill: {
+          name: skill.name,
+          version: skill.version,
+          summary: skill.summary,
+          topics: skillTopics(skill),
+          file: file.path,
+          body: file.text,
+        },
+      };
+    }),
+
+    export: os.skills.export.handler(({ input }) => {
+      const runtime = runtimeFor(input.project);
+      const paths = runtime.resolved.paths;
+      if (!paths) {
+        throw new ORPCError('CONFLICT', {
+          message: 'exporting writes into the repo, so it needs a workspace. Run `mocktown init` in the repo first.',
+        });
+      }
+      const skill = skillOr404(input.name);
+      // The export is generated, so it is gitignored — and a project that predates the
+      // entry gets it here rather than only from an `init` it will never run again.
+      writeLocalIgnore(paths.localIgnore, paths.localDir, derivedPaths(paths).files, derivedPaths(paths).dirs);
+      const { dir, files } = exportSkill(paths.skillsDir, skill);
+      return { project: runtime.name, dir, container: paths.skillsDir, files };
     }),
   },
 

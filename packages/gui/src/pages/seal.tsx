@@ -132,7 +132,7 @@ export function Seal({ project }: { project: string }) {
                 <dt>
                   <Muted>open drift issues</Muted>
                 </dt>
-                <dd>{drift.data.openDriftIssues}</dd>
+                <dd>{drift.data.outstandingDriftIssues}</dd>
               </dl>
             ) : (
               <Empty>No run yet.</Empty>

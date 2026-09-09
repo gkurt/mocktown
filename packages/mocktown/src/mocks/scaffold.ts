@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CorpusExport } from '#src/mocks/corpus.ts';
+import houseRules from '../../../../skills/mocktown/house-rules.md' with { type: 'text' };
 
 /**
  * The corpus is a sample of the contract, never the contract itself. Preflights are
@@ -25,21 +26,17 @@ import type { CorpusExport } from '#src/mocks/corpus.ts';
  */
 const isPreflight = (route: { method: string }) => route.method.toUpperCase() === 'OPTIONS';
 
-const HOUSE_RULES = [
-  'Never invent auth-shaped fields. Credentials in the corpus appear as `{{secret:<kind>#<n>}}` placeholders; accept a credential of that shape and use `ctx.fakeSecret(kind)` if you must return one.',
-  'Check for a shipped emulator before hand-writing anything. `github`, `google`, `slack`, `okta`, `clerk`, `apple`, `microsoft`, `stripe`, `aws`, `vercel`, `linear`, `twilio`, `resend` and `mongoatlas` already have stateful implementations: `mocktown services set --id <host> --provider emulator:<name>`, where the host is whatever you name the registry key. An emulator only fits where the app talks to the vendor directly — behind a broker like Auth0 it never receives a request.',
-  'Correct `schema.ts` rather than contorting the mock. `mocktown mocks schema` drafts the response schemas from every recording, and verification checks against that file, not against the recordings. When a recording is a poor witness — a scrubbed number that reads as a string, an object keyed by data, a field that happened to be null throughout — fix the line in `schema.ts` and say why. It is never regenerated over.',
-  'The corpus is a sample of the contract, not a script to replay. Implement the contract it implies: a route observed with one id must work for any id, and a list observed with three entries must work for none or thirty.',
-  'Collapse routes that differ only by an identifier into one parameterised route. `/things/abc` and `/things/def` are `/things/{thingId}`. Do this without asking — the individual recordings are examples, not separate endpoints.',
-  "Never hard-code an identifier from the corpus. Recorded ids — raw in a path, or a `{{secret:…}}` placeholder in a body — are one real org's data. Mint your own in `seed` with `state.nextId`/`ctx.prng`, and keep them referentially consistent, so what a route returns matches the id its path was given.",
-  'CORS preflight is handled for you. The host answers `OPTIONS` by reflecting the request origin, so do not write an `OPTIONS` route unless this service does something unusual with it.',
-  'Prefer widening an existing matcher over duplicating a route. Two routes that differ only by an optional query parameter are one route.',
-  'State fidelity over verbatim replay. If the corpus shows `POST /x` followed by `GET /x/{id}`, the created entity must be readable. Keep it in `ctx.state`, not in a closure.',
-  'All randomness goes through `ctx.prng`. `Math.random()`, `Date.now()` and `crypto.randomUUID()` break the determinism contract that makes runs reproducible.',
-  'Seed data per profile, with `default` (typical data) and `empty-org` (zero everything) at minimum. Empty states are what teams most often cannot test.',
-  'Prefer profile variation over knob flips for data-shape scenarios. Knobs are for cross-cutting dials — latency, error injection, volume scaling.',
-  "Add the service's EKB entry. Every generated mock declares how a client gets pointed at it, or `mocktown env` cannot cover the service.",
-];
+/**
+ * The rules the generating agent works to, taken from the skill that states them
+ * (`skills/mocktown/house-rules.md` at the repo root) rather than restated here. There used to be two
+ * copies and they had already drifted apart: the brief's was missing the WebSocket and
+ * gRPC rules, and the skill's was missing this file's own `schema.ts` rule. The brief still
+ * carries the text rather than a link, because a brief has to read on its own — an agent
+ * that never installed the skill is exactly who is reading it.
+ *
+ * The skill's `#` heading is dropped; the brief gives the section its own.
+ */
+const HOUSE_RULES = houseRules.replace(/^#[^\n]*\n+/, '').trim();
 
 export interface ScaffoldResult {
   files: string[];
@@ -99,7 +96,7 @@ function renderBrief(corpus: CorpusExport): string {
     '',
     '## House rules',
     '',
-    ...HOUSE_RULES.map((rule) => `- ${rule}`),
+    HOUSE_RULES,
     '',
     '## Routes to cover',
     '',

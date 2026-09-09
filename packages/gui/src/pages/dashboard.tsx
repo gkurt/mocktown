@@ -11,13 +11,13 @@ import { FeedLines } from './feed.tsx';
 export function Dashboard({ project }: { project: string }) {
   const status = useStatus(project);
   const seal = useSeal(project);
-  const issues = useIssues(project, 'open');
+  const issues = useIssues(project, 'outstanding');
   const portless = usePortless(project);
 
   if (status.error) return <Failure error={status.error} />;
   if (!status.data) return <Pending what="status" />;
 
-  const { frontDoor, services, providers, recordings, openIssues, session, warnings } = status.data;
+  const { frontDoor, services, providers, recordings, outstandingIssues, session, warnings } = status.data;
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
@@ -43,7 +43,7 @@ export function Dashboard({ project }: { project: string }) {
           </dt>
           <dd>
             <Link to="/issues" className="underline">
-              {openIssues}
+              {outstandingIssues}
             </Link>
           </dd>
           <dt>

@@ -84,7 +84,7 @@ describe('.mocktown/.gitignore', () => {
       .split('\n')
       .filter((line) => line && !line.startsWith('#'));
 
-    expect(lines).toEqual(['/config.local.json', '/mocktown.schema.json', '/issues/']);
+    expect(lines).toEqual(['/config.local.json', '/mocktown.schema.json', '/issues/', '/skills/']);
   });
 
   // Nothing has to be un-ignored, so moving a directory cannot silently stop it being

@@ -17,7 +17,7 @@ import {
   EkbEntry,
   FeedEvent,
   Issue,
-  IssueStatus,
+  IssueStatusFilter,
   IssueType,
   KnobDescriptor,
   Panel,
@@ -69,7 +69,7 @@ export const contract = {
           services: z.array(Service),
           providers: z.array(ProviderStatus),
           recordings: z.number().int(),
-          openIssues: z.number().int(),
+          outstandingIssues: z.number().int().describe('Open plus reopened — everything still waiting on someone'),
           session: z.string().nullable(),
           warnings: z.array(z.string()),
         }),
@@ -378,7 +378,7 @@ export const contract = {
       .input(
         z.object({
           ...ProjectInput,
-          status: IssueStatus.optional(),
+          status: IssueStatusFilter.optional(),
           type: IssueType.optional(),
           service: z.string().optional(),
           batch: z.string().optional(),
@@ -636,7 +636,7 @@ export const contract = {
           flows: z.array(z.string()).describe('Commands the re-record runs; falls back to seal.flows'),
           nextRunAt: z.string().nullable().describe('Null when the schedule is off'),
           lastRun: DriftRun.nullable(),
-          openDriftIssues: z.number().int(),
+          outstandingDriftIssues: z.number().int().describe('Open plus reopened provider-drift issues'),
         }),
       ),
 
@@ -708,12 +708,51 @@ export const contract = {
     list: oc
       .route({ method: 'GET', path: '/skills', summary: 'The prompt packs shipped with Mocktown for the recurring agent jobs' })
       .input(z.object({ ...ProjectInput }))
-      .output(withProject({ skills: z.array(z.object({ name: z.string(), version: z.string(), summary: z.string() })) })),
+      .output(
+        withProject({
+          skills: z.array(
+            z.object({
+              name: z.string(),
+              version: z.string(),
+              summary: z.string(),
+              topics: z.array(z.string()).describe('The arguments this skill answers to — one file each'),
+            }),
+          ),
+        }),
+      ),
 
     get: oc
-      .route({ method: 'GET', path: '/skills/{name}', summary: 'One prompt pack in full, including the house rules' })
+      .route({ method: 'GET', path: '/skills/{name}', summary: 'One file of a prompt pack — the entry by default, or one job' })
+      .input(
+        z.object({
+          ...ProjectInput,
+          name: z.string(),
+          topic: z.string().optional().describe('The job to read, e.g. `generate-mock`. Omitted gives SKILL.md, which routes to the rest'),
+        }),
+      )
+      .output(
+        withProject({
+          skill: z.object({
+            name: z.string(),
+            version: z.string(),
+            summary: z.string(),
+            topics: z.array(z.string()),
+            file: z.string().describe('Which file of the pack this is'),
+            body: z.string(),
+          }),
+        }),
+      ),
+
+    export: oc
+      .route({ method: 'POST', path: '/skills/{name}/export', summary: 'Write a pack into the workspace, laid out for a skills installer' })
       .input(z.object({ ...ProjectInput, name: z.string() }))
-      .output(withProject({ skill: z.object({ name: z.string(), version: z.string(), summary: z.string(), body: z.string() }) })),
+      .output(
+        withProject({
+          dir: z.string().describe('The skill directory written. Its parent is what a skills installer is pointed at'),
+          container: z.string().describe('The parent to hand an installer, so it discovers `<container>/<name>/SKILL.md`'),
+          files: z.array(z.string()).describe('Absolute paths of everything written'),
+        }),
+      ),
   },
 
   ekb: {

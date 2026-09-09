@@ -15,7 +15,8 @@
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { OUTSTANDING_STATUSES } from '#src/contract/schemas.ts';
 import type { Db } from '#src/db/client.ts';
 import { schema } from '#src/db/client.ts';
 import { id } from '#src/util/id.ts';
@@ -176,9 +177,21 @@ export class IssueEngine {
     return this.db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).get();
   }
 
+  /**
+   * `status: 'outstanding'` is open-or-reopened rather than an equality match, because
+   * "what still needs someone" is the question every caller has and no single status
+   * answers it — a resolve that fails verification lands on `reopened`, so an exact
+   * `open` hid the issues most in need of attention (contract/schemas.ts).
+   */
   list(filter: { status?: string; type?: string; service?: string; batch?: string } = {}) {
+    const byStatus =
+      filter.status === 'outstanding'
+        ? inArray(schema.issues.status, [...OUTSTANDING_STATUSES])
+        : filter.status
+          ? eq(schema.issues.status, filter.status as 'open')
+          : undefined;
     const conditions = [
-      ...(filter.status ? [eq(schema.issues.status, filter.status as 'open')] : []),
+      ...(byStatus ? [byStatus] : []),
       ...(filter.type ? [eq(schema.issues.type, filter.type as IssueType)] : []),
       ...(filter.service ? [eq(schema.issues.service, filter.service)] : []),
       ...(filter.batch ? [eq(schema.issues.batchId, filter.batch)] : []),

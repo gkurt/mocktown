@@ -353,6 +353,18 @@ describe('phase 2 — the loop closes on a real project', () => {
 
     runtime.issues.setStatus(issue.id, 'resolved', 'route added');
     expect(runtime.issues.get(issue.id)!.status).toBe('resolved');
+
+    // A resolve whose verification fails lands on `reopened`, and that used to fall out of
+    // every queue: `status: 'open'` is an equality match, so the issues most in need of
+    // attention were the ones the obvious filter hid, and an empty list read as done.
+    runtime.issues.setStatus(issue.id, 'reopened', 'replay still failed');
+    expect(runtime.issues.list({ status: 'open' }).map((i) => i.id)).not.toContain(issue.id);
+    expect(runtime.issues.list({ status: 'outstanding' }).map((i) => i.id)).toContain(issue.id);
+    // `outstanding` is a question, not a status — the row still says what happened to it.
+    expect(runtime.issues.get(issue.id)!.status).toBe('reopened');
+    // And it does not sweep up the ones that are genuinely finished.
+    runtime.issues.setStatus(issue.id, 'resolved', 'route added');
+    expect(runtime.issues.list({ status: 'outstanding' }).map((i) => i.id)).not.toContain(issue.id);
   }, 60_000);
 
   test('profiles give each persona its own world', async () => {

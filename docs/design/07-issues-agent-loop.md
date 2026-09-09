@@ -37,14 +37,20 @@ threshold, because it reads as a finding rather than a guess.
 1. **MCP server** (same daemon API, [02-architecture.md](02-architecture.md)):
    `list_issues`, `get_issue`, `resolve_issue`, `query_recordings`,
    `get_endpoint_recipe`, `run_seal`, `restart_provider`. This is the primary surface.
-2. **Skills / prompt packs**: versioned prompt+house-rules bundles shipped with
-   Mocktown for the recurring jobs — *record a flow*, *generate mock from corpus*, *fix
-   issue backlog*, *apply redirect recipes*, *write a panel*. House rules live here (never invent auth-shaped
-   fields; prefer widening matchers over duplicating routes; every new mock adds its
-   EKB entry; state fidelity over verbatim replay; seed data per auth profile with
+2. **Skills / prompt packs**: one versioned skill, `mocktown`, whose argument selects the
+   recurring job — *record a flow*, *generate mock from corpus*, *fix issue backlog*,
+   *apply redirect recipes*, *write a panel*. It lives at the repo root, in `skills/mocktown/`,
+   as the directory every agent host already expects — `SKILL.md` plus a file per job, so
+   `SKILL.md` routes the argument, the shared house rules are written once rather than
+   pasted into each job, and `npx skills add gkurt/mocktown` installs the pack straight
+   from GitHub without a checkout (never invent
+   auth-shaped fields; prefer widening matchers over duplicating routes; every new mock
+   adds its EKB entry; state fidelity over verbatim replay; seed data per auth profile with
    `default` + `empty-org` minimum; prefer profile variation over knob flips for
    data-shape scenarios; all randomness via the seeded PRNG —
-   [12-scenario-controls.md](12-scenario-controls.md)).
+   [12-scenario-controls.md](12-scenario-controls.md)). `mocktown skills export` lays the
+   directory out in the workspace and `mocktown skills install` hands it to the `skills`
+   CLI, which owns the per-agent destination list; mocktown does not keep its own.
 3. **Files**: issues also materialize as JSON under `.mocktown/issues/` in the
    workspace so file-oriented agents (`claude -p`, CI bots) work without MCP.
 
@@ -53,14 +59,20 @@ threshold, because it reads as a finding rather than a guess.
 - Resolution is **incremental and verified**: after an agent patches a mock, the
   daemon replays the triggering request(s) against it; only a passing replay closes
   the issue. Failed verification reopens with the diff attached.
+- **The queue is `outstanding`, which is open *or* reopened.** The four statuses a row can
+  hold (`open`, `verifying`, `reopened`, `resolved`) answer "what happened to this issue";
+  a queue asks "what still needs someone", and no single status answers that. Filtering by
+  `open` did, and it excluded every issue whose fix had just failed verification — the
+  queue read empty at exactly the moment it should have been loudest. So `status` filtering
+  accepts `outstanding` as well, and every count mocktown itself reports uses it.
 - **Batching**: issues from one run are grouped into a batch so an agent fixes a
   coherent set, then one verification pass runs the whole batch.
 - **Watching is the feed, not a second command.** An agent fixing issues as they land
   follows `mocktown feed --follow --kind issue`, whose long poll returns the moment one is
   filed ([09-gui-plugins.md](09-gui-plugins.md)). There is no `issues watch`: following is a
   loop, the feed already is one, and a per-subsystem watch command would reimplement it on
-  the CLI alone. The feed is a bounded window, so it wakes an agent — `issues list` stays
-  the queue of record.
+  the CLI alone. The feed is a bounded window, so it wakes an agent — `issues list --status
+  outstanding` stays the queue of record.
 - **Human review boundary**: agent-proposed changes to *committed* artifacts
   (generated mocks, `.env.mocktown`, code patches in the user's app) go through
   normal VCS review. Mocktown never auto-commits. Runtime-only changes (widened

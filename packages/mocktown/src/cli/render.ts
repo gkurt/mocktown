@@ -53,7 +53,7 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `front door:   ${r.frontDoor.running ? `running on :${r.frontDoor.port} (unknown hosts: ${r.frontDoor.mode})` : 'stopped'}`,
     `session:      ${r.session ?? 'none'}`,
     `corpus:       ${r.recordings} recording${r.recordings === 1 ? '' : 's'}`,
-    `issues:       ${r.openIssues} open`,
+    `issues:       ${r.outstandingIssues} outstanding`,
     '',
     'services',
     ...(r.services.length
@@ -296,11 +296,17 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
   'env.portless.get': (r) => renderPortless(r),
   'env.portless.sync': (r) => renderPortless(r),
 
-  'skills.list': (r) => r.skills.map((s: any) => `  ${pad(s.name, 20)} v${pad(s.version, 8)} ${s.summary}`),
+  // A skill is a directory, so the listing is the pack and the arguments it answers to —
+  // the summary is the frontmatter description, which is written to make an agent trigger
+  // rather than to fit a column, so it gets its own line.
+  'skills.list': (r) =>
+    r.skills.flatMap((s: any) => [`  ${pad(s.name, 20)} v${s.version}`, `    ${s.summary}`, `    arguments: ${s.topics.join(', ')}`]),
 
-  // The pack is the payload: printing it whole is what makes `mocktown skills get`
-  // usable as `mocktown skills get --name fix-issues > prompt.md`.
+  // The file is the payload: printing it whole is what makes `mocktown skills get`
+  // usable as `mocktown skills get --name mocktown --topic fix-issues > prompt.md`.
   'skills.get': (r) => ['', r.skill.body],
+
+  'skills.export': (r) => [`  wrote ${r.files.length} files to ${r.dir}`],
 
   'ekb.list': (r) =>
     r.entries.length
@@ -400,7 +406,7 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     `schedule:  ${r.enabled ? `every ${r.intervalHours}h — next ${r.nextRunAt}` : 'off (a drift run calls the real services)'}`,
     `services:  ${r.services.length ? r.services.join(', ') : '(none backed by a provider)'}`,
     `flows:     ${r.flows.length ? r.flows.join(' ; ') : '(none configured — a run would prove nothing)'}`,
-    `open provider-drift issues: ${r.openDriftIssues}`,
+    `outstanding provider-drift issues: ${r.outstandingDriftIssues}`,
     ...(r.lastRun
       ? [
           '',

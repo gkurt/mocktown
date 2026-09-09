@@ -95,6 +95,8 @@ export const workspacePaths = (repoRoot: string, dirs: Partial<WorkspaceDirs> = 
     schemaFile: join(repoRoot, '.mocktown', 'mocktown.schema.json'),
     /** Written on init so `.mocktown/` decides for itself what of it is committed. */
     localIgnore: join(repoRoot, '.mocktown', '.gitignore'),
+    /** Where `skills export` lays out the shipped packs for an installer to pick up. */
+    skillsDir: join(repoRoot, '.mocktown', 'skills'),
     issuesDir: confine(repoRoot, 'issues', where.issues),
     mocksDir: confine(repoRoot, 'mocks', where.mocks),
     panelsDir: confine(repoRoot, 'panels', where.panels),
@@ -109,5 +111,5 @@ export const workspacePaths = (repoRoot: string, dirs: Partial<WorkspaceDirs> = 
  */
 export const derivedPaths = (paths: ReturnType<typeof workspacePaths>) => ({
   files: [paths.localConfig, paths.schemaFile],
-  dirs: [paths.issuesDir],
+  dirs: [paths.issuesDir, paths.skillsDir],
 });

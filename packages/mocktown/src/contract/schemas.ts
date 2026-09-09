@@ -74,6 +74,21 @@ export const IssueType = z
 
 export const IssueStatus = z.enum(['open', 'resolved', 'verifying', 'reopened']);
 
+/**
+ * What a caller may filter by, which is *not* the same set a row can hold.
+ *
+ * `outstanding` is open-or-reopened — the question every queue actually asks, and the one
+ * that has no answer among the statuses themselves. Asking for `open` used to be the way
+ * it was spelled, and it silently excluded exactly the issues whose fix had just failed
+ * verification: the queue read empty and the run looked finished. The four literal
+ * statuses stay filterable because browsing by one is a different question, and the GUI
+ * asks it.
+ */
+export const IssueStatusFilter = z.enum([...IssueStatus.options, 'outstanding']).describe('`outstanding` means open or reopened');
+
+/** The statuses `outstanding` covers: an issue that still needs someone. */
+export const OUTSTANDING_STATUSES = ['open', 'reopened'] as const satisfies readonly z.infer<typeof IssueStatus>[];
+
 export const Issue = z.object({
   id: z.string(),
   type: IssueType,

@@ -454,6 +454,68 @@ program
     spawn(opener, [url], { stdio: 'ignore', detached: true }).unref();
   });
 
+/**
+ * `mocktown skills install` — the shipped pack is a directory of markdown, and putting a
+ * directory of markdown where the agents on this machine will find it is a solved problem:
+ * the `skills` CLI (github.com/vercel-labs/skills) knows the 75-odd `<agent>/skills/`
+ * layouts and keeps the manifest that makes `skills update` work. So this exports the pack
+ * through the API and hands the directory over, rather than growing our own list of
+ * destinations that would be wrong within a month.
+ *
+ * Copying rather than symlinking by default: the export lives in `.mocktown/skills`, which
+ * is generated and gitignored, so a symlinked project install is a dangling link in a
+ * teammate's clone. Re-run this command to pick up a newer pack.
+ */
+const skillsCommand = program.commands.find((c) => c.name() === 'skills')!;
+skillsCommand
+  .command('install')
+  .description('Install a shipped skill for the agents on this machine, via the `skills` CLI')
+  .option('--name <name>', 'Skill to install', 'mocktown')
+  .option('--agent <agents...>', 'Target agents, e.g. claude-code (default: let `skills` ask)')
+  .option('--global', 'Install into the user directory instead of this project')
+  .option('--symlink', 'Symlink to the export instead of copying it')
+  .action(async (options: { name: string; agent?: string[]; global?: boolean; symlink?: boolean }) => {
+    const globals = program.opts();
+    const project = resolveProject({ project: globals.project as string | undefined });
+    ensureRegistered(project);
+    const client = clientFor(await ensureDaemon());
+
+    const exported = await client.skills.export({ project: project.name, name: options.name });
+    console.log(`project: ${project.name}`);
+    console.log(tilde(`  exported ${exported.files.length} files to ${exported.dir}`));
+
+    // `skills` is handed the container, not the skill: `<container>/<name>/SKILL.md` is the
+    // layout it discovers, and `--skill` keeps it to the one pack asked for.
+    const args = [
+      '-y',
+      'skills',
+      'add',
+      exported.container,
+      '--skill',
+      options.name,
+      '--yes',
+      ...(options.symlink ? [] : ['--copy']),
+      ...(options.global ? ['--global'] : []),
+      ...(options.agent ?? []).flatMap((agent) => ['--agent', agent]),
+    ];
+    // Printed before it runs: this shells out to a third-party installer that writes
+    // outside `.mocktown/`, and that is worth seeing rather than inferring.
+    console.log(`  running: npx ${args.slice(1).join(' ')}`);
+
+    const child = spawn('npx', args, { stdio: 'inherit' });
+    const status = await new Promise<{ code: number; error?: Error }>((settle) => {
+      child.once('error', (error) => settle({ code: 1, error }));
+      child.once('exit', (code) => settle({ code: code ?? 1 }));
+    });
+    if (status.error) {
+      console.error(`error: could not run \`npx\` — ${status.error.message}`);
+      console.error(`  the pack is exported, so install it directly: npx skills add ${exported.container} --skill ${options.name}`);
+      process.exitCode = 1;
+      return;
+    }
+    process.exitCode = status.code;
+  });
+
 program
   .command('mcp')
   .description('Run the MCP server on stdio — the primary agent surface')

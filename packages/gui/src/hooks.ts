@@ -7,7 +7,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, strandedToken, useStranded } from './api.ts';
 
-export type IssueStatus = NonNullable<Parameters<typeof api.issues.list>[0]['status']>;
+/** Includes `outstanding`, which is open-or-reopened rather than a status a row holds. */
+export type IssueStatusFilter = NonNullable<Parameters<typeof api.issues.list>[0]['status']>;
 
 /**
  * Everything is scoped to one project, and the project is always visible
@@ -36,7 +37,7 @@ export function useProjectQuery<T>(
 }
 
 export const useStatus = (project: string) => useProjectQuery(['status'], project, () => api.status.get({ project }), 4000);
-export const useIssues = (project: string, status?: IssueStatus) =>
+export const useIssues = (project: string, status?: IssueStatusFilter) =>
   useProjectQuery(['issues', status], project, () => api.issues.list({ project, status }), 4000);
 export const useServices = (project: string) => useProjectQuery(['services'], project, () => api.services.list({ project }));
 export const useRoutes = (project: string) => useProjectQuery(['routes'], project, () => api.recordings.routes({ project }));
