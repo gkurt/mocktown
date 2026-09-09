@@ -1,6 +1,6 @@
 {
   "name": "mocktown",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Record an app's outbound traffic, serve it back as stateful mocks, and keep them alive as the real services change.",
   "keywords": [
