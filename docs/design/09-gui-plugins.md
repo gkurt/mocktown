@@ -56,6 +56,32 @@ packaging.
   `sandbox up` and `drift check` are read-only in the shell and named as CLI commands; a
   button that spends quota is a decision, and the CLI is where decisions are made.
 
+*Amended 2026-09-09 — what the shell may destroy, and how it asks:*
+
+- **The state reset is not confirmed.** [12-scenario-controls.md](12-scenario-controls.md)
+  designed it to be cheap enough to run between test cases, so a guard would put friction on
+  the fast path it exists for — and unlike a delete it has a defined result rather than a
+  lost one: seeds re-apply, and what happened before stays in the corpus under the session it
+  closed. What the page owes the reader instead is the *consequence*, so the new session id
+  and any provider that had to restart are reported rather than the screen just refreshing.
+  The State page had been showing state it could not reset, which reads as a missing button
+  rather than a decision.
+- **Every corpus delete is armed first.** It is irreversible, and the corpus is what mocks
+  are generated and verified from ([03-capture.md](03-capture.md)). The delete lives on the
+  Corpus page because that is the only screen on which a stray host or a route recorded from
+  the wrong environment is *visible*; putting it elsewhere would mean reading it here and
+  acting on it there.
+- **Arming happens in place, not in a dialog.** "Delete these 14 recordings" is a row-level
+  decision, and a modal that restates it in the middle of the screen adds a step without
+  adding information the row did not already show. The button disarms itself, because one
+  left armed behind a scroll is a trap for the next click that lands near it. The
+  `TODO(registry)` for a real `alert-dialog` stays, for a confirmation that needs more room
+  than a button holds.
+- **Project removal is deliberately not here.** Every page is scoped to one resolved
+  project, and that is the one operation that acts across projects and cannot be undone; its
+  safety comes from typing the project's name, which belongs in a terminal
+  ([08-projects-config.md](08-projects-config.md)).
+
 ### The token is injected, never bundled
 
 The daemon inserts a `<meta name="mocktown-boot">` element carrying the API base, the

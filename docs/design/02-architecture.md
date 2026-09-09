@@ -7,6 +7,24 @@ and GUI are thin clients of that API — no client has privileged access to anyt
 This discipline is what makes the later plugin model nearly free
 ([09-gui-plugins.md](09-gui-plugins.md)).
 
+*Amended 2026-09-09 by three defects hit while restarting the daemon.* A client finds the
+daemon through one file — `daemon.json` in the global config dir, holding the port, the
+session token, the pid and the contract signature. That file is a **claim, not proof of
+life**: a `kill -9`, a crash or a reboot each leave one behind, and read as fact it sends
+every following command at a port nothing is on, where the failure that comes back —
+`the socket connection was closed unexpectedly` — names neither the daemon nor the file to
+delete. Three rules follow, and they are the ones to keep:
+
+- **Liveness is checked, never assumed.** `daemon status` answers from the pid and the port,
+  not from the file's existence, so `not running (stale state file)` is one of its answers.
+- **The recovery command may not be the one that crashes.** `daemon stop` on a dead pid says
+  so and clears the registration, rather than raising `ESRCH` at whoever ran it — that is the
+  command someone reaches for precisely because something already went wrong.
+- **A daemon unlinks only its own registration.** Two can be running at once — an orphan from
+  an earlier shell and the one that registered after it — and only the last writer is named in
+  the file. Unlinking blind on shutdown deletes the *other* daemon's entry, leaving a healthy
+  daemon that no client can find.
+
 ## Components
 
 ```

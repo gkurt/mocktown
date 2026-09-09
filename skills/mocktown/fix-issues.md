@@ -5,6 +5,10 @@ self-contained: it carries the scrubbed request, the nearest matching behavior a
 did not match, a suggested resolution, and links to the files and corpus rows you need.
 You should not need any other context.
 
+An issue with fewer links than you expected may have had one stripped: a link is removed when
+the recording it named was deleted from the corpus, because a link that resolves to nothing
+is worse than none. The scrubbed request the issue carries inline is still the evidence.
+
 Anything you write into a mock while working the queue is bound by
 [house-rules.md](house-rules.md). Read it first.
 

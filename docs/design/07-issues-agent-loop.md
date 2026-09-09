@@ -73,6 +73,17 @@ threshold, because it reads as a finding rather than a guess.
   loop, the feed already is one, and a per-subsystem watch command would reimplement it on
   the CLI alone. The feed is a bounded window, so it wakes an agent — `issues list --status
   outstanding` stays the queue of record.
+- **A deleted recording strips the link, not the issue.** *Added 2026-09-09 with
+  [03-capture.md](03-capture.md)'s delete path.* The bar above is that an issue is
+  resolvable by an agent that has read nothing but the issue and the files it links, and a
+  link to a corpus row that no longer exists breaks it in the worst way available: the agent
+  follows it, gets an empty result, and cannot tell missing evidence from a wrong command. So
+  a delete strips the dead link, rewrites the issue's file, and names the affected issues in
+  its own result — it never closes them. The issue stays actionable because it carries the
+  whole scrubbed request inline; what it loses is the corroborating exchange, which is a
+  weaker issue rather than a dishonest one. Matching is by substring, because a link is a
+  command line (`mocktown recordings get --id rec_…`) and the id is the part of it that
+  stopped being true.
 - **Human review boundary**: agent-proposed changes to *committed* artifacts
   (generated mocks, `.env.mocktown`, code patches in the user's app) go through
   normal VCS review. Mocktown never auto-commits. Runtime-only changes (widened

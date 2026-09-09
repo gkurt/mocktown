@@ -4,7 +4,7 @@
  * where they should come from once this app needs a real component — a dialog, a combobox,
  * a data table. Each `TODO(registry)` marks a place where that swap is a one-liner.
  */
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { boot } from './api.ts';
 
 export function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
@@ -64,6 +64,60 @@ export function Button({ onClick, children, disabled }: { onClick: () => void; c
       className="rounded border border-line px-2 py-1 hover:bg-line/40 disabled:opacity-40 disabled:hover:bg-transparent"
     >
       {children}
+    </button>
+  );
+}
+
+/**
+ * A destructive action, armed by a first click and run by a second.
+ *
+ * The registry's dialog is the eventual home for this, but a modal is the wrong shape for
+ * the thing being confirmed here: "delete these 14 recordings" is a row-level decision, and
+ * a dialog that restates it in the middle of the screen adds a step without adding
+ * information the row did not already show. Arming in place keeps the subject under the
+ * cursor — the reader confirms the row they are pointing at, not a sentence about it.
+ *
+ * It disarms itself, because a button left armed behind a scroll is a trap for the next
+ * click that lands near it.
+ *
+ * TODO(registry): registry `alert-dialog`, if a confirmation ever needs to explain itself
+ * at more length than a button can hold.
+ */
+export function Danger({
+  label,
+  armed,
+  onConfirm,
+  disabled,
+}: {
+  label: ReactNode;
+  armed: ReactNode;
+  onConfirm: () => void;
+  disabled?: boolean;
+}) {
+  const [live, setLive] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => {
+        clearTimeout(timer.current);
+        if (live) {
+          setLive(false);
+          onConfirm();
+          return;
+        }
+        setLive(true);
+        timer.current = setTimeout(() => setLive(false), 4000);
+      }}
+      className={`rounded border px-2 py-1 leading-none disabled:opacity-40 ${
+        live ? 'border-bad/60 bg-bad/15 text-bad' : 'border-line text-muted hover:bg-line/40'
+      }`}
+    >
+      {live ? armed : label}
     </button>
   );
 }

@@ -7,7 +7,7 @@
  * are HTTP clients of exactly this surface, so a capability that is not here does not
  * exist for any of them.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ORPCError } from '@orpc/client';
 import { implement } from '@orpc/server';
@@ -16,13 +16,14 @@ import { launchBrowser } from '#src/capture/browser.ts';
 import { parseHar } from '#src/capture/har.ts';
 import { endSession, Recorder, startSession } from '#src/capture/recorder.ts';
 import { writeLocalIgnore } from '#src/config/ignore.ts';
-import { derivedPaths, projectPaths } from '#src/config/paths.ts';
-import { loadGlobalConfig } from '#src/config/project.ts';
+import { derivedPaths, projectDataDir, projectPaths } from '#src/config/paths.ts';
+import { loadGlobalConfig, saveGlobalConfig } from '#src/config/project.ts';
+import { GlobalConfig } from '#src/config/schema.ts';
 import { writeService } from '#src/config/services.ts';
 import { settingsOf, writeSetting } from '#src/config/settings.ts';
 import { contract } from '#src/contract/index.ts';
 import type { ProviderRef, Service } from '#src/contract/schemas.ts';
-import { runtimeFor } from '#src/daemon/runtime.ts';
+import { liveRuntime, retireRuntime, runtimeFor } from '#src/daemon/runtime.ts';
 import { schema } from '#src/db/client.ts';
 import { checkDrift } from '#src/drift/watch.ts';
 import { renderAgentsSection, renderEnvFile, staleEnvVars, writeAgentsSection } from '#src/env/generate.ts';
@@ -119,6 +120,108 @@ export const router = os.router({
           workspace: entry.workspace,
           workspaceExists: entry.workspace !== null && existsSync(entry.workspace),
         })),
+      };
+    }),
+
+    /**
+     * Removing a project is the one operation here that acts on a project other than the
+     * resolved one, and that shapes the whole handler.
+     *
+     * Nothing may call `runtimeFor(input.name)`: it creates a runtime on miss and calls
+     * `ensureDirs`, which would recreate the directory this call came to delete. So the
+     * target is reached through `liveRuntime`, which answers only if the daemon already
+     * has one, and `retireRuntime`, which stops it and closes its database first — on
+     * Windows an open SQLite handle refuses the unlink outright, and on macOS and Linux it
+     * succeeds while this process keeps writing to files that no longer have names.
+     */
+    remove: os.project.remove.handler(async ({ input }) => {
+      const target = input.name;
+      const config = loadGlobalConfig();
+      const entry = config.projects[target];
+      const registered = entry !== undefined;
+      const dataDir = entry?.dataDir ?? projectDataDir(target);
+      const notes: string[] = [];
+
+      // The CLI re-registers the resolved project before every call (08-projects-config.md's
+      // auto-register), so removing the project you are acting as would be undone by the
+      // next command — and `--data` would delete a directory the same command recreates.
+      if (target === input.project) {
+        throw new ORPCError('CONFLICT', {
+          message:
+            `"${target}" is the project this call resolved to, and every command re-registers the project it resolves to — ` +
+            'removing it here would be undone by the next one. Run this from outside its repo, or pass `--project <other>`.',
+        });
+      }
+
+      // A project that has been registered but never run has no data directory: nothing has
+      // opened its database yet. Reporting `dataRemoved` from the flag rather than from what
+      // was there would claim a deletion that did not happen.
+      const hadData = existsSync(dataDir);
+
+      if (input.data) {
+        // A typed name rather than a flag: `--data` alone is one keystroke away from a
+        // command that only meant to unregister, and an agent calling the MCP tool has no
+        // way to express "I meant it" that a flag would not also satisfy by accident.
+        if (input.confirm !== target) {
+          throw new ORPCError('BAD_REQUEST', {
+            message:
+              `deleting ${target}'s data is irreversible — the corpus, the issue history, the seal stamps and the project's ` +
+              `root CA all live in ${dataDir}. Pass \`--confirm ${target}\` to mean it.`,
+          });
+        }
+        const live = liveRuntime(target);
+        if (live?.frontDoorStatus().running) {
+          throw new ORPCError('CONFLICT', {
+            message: `${target}'s front door is running. Stop it first with \`mocktown serve stop --project ${target}\`.`,
+          });
+        }
+        // The topology file exists only while the boundary is up (sandbox/sandbox.ts), so
+        // it can be asked about without building a runtime for a project being deleted.
+        if (existsSync(join(dataDir, 'sandbox.json'))) {
+          throw new ORPCError('CONFLICT', {
+            message: `${target} has a sandbox up. Tear it down first with \`mocktown sandbox down --project ${target}\`.`,
+          });
+        }
+        await retireRuntime(target);
+        rmSync(dataDir, { recursive: true, force: true });
+      } else if (hadData) {
+        notes.push(`Data left in place at ${dataDir}. \`--data --confirm ${target}\` would delete it too.`);
+      }
+      if (input.data && !hadData) notes.push(`There was no data directory at ${dataDir} — this project had never been run.`);
+
+      if (registered) {
+        delete config.projects[target];
+        // The default is a name, not a reference, so a removed default would resolve every
+        // later command to a project that is not there. Falling back to the schema default
+        // is the one choice that cannot point at something deleted.
+        if (config.defaultProject === target) {
+          config.defaultProject = GlobalConfig.parse({}).defaultProject;
+          notes.push(`"${target}" was the global default; it is now "${config.defaultProject}".`);
+        }
+        saveGlobalConfig(config);
+      } else {
+        notes.push(`"${target}" held no registry entry.`);
+      }
+
+      // The registry is not the only thing that names a project. `mocktown.json` is
+      // committed, so a repo that still says `"project": "<target>"` re-registers it the
+      // first time any command runs there — which is 08-projects-config.md's auto-register
+      // working as designed, and worth saying out loud rather than letting the project's
+      // reappearance look like the removal having failed.
+      if (entry?.workspace && existsSync(join(entry.workspace, 'mocktown.json'))) {
+        notes.push(
+          `${join(entry.workspace, 'mocktown.json')} still names "${target}", so any command run in that repo will register it ` +
+            'again. Edit or delete that file to stop it coming back.',
+        );
+      }
+
+      return {
+        project: input.project,
+        removed: target,
+        unregistered: registered,
+        dataDir,
+        dataRemoved: Boolean(input.data) && hadData,
+        notes,
       };
     }),
   },
@@ -247,6 +350,25 @@ export const router = os.router({
     routes: os.recordings.routes.handler(({ input }) => {
       const runtime = runtimeFor(input.project);
       return { project: runtime.name, routes: routeTable(runtime.db, input.service) };
+    }),
+
+    delete: os.recordings.delete.handler(({ input }) => {
+      const runtime = runtimeFor(input.project);
+      // `method` and `pathTemplate` narrow a subject, they do not name one: `--method GET`
+      // on its own would mean "every GET this project ever recorded", which is the kind of
+      // thing that reads like a filter and behaves like a wipe.
+      if (!input.id && !input.session && !input.service) {
+        throw new ORPCError('BAD_REQUEST', {
+          message:
+            'a delete needs a subject: --id, --session or --service. `--method` and `--path-template` only narrow one of those. ' +
+            'To empty a project entirely, use `mocktown project remove --name <project> --data --confirm <project>`.',
+        });
+      }
+      const { goneIds: _goneIds, ...result } = runtime.deleteCorpus(
+        { id: input.id, session: input.session, service: input.service, method: input.method, pathTemplate: input.pathTemplate },
+        input.dryRun ?? false,
+      );
+      return { project: runtime.name, ...result };
     }),
   },
 

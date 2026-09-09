@@ -161,8 +161,9 @@ The escalation ladder — each rung covers the previous rung's failure case:
    pattern, and a session that dropped more than it kept raises it as a warning. `capture` in
    `mocktown.json` is where a project adds patterns (`ignore`), takes a default back
    (`keep`, per host or per path) or turns the built-in list off (`ignoreNoise`).
-   *Deferred:* pruning noise a previous run already recorded. There is no delete path in the
-   corpus at all today, so this changes what is captured next, not what is captured already.
+   *Amended 2026-09-09:* there is now a delete path (below), so pruning noise a previous run
+   already recorded is `mocktown recordings delete --service <host>` rather than a gap. The
+   `capture` config still only decides what is captured *next*.
 3. **In-sandbox record mode** — for code that ignores proxy env vars: inside the
    namespace there is no "direct"; everything transits the front door by construction.
 4. **HAR import** — `mocktown import <file.har>`: the escape hatch for traffic only
@@ -231,6 +232,56 @@ and the row is marked `unscrubbable-binary`. That is an honest hole in
 protobuf, so the corpus says so instead of implying the body was checked. Text-vs-binary is
 decided by a UTF-8 round trip, never by `content-type` — a body labelled
 `application/json` that is really gzip is exactly the case a header check gets wrong.
+
+## Deleting from the corpus
+
+*Added 2026-09-09.* Until now nothing could take a row back out. That was defensible while
+the corpus was only ever an asset, and indefensible for one case: a capture whose secret the
+scrubber's rules did not match. "Scrub before disk" is this product's central promise, and
+the only remedy for a miss was `rm -rf` on the data directory by hand — a worse outcome than
+the delete we were avoiding, because it takes the issue history and the project CA with it.
+
+So `mocktown recordings delete` deletes rows, and four decisions make it more than a
+`DELETE FROM`:
+
+- **A delete needs a subject: `--id`, `--session` or `--service`.** `--method` and
+  `--path-template` narrow one of those and are not filters on their own — "every GET this
+  project ever recorded" reads like a filter and behaves like a wipe. There is deliberately
+  no way to empty the corpus by omitting an argument; emptying a project is
+  `mocktown project remove --name <p> --data --confirm <p>`
+  ([08-projects-config.md](08-projects-config.md)).
+- **Blobs are reference-counted, not deleted by hash.** A spilled body is
+  content-addressed, so two recordings with identical bodies share one file. Unlinking by
+  the deleted row's hash would take the body out from under a row that still points at it,
+  and `inflateRecording` would then read `null` for a row that looks intact — a corpus that
+  lies rather than one that is smaller.
+- **An emptied service is reported loudly.** Deleting the last recording for a service
+  leaves any mock generated from it unbacked, and leaves `mocktown mocks verify` passing
+  because it has nothing left to replay. That is the one outcome here that could be mistaken
+  for success, so it is named in the result rather than left in the counts.
+- **An issue that cited a deleted row loses the link, not the issue.**
+  [07-issues-agent-loop.md](07-issues-agent-loop.md)'s bar is that an issue is resolvable by
+  an agent that has read nothing but the issue and the files it links, and a link that
+  resolves to nothing breaks that in the worst way available: the agent follows it, gets an
+  empty result, and cannot tell missing evidence from a wrong command. The issue survives
+  because it carries the whole scrubbed request inline, so the dead link is stripped, the
+  issue file is rewritten, and the affected issues are named in the result.
+
+`--dry-run` reports every count and writes nothing, including which issues *would* lose a
+link. It is the only honest way to ask "how much would this take" before it is gone, so the
+counts are derived from the matched set rather than observed afterwards — the dry run and the
+real run agree by construction, including on the shared blob neither of them unlinks.
+
+**What a delete does not touch:** generated mocks, the service registry, knob values, auth
+profiles, and the seal stamp. A stamp's `configHash` covers the registry, the generated
+environment and the flow list, not the corpus ([05-redirection.md](05-redirection.md)) — the
+seal certifies that nothing escaped, which a narrower corpus does not falsify. The
+consequence is worth stating plainly: **a mock whose evidence is gone keeps serving.** A
+delete narrows what the mock can be checked against; it never changes what the mock does.
+
+The session row of an emptied session is kept. A journal entry and an issue's `sessionId`
+both point at it, and dropping it would turn those into dangling references to reclaim one
+row.
 
 ## gRPC: recorded, and not servable
 

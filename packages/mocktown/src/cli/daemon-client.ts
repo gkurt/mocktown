@@ -11,24 +11,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createORPCClient } from '@orpc/client';
 import { OpenAPILink } from '@orpc/openapi-client/fetch';
+import { isDaemonListening, readDaemonState } from '#src/config/daemon.ts';
 import { contract } from '#src/contract/index.ts';
 import { contractSignature } from '#src/contract/walk.ts';
-import { readDaemonState } from '#src/daemon/server.ts';
 
 const daemonEntry = join(dirname(fileURLToPath(import.meta.url)), '..', 'daemon', 'index.ts');
 
 export interface DaemonConnection {
   url: string;
   token: string;
-}
-
-async function isAlive(port: number): Promise<boolean> {
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/v1/openapi.json`, { signal: AbortSignal.timeout(1000) });
-    return response.ok;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -40,7 +31,7 @@ export async function ensureDaemon(): Promise<DaemonConnection> {
   if (override) return { url: override, token: process.env.MOCKTOWN_TOKEN ?? '' };
 
   const existing = readDaemonState();
-  if (existing && (await isAlive(existing.port))) {
+  if (existing && (await isDaemonListening(existing.port))) {
     // The daemon outlives the shell by design, so the one answering may predate the contract
     // this client was built from. Saying so beats letting a surface read a field the daemon
     // never learned to send — that surfaces as an unattributable TypeError.

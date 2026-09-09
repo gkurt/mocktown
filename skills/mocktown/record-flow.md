@@ -41,6 +41,16 @@ mocktown record stop
 `record stop` reports what was kept and what was dropped as browser noise. Read it — it is
 the only place a missing dependency announces itself.
 
+Noise a *previous* run recorded is still there, since filtering only decides what is written
+next. `mocktown recordings delete --service <host>` prunes it, and `--dry-run` first is the
+habit: it reports the count, whether the delete would leave a service with no recordings at
+all, and which issues cite a row that is about to go.
+
+Prune noise; never delete a recording because something is failing against it. Deleting the
+rows a mock fails verification against makes `mocktown mocks verify` pass by having nothing
+left to replay, and closes an issue by destroying its evidence — both read as green and
+neither is.
+
 Issues land while the flow runs, not when it ends: `mocktown feed --follow --kind issue
 --json` in the background prints one line each time the front door files one, so a host you
 forgot to register announces itself while you can still drive the flow.

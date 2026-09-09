@@ -11,7 +11,7 @@
  *     └─ ca/                              project root CA (key: 0600)
  */
 import { homedir, platform } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 
 function configHome(): string {
   if (process.env.MOCKTOWN_CONFIG_HOME) return process.env.MOCKTOWN_CONFIG_HOME;
@@ -39,7 +39,23 @@ export const globalConfigFile = () => join(globalConfigDir(), 'config.json');
  */
 export const daemonStateFile = () => join(globalConfigDir(), 'daemon.json');
 
+/**
+ * A project name is one path segment and nothing else.
+ *
+ * The name reaches here from `--project`, `MOCKTOWN_PROJECT` and a committed
+ * `mocktown.json`, and it is only validated as a non-empty string — so `../../x` was a
+ * legal name that resolved a data directory outside `mocktown/` entirely. Reading and
+ * writing there was already wrong; once a delete path exists it is a traversal with a
+ * `rm -rf` on the end of it, so the check belongs at the one place every path is built.
+ */
+function assertProjectName(project: string): void {
+  if (!project || project !== basename(project) || project === '.' || project === '..') {
+    throw new Error(`"${project}" is not a usable project name: it must be a single path segment, with no separators`);
+  }
+}
+
 export function projectDataDir(project: string): string {
+  assertProjectName(project);
   return join(dataHome(), 'mocktown', project);
 }
 

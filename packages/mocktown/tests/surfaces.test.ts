@@ -7,7 +7,7 @@
  * every command, `readOnlyHint` derived from the HTTP method, the project resolved by
  * the CLI. That argument is only true if something checks it, so this does.
  */
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { oc } from '@orpc/contract';
@@ -32,7 +32,9 @@ const { settingsOf, writeSetting } = await import('#src/config/settings.ts');
 const { writeService } = await import('#src/config/services.ts');
 const { projectFileJsonSchema, SCHEMA_REF } = await import('#src/config/jsonschema.ts');
 const { ProjectFile } = await import('#src/config/schema.ts');
-const { workspacePaths } = await import('#src/config/paths.ts');
+const { daemonStateFile, globalConfigDir, workspacePaths } = await import('#src/config/paths.ts');
+const { daemonLiveness, readDaemonState } = await import('#src/config/daemon.ts');
+const { findFreePort } = await import('#src/util/ports.ts');
 
 const workspace = join(root, 'app');
 let runtime: InstanceType<typeof ProjectRuntime>;
@@ -585,4 +587,126 @@ describe("the contract's house rules are structural", () => {
     // A required field must stay required, or the CLI stops demanding it up front.
     expect(fieldInfo(shape.id!).optional).toBe(false);
   });
+});
+
+/**
+ * The daemon state file is how every client finds the daemon, and it outlives the process
+ * that wrote it: a `kill -9`, a crash or a reboot all leave one behind. Read as fact, a
+ * leftover file sends every command at a port nothing is on — and the failure that comes
+ * back, `the socket connection was closed unexpectedly`, names neither the daemon nor the
+ * file to delete. Each test here is a restart that went that way.
+ */
+describe('the daemon state file is a claim, not proof of life', () => {
+  const cli = join(import.meta.dir, '..', 'src', 'cli', 'index.ts');
+  const daemonEntry = join(import.meta.dir, '..', 'src', 'daemon', 'index.ts');
+  const env = { ...process.env, MOCKTOWN_CONFIG_HOME: join(root, 'config'), MOCKTOWN_DATA_HOME: join(root, 'data') };
+
+  /** A pid that is certainly nobody's: spawn something trivial and let it be reaped. */
+  function deadPid(): number {
+    const corpse = Bun.spawnSync(['true']);
+    expect(corpse.exitCode).toBe(0);
+    return corpse.pid;
+  }
+
+  function register(state: { port: number; pid: number }): void {
+    mkdirSync(globalConfigDir(), { recursive: true });
+    writeFileSync(daemonStateFile(), JSON.stringify({ token: 'surfaces-token', contract: 'unknown', ...state }));
+  }
+
+  async function until(predicate: () => boolean, timeoutMs = 20_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await Bun.sleep(50);
+    }
+    return false;
+  }
+
+  /** A real daemon process, registered and answering, so a shutdown can be observed end to end. */
+  async function startRegisteredDaemon() {
+    const child = Bun.spawn(['bun', daemonEntry], { env, stdout: 'pipe', stderr: 'pipe' });
+    if (!(await until(() => readDaemonState()?.pid === child.pid))) {
+      child.kill('SIGKILL');
+      throw new Error(`the daemon never registered: ${await new Response(child.stderr).text()}`);
+    }
+    return child;
+  }
+
+  afterEach(() => rmSync(daemonStateFile(), { force: true }));
+
+  test('a dead pid is a stale file, not a running daemon', async () => {
+    register({ port: 4499, pid: deadPid() });
+    expect((await daemonLiveness()).status).toBe('stale');
+  });
+
+  test('a live pid whose port answers nothing is not running either', async () => {
+    // What a recycled pid looks like: the daemon died, the OS handed its number to something
+    // else, and only the port can tell the difference. This process stands in for that.
+    register({ port: await findFreePort(4900), pid: process.pid });
+    expect((await daemonLiveness()).status).toBe('unresponsive');
+  });
+
+  test('a pid that is alive and a port that answers is running', async () => {
+    const port = await findFreePort(4950);
+    const server = Bun.serve({
+      port,
+      hostname: '127.0.0.1',
+      fetch: (request) => new Response('{}', { status: new URL(request.url).pathname === '/api/v1/openapi.json' ? 200 : 404 }),
+    });
+    try {
+      register({ port, pid: process.pid });
+      const liveness = await daemonLiveness();
+      expect(liveness.status).toBe('running');
+      // The state is handed back with the verdict: a caller that has to re-read the file to
+      // get the token has two answers to reconcile.
+      expect(liveness.status === 'running' && liveness.state.token).toBe('surfaces-token');
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test('`daemon status` names the stale file instead of a port nothing is on', () => {
+    register({ port: 4499, pid: deadPid() });
+    const result = Bun.spawnSync(['bun', cli, 'daemon', 'status'], { env });
+    expect(result.stdout.toString()).toContain('not running (stale state file');
+    expect(result.stdout.toString()).not.toContain('running on 127.0.0.1:4499');
+    // Status reports; it does not repair. `daemon stop` is the command that clears it, and
+    // that is what the output says.
+    expect(existsSync(daemonStateFile())).toBe(true);
+  }, 30_000);
+
+  test('`daemon stop` clears a stale file instead of raising ESRCH at whoever ran it', () => {
+    register({ port: 4499, pid: deadPid() });
+    const result = Bun.spawnSync(['bun', cli, 'daemon', 'stop'], { env });
+    expect(result.exitCode).toBe(0);
+    // The unguarded `process.kill` printed `SystemError: kill() failed: ESRCH` and a stack
+    // trace at someone whose only problem was a file left behind by a crash.
+    expect(result.stderr.toString()).toBe('');
+    expect(result.stdout.toString()).toContain('not running');
+    // Gone, so the next command starts a daemon rather than dialling the dead port again.
+    expect(existsSync(daemonStateFile())).toBe(false);
+  }, 30_000);
+
+  test('a daemon removes its own registration on the way out', async () => {
+    const child = await startRegisteredDaemon();
+    child.kill('SIGTERM');
+    await child.exited;
+    expect(existsSync(daemonStateFile())).toBe(false);
+  }, 30_000);
+
+  test('but never one that belongs to another daemon', async () => {
+    const child = await startRegisteredDaemon();
+    try {
+      // Two daemons at once is the situation this guards: an orphan from an earlier shell and
+      // the one that registered after it. Stopping the orphan used to delete the live
+      // daemon's registration, leaving it running with no client able to find it.
+      const live = { port: 4500, pid: process.pid };
+      register(live);
+      child.kill('SIGTERM');
+      await child.exited;
+      expect(readDaemonState()).toMatchObject(live);
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL');
+    }
+  }, 30_000);
 });

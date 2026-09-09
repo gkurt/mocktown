@@ -214,6 +214,41 @@ a session that dropped more than it kept says so as a warning.
 `keep` wins over everything, per host or per path prefix. `ignoreNoise: false` drops the
 built-in list entirely and leaves your own `ignore` entries in force.
 
+### Taking recordings back out
+
+The corpus accretes, and sometimes it accretes something you do not want: a route recorded
+against the wrong environment, a stray host, or — the case this exists for — a capture whose
+secret the scrubber's rules did not match.
+
+```bash
+mocktown recordings delete --service noise.test --dry-run   # counts, writes nothing
+mocktown recordings delete --service noise.test
+mocktown recordings delete --service api.test --method GET --path-template '/v1/orders/{orderId}'
+mocktown recordings delete --session ses_...                # one recording run
+mocktown recordings delete --id rec_...                     # one exchange
+```
+
+A delete needs a subject — `--id`, `--session` or `--service`. `--method` and
+`--path-template` narrow one of those and are not filters on their own: "every GET this
+project ever recorded" reads like a filter and behaves like a wipe. There is no way to empty
+the corpus by leaving arguments out.
+
+Four things are worth knowing before you run it:
+
+- **A spilled body shared with a surviving recording is not unlinked.** Large bodies are
+  content-addressed, so a delete reference-counts rather than deleting by hash.
+- **Emptying a service is reported loudly.** With no recordings left, a generated mock for
+  that service is unbacked and `mocktown mocks verify` passes because it has nothing to
+  replay — the one outcome here that could be mistaken for success.
+- **An issue that cited a deleted row loses the link, not the issue.** The dead link is
+  stripped and the issue's file rewritten; the issue keeps the whole scrubbed request it
+  carries inline, so it stays actionable.
+- **Generated mocks, the registry and the seal stamp are untouched.** A delete narrows the
+  evidence, not the setup — a mock whose evidence is gone keeps serving exactly as before.
+
+The GUI's Corpus page does the same thing per route and per service, armed by a first click
+and run by a second.
+
 ### What still escapes this window
 
 The note on every launch says the traffic is captured *cooperatively and best-effort*, and
@@ -304,6 +339,41 @@ authenticate. It spends real quota, so the schedule is off until `mocktown.json`
 ```jsonc
 { "drift": { "enabled": true, "intervalHours": 24, "flows": ["bun run test:integration"] } }
 ```
+
+## Projects, and removing one
+
+A project is a name, a data directory under `~/.local/share/mocktown/<name>/`, and a
+registry entry in `~/.config/mocktown/config.json`. `mocktown init` writes the committed
+`mocktown.json`; every command afterwards re-registers whatever project it resolves to, so
+cloning a repo and running anything just works.
+
+```bash
+mocktown project list                                # every registered project, and the default
+mocktown project use <name>                          # set the global default
+mocktown project remove --name <name>                # unregister; the data stays
+mocktown project remove --name <name> --data --confirm <name>   # delete the data too
+```
+
+Unregistering is the common one and it is safe: a registry entry outlives the checkout it
+names, and `project list` marks a workspace that has gone. `--data` is the destructive one —
+the corpus, the issue history, the seal stamps and the project's **root CA** all live in that
+directory — so it will not run unless `--confirm` repeats the project's name. That is an
+argument rather than a flag on purpose: `--data` alone is one keystroke from a command that
+only meant to unregister, and an agent calling the MCP tool has no way to mean it that a bare
+flag would not also satisfy by accident.
+
+It refuses in three more cases, each with the fix in the message: while that project's front
+door is running, while it has a sandbox up, and when the project is the one the command
+itself resolved to — every command re-registers the project it resolves to, so removing it
+there would be undone by the next one. Run it from another directory, or with `--project`
+naming a different project.
+
+Two things it tells you rather than hides: a repo whose `mocktown.json` still names the
+project will register it again on the next command run there, and removing the global default
+moves it back to `main`.
+
+There is no GUI button for this. Every GUI page is scoped to one project, and the safety here
+is a typed name, which belongs in a terminal.
 
 ## Stable local names (optional)
 

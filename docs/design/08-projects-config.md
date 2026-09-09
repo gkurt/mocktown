@@ -84,6 +84,7 @@ from a shell.
 ~/.local/share/mocktown/<project>/      # machine-local, never committed
   ├─ mocktown.sqlite                    # recordings, issues, EKB, seal stamps, mock state
   ├─ blobs/                             # content-addressed large bodies
+  ├─ sandbox.json                       # present only while the boundary is up
   └─ ca/                                # project root CA (key: 0600)
 <repo>/mocktown.json                    # committed identity + service registry
 <repo>/.env.mocktown                    # generated, gitignored
@@ -111,11 +112,65 @@ projects rather than reported. The registered workspace is only used when it sti
 `mocktown.json` naming that project, so a moved or deleted repo degrades to "no workspace"
 instead of resolving to a stale path.
 
+## Removing a project
+
+*Added 2026-09-09.* Registration only ever accreted: a registry entry outlived the checkout
+it named, and nothing could take it out again. `mocktown project remove --name <p>` is the
+safe half — it unregisters and leaves the data where it is, which is the fix for an entry
+pointing at a repo that has moved or gone.
+
+`--data` is the other half, and it is the most destructive thing in the product: the corpus,
+the issue history, the seal stamps and the project's **root CA** all live in that directory.
+Four things guard it, and each one is guarding against a different mistake:
+
+- **The confirmation is an input, not a flag.** `--confirm <name>` must repeat the project's
+  own name. A flag is one keystroke away from a command that only meant to unregister, and
+  an agent calling the MCP tool has no way to express "I meant it" that a bare flag would
+  not also satisfy by accident. Since the CLI, the MCP server and the GUI are all clients of
+  one contract, a guard that lives anywhere but the procedure is not a guard.
+- **A running front door or an up sandbox refuses the delete** rather than being silently
+  orphaned. The sandbox is asked about through its topology file, which exists only while the
+  boundary is up — so the question can be answered without building a runtime for a project
+  that is being deleted.
+- **The project's runtime is retired first.** The daemon keeps one runtime per project for
+  its whole lifetime, holding an open SQLite handle. Unlinking under it succeeds on macOS and
+  Linux while the process keeps writing to files that no longer have names, and is refused
+  outright on Windows. Nothing in this path may call `runtimeFor` on the target either: it
+  creates on miss and calls `ensureDirs`, which would recreate the directory the call came to
+  delete.
+- **A project name must be a single path segment.** The name arrives from `--project`,
+  `MOCKTOWN_PROJECT` and a committed `mocktown.json`, validated only as a non-empty string —
+  so `../../x` was a legal name resolving a data directory outside `mocktown/` entirely.
+  Reading and writing there was already wrong; with a delete path it is a traversal with an
+  `rm -rf` on the end of it, so the check lives in `config/paths.ts` where every path is
+  built rather than in the handler that noticed.
+
+Two consequences of resolution order that the command reports rather than hides:
+
+- **The resolved project cannot remove itself.** Every command re-registers the project it
+  resolves to, so the removal would be undone by the next one — and `--data` would delete a
+  directory the same command recreates. Run it from outside the repo, or with `--project`
+  naming another.
+- **A repo whose `mocktown.json` still names the project will re-register it.** That is
+  auto-registration working as designed, and silence about it would make the project's
+  reappearance look like the removal having failed.
+
+Removing the global default moves it back to `main`, because a default is a name rather than
+a reference: left pointing at a removed project it would resolve every later command to
+something that is not there.
+
+**Not in the GUI, deliberately.** Every GUI page is scoped to one resolved project, and this
+is the one operation that acts across projects and cannot be undone. The `--confirm <name>`
+gesture is what makes it safe, and a typed name belongs in a terminal; a button that opens a
+dialog to collect it would be a worse version of the command. `mocktown project remove` is
+the whole interface.
+
 ## CLI shape (illustrative)
 
 ```
 mocktown init [name]            # write mocktown.json, register project
 mocktown project list|use <n>   # manage global default
+mocktown project remove         # unregister, and optionally delete the data (irreversible)
 mocktown record -- <cmd>        # host-mode recording (03)
 mocktown sandbox up|record      # sealed environment (04)
 mocktown env                    # emit .env.mocktown + agent task list (05)

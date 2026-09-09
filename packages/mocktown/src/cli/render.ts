@@ -80,6 +80,13 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
     ),
   ],
 
+  'project.remove': (r) => [
+    `removed: ${r.removed}`,
+    r.unregistered ? '  unregistered' : '  was not registered',
+    r.dataRemoved ? `  deleted ${r.dataDir}` : `  data dir ${r.dataDir}`,
+    ...(r.notes.length ? ['', ...r.notes.map((note: string) => `  note: ${note}`)] : []),
+  ],
+
   'feed.tail': (r) => [
     ...(r.gap ? ['! the feed is a bounded window and events were dropped before this point'] : []),
     ...(r.events.length ? r.events.map(feedLine) : ['  (nothing yet)']),
@@ -108,6 +115,20 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
   'recordings.list': (r) => [
     `${r.total} recording${r.total === 1 ? '' : 's'}${r.recordings.length < r.total ? ` (showing ${r.recordings.length})` : ''}`,
     ...r.recordings.map((rec: any) => `  ${pad(rec.method, 7)} ${pad(rec.statusCode, 4)} ${pad(rec.service, 26)} ${rec.pathTemplate}`),
+  ],
+
+  'recordings.delete': (r) => [
+    `${r.dryRun ? 'would delete' : 'deleted'} ${r.deleted} recording${r.deleted === 1 ? '' : 's'}` +
+      (r.frames ? ` and ${r.frames} socket frame${r.frames === 1 ? '' : 's'}` : '') +
+      (r.blobs ? `, unlinking ${r.blobs} spilled bod${r.blobs === 1 ? 'y' : 'ies'}` : ''),
+    ...(r.services.length ? [`  from ${r.services.join(', ')}`] : []),
+    // Loud rather than in the notes: a service with nothing behind it is the state in which
+    // `mocks verify` passes by having no work to do.
+    ...(r.emptiedServices.length ? [`  ! no recordings left for ${r.emptiedServices.join(', ')}`] : []),
+    ...(r.issues.length
+      ? [`  ${r.issues.length} issue${r.issues.length === 1 ? '' : 's'} cited a deleted row: ${r.issues.join(', ')}`]
+      : []),
+    ...r.notes.map((note: string) => `  note: ${note}`),
   ],
 
   'recordings.routes': (r) =>

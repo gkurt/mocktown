@@ -22,14 +22,14 @@ import { launch } from '#src/capture/launch.ts';
 import { coerceInput, kebab } from '#src/cli/coerce.ts';
 import { clientFor, ensureDaemon } from '#src/cli/daemon-client.ts';
 import { feedLine, renderResult, tilde } from '#src/cli/render.ts';
+import { daemonLiveness, readDaemonState, removeDaemonState } from '#src/config/daemon.ts';
 import { writeLocalIgnore } from '#src/config/ignore.ts';
 import { SCHEMA_REF, writeProjectFileJsonSchema } from '#src/config/jsonschema.ts';
-import { derivedPaths, projectPaths, workspacePaths } from '#src/config/paths.ts';
+import { daemonStateFile, derivedPaths, projectPaths, workspacePaths } from '#src/config/paths.ts';
 import { ensureRegistered, loadGlobalConfig, resolveProject, saveGlobalConfig } from '#src/config/project.ts';
 import { ProjectFile } from '#src/config/schema.ts';
 import { contract } from '#src/contract/index.ts';
 import { contractSignature, fieldInfo, inputShape, type ProcedureInfo, walkContract } from '#src/contract/walk.ts';
-import { readDaemonState } from '#src/daemon/server.ts';
 import { shellAssignment } from '#src/env/generate.ts';
 import { guiDist } from '#src/gui/serve.ts';
 
@@ -297,12 +297,31 @@ daemonCommand
 daemonCommand
   .command('status')
   .description('Whether a daemon is running, and where')
-  .action(() => {
-    const state = readDaemonState();
-    if (!state) {
+  .action(async () => {
+    // The state file is a claim, not proof of life. Reported as fact, a leftover one printed
+    // `running on 127.0.0.1:4499` at someone whose every next command then dialled a dead
+    // port and failed with `the socket connection was closed unexpectedly` — an error that
+    // named neither the daemon nor the file to delete. This is where that gets named.
+    const liveness = await daemonLiveness();
+    if (liveness.status === 'none') {
       console.log('not running');
       return;
     }
+
+    const { state } = liveness;
+    if (liveness.status === 'stale') {
+      console.log(`not running (stale state file — pid ${state.pid} is gone)`);
+      console.log(tilde(`  clear it with \`mocktown daemon stop\`, or delete ${daemonStateFile()}`));
+      return;
+    }
+    if (liveness.status === 'unresponsive') {
+      // Either a wedged daemon or a pid the OS has since handed to something else. Both
+      // leave the port dead, and both are fixed by clearing the registration.
+      console.log(`not answering on 127.0.0.1:${state.port}, though pid ${state.pid} is alive`);
+      console.log('  stop it with `mocktown daemon stop`; the next command starts a fresh one');
+      return;
+    }
+
     console.log(`running on 127.0.0.1:${state.port} (pid ${state.pid})`);
     // The one command that still works under skew, so it is where the reason belongs.
     const expected = contractSignature(contract);
@@ -321,7 +340,18 @@ daemonCommand
       console.log('not running');
       return;
     }
-    process.kill(state.pid, 'SIGTERM');
+    try {
+      process.kill(state.pid, 'SIGTERM');
+    } catch (error) {
+      // ESRCH is the stale file: the daemon died without unlinking it (a kill -9, a crash, a
+      // reboot). Unguarded, the one command that should recover from that instead threw
+      // `SystemError: kill() failed: ESRCH` and a stack trace. Removing the registration is
+      // the repair — the next command starts a daemon rather than dialling a dead port.
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      removeDaemonState();
+      console.log(`not running (stale state file for pid ${state.pid} removed)`);
+      return;
+    }
     console.log(`stopped (pid ${state.pid})`);
   });
 
@@ -465,21 +495,40 @@ program
  * Copying rather than symlinking by default: the export lives in `.mocktown/skills`, which
  * is generated and gitignored, so a symlinked project install is a dangling link in a
  * teammate's clone. Re-run this command to pick up a newer pack.
+ *
+ * **Which agents is the caller's choice, never ours.** `skills add --yes` skips its own
+ * picker, and with no `--agent` that means installing into every agent it can find — a
+ * write into directories nobody named. So `--yes` goes only where the target is already
+ * decided, the picker runs when someone is there to answer it, and a run that can do
+ * neither stops and says so rather than guessing wide.
  */
 const skillsCommand = program.commands.find((c) => c.name() === 'skills')!;
 skillsCommand
   .command('install')
   .description('Install a shipped skill for the agents on this machine, via the `skills` CLI')
   .option('--name <name>', 'Skill to install', 'mocktown')
-  .option('--agent <agents...>', 'Target agents, e.g. claude-code (default: let `skills` ask)')
+  .option('--agent <agents...>', "Target agents, e.g. claude-code — or '*' for every one. Omitted, `skills` asks")
   .option('--global', 'Install into the user directory instead of this project')
   .option('--symlink', 'Symlink to the export instead of copying it')
   .action(async (options: { name: string; agent?: string[]; global?: boolean; symlink?: boolean }) => {
     const globals = program.opts();
     const project = resolveProject({ project: globals.project as string | undefined });
     ensureRegistered(project);
-    const client = clientFor(await ensureDaemon());
 
+    // The picker needs a terminal. Without one and without `--agent` there is no honest
+    // answer to "install where", and the convenient guess is the wrong one — so this fails
+    // before the export, while the message is still the only output.
+    const decided = Boolean(options.agent?.length);
+    if (!decided && !process.stdin.isTTY) {
+      console.error('error: nothing to install into — `skills` cannot show its picker with no terminal attached.');
+      console.error('  name the targets: `mocktown skills install --agent claude-code` (repeat --agent for more)');
+      console.error("  or take every agent on this machine, deliberately: `mocktown skills install --agent '*'`");
+      console.error('  `mocktown skills list` shows what would be installed; `mocktown skills export` just writes the files.');
+      process.exitCode = 1;
+      return;
+    }
+
+    const client = clientFor(await ensureDaemon());
     const exported = await client.skills.export({ project: project.name, name: options.name });
     console.log(`project: ${project.name}`);
     console.log(tilde(`  exported ${exported.files.length} files to ${exported.dir}`));
@@ -493,7 +542,11 @@ skillsCommand
       exported.container,
       '--skill',
       options.name,
-      '--yes',
+      // Everything else is answered on the command line, so the only question left is the
+      // one we must not answer: `--yes` is safe exactly when --agent already said where.
+      // There is deliberately no `--yes` of our own — "all of them, without asking" is
+      // `--agent '*'`, which says so.
+      ...(decided ? ['--yes'] : []),
       ...(options.symlink ? [] : ['--copy']),
       ...(options.global ? ['--global'] : []),
       ...(options.agent ?? []).flatMap((agent) => ['--agent', agent]),

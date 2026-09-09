@@ -215,6 +215,41 @@ export class IssueEngine {
   }
 
   /**
+   * Drop links that name something that no longer exists, and say which issues lost one.
+   *
+   * 07-issues-agent-loop.md's bar is that an issue is resolvable by an agent that has read
+   * nothing but the issue and the files it links. A link to a deleted corpus row breaks
+   * that in the worst available way: the agent follows it, gets an empty result, and has to
+   * work out whether the evidence is missing or it ran the wrong command. The issue itself
+   * survives a corpus delete — it carries the whole scrubbed request inline — so stripping
+   * the dead link leaves it weaker but still honest.
+   *
+   * Matching is by substring because a link is a command line, not an id: the evidence for
+   * a verify failure is `mocktown recordings get --id rec_…`, and the id is the part of it
+   * that stopped being true.
+   */
+  forgetReferences(goneIds: string[]): string[] {
+    const touched: string[] = [];
+    for (const issue of this.referencingIssues(goneIds)) {
+      const kept = issue.links.filter((link) => !goneIds.some((gone) => link.includes(gone)));
+      this.db.update(schema.issues).set({ links: kept }).where(eq(schema.issues.id, issue.id)).run();
+      this.materialize(issue.id);
+      touched.push(issue.id);
+    }
+    return touched;
+  }
+
+  /** The same question without the repair, so a dry run can answer it truthfully. */
+  referencing(goneIds: string[]): string[] {
+    return this.referencingIssues(goneIds).map((issue) => issue.id);
+  }
+
+  private referencingIssues(goneIds: string[]) {
+    if (goneIds.length === 0) return [];
+    return this.list().filter((issue) => issue.links.some((link) => goneIds.some((gone) => link.includes(gone))));
+  }
+
+  /**
    * Issues also live as files, so `claude -p` and CI bots work without MCP
    * (07-issues-agent-loop.md). Resolved issues lose their file: an agent listing the
    * directory should see the open queue, not an archive.

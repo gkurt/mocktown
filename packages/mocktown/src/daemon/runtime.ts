@@ -19,12 +19,13 @@ import { projectPaths } from '#src/config/paths.ts';
 import { ensureRegistered, type ResolvedProject, resolveProject } from '#src/config/project.ts';
 import { FeedBus, summarize } from '#src/daemon/events.ts';
 import type { Db } from '#src/db/client.ts';
-import { openProjectDb, schema } from '#src/db/client.ts';
+import { closeProjectDb, openProjectDb, schema } from '#src/db/client.ts';
 import { type EnvArtifacts, generateEnv } from '#src/env/generate.ts';
 import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { type CapturedExchange, type CapturedSocket, FrontDoor, type WallHit } from '#src/frontdoor/controller.ts';
 import { escapingHosts, type Route, type RoutingTable, routeForProvider } from '#src/frontdoor/routing.ts';
 import { IssueEngine } from '#src/issues/engine.ts';
+import { type CorpusDeletion, type DeleteScope, deleteRecordings } from '#src/mocks/corpus.ts';
 import { EmulateProvider, emulateServiceId } from '#src/providers/emulate.ts';
 import { GeneratedProvider } from '#src/providers/generated.ts';
 import type { Provider, StateSnapshot } from '#src/providers/types.ts';
@@ -623,6 +624,29 @@ export class ProjectRuntime {
           ]
         : []),
     ];
+  }
+
+  // ── The corpus ──────────────────────────────────────────────────────────────
+
+  /**
+   * The corpus's delete path (03-capture.md). The row work is `deleteRecordings`; what
+   * belongs here is everything the rest of the project has to be told about it.
+   *
+   * Issues are the part that cannot be skipped. An issue cites the corpus rows an agent
+   * should read, so deleting a row leaves a link that resolves to nothing — and an agent
+   * that follows it cannot tell a missing recording from a wrong command. The links are
+   * stripped rather than the issues closed: the issue still carries its request inline, so
+   * it stays actionable.
+   */
+  deleteCorpus(scope: DeleteScope, dryRun = false): CorpusDeletion & { issues: string[] } {
+    const result = deleteRecordings(this.project.name, this.db, scope, dryRun);
+    // A dry run must not repair anything — it reports, including which issues *would* lose
+    // a link, which it can only do by asking without writing.
+    const issues = dryRun ? this.issues.referencing(result.goneIds) : this.issues.forgetReferences(result.goneIds);
+    if (!dryRun && result.deleted > 0) {
+      this.note('session', `deleted ${result.deleted} recording${result.deleted === 1 ? '' : 's'} from ${result.services.join(', ')}`);
+    }
+    return { ...result, issues };
   }
 
   // ── Serve mode ──────────────────────────────────────────────────────────────
@@ -1261,6 +1285,25 @@ export function runtimeFor(projectName: string, cwd?: string): ProjectRuntime {
   runtime.ensureDirs();
   runtimes.set(projectName, runtime);
   return runtime;
+}
+
+/**
+ * A project's runtime only if the daemon already has one.
+ *
+ * `runtimeFor` creates on miss and calls `ensureDirs`, so asking it about a project you are
+ * about to remove would recreate the very directory you came to delete. Anything that acts
+ * *on* a project rather than *as* one has to ask this instead.
+ */
+export function liveRuntime(projectName: string): ProjectRuntime | undefined {
+  return runtimes.get(projectName);
+}
+
+/** Stop what a project is running and release its database, so its files can be removed. */
+export async function retireRuntime(projectName: string): Promise<void> {
+  const runtime = runtimes.get(projectName);
+  runtimes.delete(projectName);
+  await runtime?.shutdown();
+  closeProjectDb(projectName);
 }
 
 export async function shutdownAllRuntimes(): Promise<void> {

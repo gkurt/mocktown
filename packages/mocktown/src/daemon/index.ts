@@ -5,8 +5,7 @@
  *
  *   bun src/daemon/index.ts [--port <n>]
  */
-import { existsSync, rmSync } from 'node:fs';
-import { daemonStateFile } from '#src/config/paths.ts';
+import { removeOwnDaemonState } from '#src/config/daemon.ts';
 import { shutdownAllRuntimes } from '#src/daemon/runtime.ts';
 import { startDaemon } from '#src/daemon/server.ts';
 
@@ -24,7 +23,10 @@ async function shutdown() {
   // running would leave a MITM proxy holding a developer's traffic with nothing driving it.
   await shutdownAllRuntimes();
   await daemon.stop();
-  if (existsSync(daemonStateFile())) rmSync(daemonStateFile(), { force: true });
+  // Only if the registration is still ours: an orphan daemon from an earlier shell shares
+  // this file with the one that wrote it last, and unlinking blind on the way out deletes a
+  // live daemon's registration — leaving it running with no client able to find it.
+  removeOwnDaemonState();
   process.exit(0);
 }
 

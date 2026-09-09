@@ -70,7 +70,14 @@
    socket that connects and then says nothing is the hardest mock bug to diagnose. State
    that must outlive the connection goes in `ctx.state`; state that must not goes in
    `ctx.connection`.
-14. **Do not write routes for gRPC methods.** They are recorded as opaque HTTP/2 and cannot
+14. **Never delete recordings to make a check pass.** `mocktown recordings delete` exists
+   to prune noise and to remove a capture that should not be on disk — not to resolve a
+   failure. Deleting the recordings a mock fails verification against makes `mocktown mocks
+   verify` pass by having nothing left to replay, and closes an issue by destroying its
+   evidence. Both read as green and neither is. If the corpus is a poor witness, rule 4 is
+   the answer: correct `schema.ts` and say why. And never run `mocktown project remove` —
+   that is a human's decision about their machine, not a step in any job here.
+15. **Do not write routes for gRPC methods.** They are recorded as opaque HTTP/2 and cannot
    be served by a generated mock — `Bun.serve` does not accept HTTP/2 connections, and
    gRPC needs it plus trailers. Point the service at `record`, or run a real gRPC test
    double and register its host as `passthrough`.

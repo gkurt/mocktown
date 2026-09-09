@@ -4,8 +4,10 @@
  * work: the third of 02-architecture.md's "one procedure definition, three surfaces".
  *
  * Two house rules the walk lets us set that an adapter would not (spike 02):
- *   - `readOnlyHint` is derived from the HTTP method. GET procedures are safe for an
- *     agent to call speculatively; PUT and POST are not.
+ *   - `readOnlyHint` and `destructiveHint` are derived from the HTTP method. GET
+ *     procedures are safe for an agent to call speculatively; PUT and POST are not; and a
+ *     DELETE destroys something a re-run cannot rebuild, which a host is entitled to gate
+ *     differently. Deriving it means a procedure cannot understate itself by omission.
  *   - the project is resolved by the server, not asked of the model, so an agent cannot
  *     accidentally drive the wrong project by omitting an argument.
  */
@@ -42,7 +44,7 @@ export async function buildMcpServer(): Promise<McpServer> {
       {
         description: [procedure.summary, UNTRUSTED_NOTE].filter(Boolean).join('\n\n'),
         inputSchema: shape,
-        annotations: { readOnlyHint: procedure.method === 'GET' },
+        annotations: { readOnlyHint: procedure.method === 'GET', destructiveHint: procedure.method === 'DELETE' },
       } as any,
       async (input: Record<string, unknown>) => {
         const project = resolveProject();

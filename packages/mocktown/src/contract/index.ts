@@ -7,7 +7,8 @@
  * House rules the generators enforce structurally, so no future procedure can opt out:
  *   - every command supports `--json`, and the human rendering is a projection of it
  *   - the resolved project is the first line of output (08-projects-config.md)
- *   - MCP `readOnlyHint` is derived from the HTTP method, not declared per-tool
+ *   - MCP `readOnlyHint` and `destructiveHint` are derived from the HTTP method, not
+ *     declared per-tool, so a DELETE cannot present itself to an agent as reversible
  */
 import { oc } from '@orpc/contract';
 import * as z from 'zod/v4';
@@ -92,6 +93,43 @@ export const contract = {
               workspaceExists: z.boolean(),
             }),
           ),
+        }),
+      ),
+
+    /**
+     * Unregistering is the safe half and the common one: a registry entry outlives the
+     * checkout it names, and until this existed a stale entry was permanent. `data: true`
+     * is the other half, and it is genuinely irreversible — the corpus, the issue history,
+     * the seal stamps and the project's root CA all live in that directory.
+     *
+     * So the confirmation is an input, not a flag. `confirm` must repeat the project's own
+     * name, which is what makes an accidental call — an agent calling the MCP tool
+     * speculatively, a fat-fingered shell line — fail closed instead of succeeding.
+     */
+    remove: oc
+      .route({
+        method: 'DELETE',
+        path: '/projects/{name}',
+        summary: 'Unregister a project, and optionally delete its machine-local data — irreversible',
+      })
+      .input(
+        z.object({
+          ...ProjectInput,
+          name: z.string().describe('Project to remove, which may not be the one this call resolved to'),
+          data: z
+            .boolean()
+            .optional()
+            .describe('Also delete ~/.local/share/mocktown/<name>: corpus, issues, seal stamps and the project CA'),
+          confirm: z.string().optional().describe('Must repeat the project name when --data is given; nothing else is accepted'),
+        }),
+      )
+      .output(
+        withProject({
+          removed: z.string(),
+          unregistered: z.boolean().describe('False when the project held no registry entry to begin with'),
+          dataDir: z.string(),
+          dataRemoved: z.boolean(),
+          notes: z.array(z.string()).describe('What was left in place, and what would have removed it'),
         }),
       ),
   },
@@ -218,6 +256,52 @@ export const contract = {
               lastSeenAt: z.string().nullable(),
             }),
           ),
+        }),
+      ),
+
+    /**
+     * The corpus had no delete path at all, which made one class of mistake unrecoverable
+     * through the product: a capture whose secret the scrubber's rules did not match. The
+     * only remedy was `rm -rf` on the data directory by hand, which is a bad answer from a
+     * tool whose central promise is that nothing sensitive reaches disk.
+     *
+     * Every filter is optional and at least one is required. An unfiltered call would be
+     * "empty the corpus", and that is not a thing a mistyped command or a speculative agent
+     * should be able to do by omission — deleting everything stays available, but only by
+     * naming every session or by removing the project.
+     */
+    delete: oc
+      .route({
+        method: 'DELETE',
+        path: '/recordings',
+        summary: 'Delete recordings — by id, session, service or route. Requires a subject; generated mocks are left alone',
+      })
+      .input(
+        z.object({
+          ...ProjectInput,
+          id: z.string().optional().describe('One exchange'),
+          session: z.string().optional().describe('Every exchange from one recording run'),
+          service: z.string().optional(),
+          method: z.string().optional().describe('Narrows a service or route; not a filter on its own'),
+          pathTemplate: z
+            .string()
+            .optional()
+            .describe('The normalized template as the route table shows it, e.g. /orders/{orderId} — not the concrete path'),
+          dryRun: z.boolean().optional().describe('Report what would go and delete nothing'),
+        }),
+      )
+      .output(
+        withProject({
+          dryRun: z.boolean(),
+          deleted: z.number().int(),
+          frames: z.number().int().describe('WebSocket frames that went with them'),
+          blobs: z.number().int().describe('Spilled bodies unlinked — only those no surviving recording still points at'),
+          services: z.array(z.string()).describe('Services the deleted rows belonged to'),
+          emptiedServices: z
+            .array(z.string())
+            .describe('Services left with no recordings at all — a mock generated from them is now unbacked'),
+          issues: z.array(z.string()).describe('Issues whose evidence cited a deleted row; the dangling links were stripped'),
+          notes: z.array(z.string()),
         }),
       ),
   },

@@ -1,15 +1,21 @@
 /**
- * Corpus export: the recordings turned into the document a generating agent reads.
+ * The corpus: the recordings turned into the document a generating agent reads, and the
+ * one path that takes rows back out again.
  *
- * 01-product.md names this as a differentiator — "recordings as an agent-legible corpus,
- * not just replay fixtures". The difference in practice is that this export is organised
- * by *route*, carries a handful of representative examples rather than every row, and
- * states the couplings an agent would otherwise have to infer by reading hundreds of
+ * 01-product.md names the export as a differentiator — "recordings as an agent-legible
+ * corpus, not just replay fixtures". The difference in practice is that this export is
+ * organised by *route*, carries a handful of representative examples rather than every row,
+ * and states the couplings an agent would otherwise have to infer by reading hundreds of
  * exchanges.
+ *
+ * `deleteRecordings` lives here rather than in a module of its own because everything that
+ * makes a delete correct — how a body spills to `blobs/`, what a route key is, which rows a
+ * service owns — is already this module's subject. Two modules would be two places to keep
+ * that agreement.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import { routeKey } from '#src/capture/normalize.ts';
 import { projectPaths } from '#src/config/paths.ts';
 import type { Recording } from '#src/contract/schemas.ts';
@@ -288,5 +294,167 @@ export function inflateRecording(project: string, row: typeof schema.recordings.
     ...row,
     requestBody: row.requestBody ?? readBlob(row.requestBlob),
     responseBody: row.responseBody ?? readBlob(row.responseBlob),
+  };
+}
+
+/** What a delete matched and what went with it. Reported whether or not anything ran. */
+export interface CorpusDeletion {
+  dryRun: boolean;
+  deleted: number;
+  frames: number;
+  blobs: number;
+  services: string[];
+  emptiedServices: string[];
+  notes: string[];
+  /** Recording and session ids that no longer exist, for callers repairing references. */
+  goneIds: string[];
+}
+
+export interface DeleteScope {
+  id?: string;
+  session?: string;
+  service?: string;
+  method?: string;
+  pathTemplate?: string;
+}
+
+/**
+ * Delete part of the corpus — 03-capture.md's delete path.
+ *
+ * Three things make this more than a `DELETE FROM`:
+ *
+ *   - **Frames are children.** `foreign_keys` is on, so a WebSocket row cannot go before
+ *     its frames do.
+ *   - **Blobs are shared.** A spilled body is content-addressed, so two recordings with
+ *     identical bodies point at one file. Unlinking by the deleted row's hash would take
+ *     the body out from under whatever else still references it, and `inflateRecording`
+ *     would then read a null body for a row that looks intact. So a blob is unlinked only
+ *     once nothing points at it.
+ *   - **A service can be emptied.** Deleting the last recording for a service leaves any
+ *     mock generated from it with nothing behind it, and leaves `mocks verify` with nothing
+ *     to replay — it passes by having no work rather than by the mock being right. That is
+ *     reported, because silence here would read as success.
+ *
+ * `dryRun` runs every count and writes nothing, which is the only honest way to answer
+ * "how much would this take" before it is gone.
+ */
+export function deleteRecordings(project: string, db: Db, scope: DeleteScope, dryRun = false): CorpusDeletion {
+  const conditions = [
+    ...(scope.id ? [eq(schema.recordings.id, scope.id)] : []),
+    ...(scope.session ? [eq(schema.recordings.sessionId, scope.session)] : []),
+    ...(scope.service ? [eq(schema.recordings.service, scope.service)] : []),
+    ...(scope.method ? [eq(schema.recordings.method, scope.method.toUpperCase())] : []),
+    ...(scope.pathTemplate ? [eq(schema.recordings.pathTemplate, scope.pathTemplate)] : []),
+  ];
+  // The caller is responsible for requiring a filter; this guard is here so a future caller
+  // that forgets cannot empty the corpus through this function.
+  if (conditions.length === 0) throw new Error('deleteRecordings needs at least one filter — an unfiltered delete is not supported');
+
+  const matched = db
+    .select()
+    .from(schema.recordings)
+    .where(and(...conditions))
+    .all();
+
+  const services = [...new Set(matched.map((row) => row.service))].sort();
+  const notes: string[] = [];
+  if (matched.length === 0) {
+    return { dryRun, deleted: 0, frames: 0, blobs: 0, services, emptiedServices: [], notes: ['Nothing matched.'], goneIds: [] };
+  }
+
+  const ids = matched.map((row) => row.id);
+  const frames = db.select().from(schema.socketFrames).where(inArray(schema.socketFrames.recordingId, ids)).all().length;
+
+  // What stops existing, for callers repairing references to it. Derived from the matched
+  // set rather than observed after the fact, so a dry run answers the same question — an
+  // issue about to lose a link is exactly what someone runs a dry run to find out.
+  //
+  // An emptied session's own row is kept regardless. It is what a journal entry and an
+  // issue's `sessionId` point at, and dropping it would turn those into dangling references
+  // to reclaim one row; what it stops being is a session anyone can list recordings from,
+  // which is the part a link to it needs to know.
+  const emptiedSessions = [...new Set(matched.map((row) => row.sessionId))].filter((sessionId) =>
+    db
+      .select()
+      .from(schema.recordings)
+      .where(eq(schema.recordings.sessionId, sessionId))
+      .all()
+      .every((row) => ids.includes(row.id)),
+  );
+  const goneIds = [...ids, ...emptiedSessions];
+
+  // Which services would be left with nothing: counted before the delete, so the dry run
+  // and the real run report the same thing.
+  const survivorsByService = new Map<string, number>();
+  for (const service of services) {
+    const total = db.select().from(schema.recordings).where(eq(schema.recordings.service, service)).all().length;
+    survivorsByService.set(service, total - matched.filter((row) => row.service === service).length);
+  }
+  const emptiedServices = services.filter((service) => survivorsByService.get(service) === 0);
+
+  const candidateBlobs = new Set(matched.flatMap((row) => [row.requestBlob, row.responseBlob]).filter((hash): hash is string => !!hash));
+
+  if (dryRun) {
+    // A dry run cannot ask "would this blob still be referenced" without the rows gone, so
+    // it counts what is reachable only from the matched rows. Anything shared with a
+    // survivor is excluded here exactly as it would be excluded from a real run.
+    const orphans = [...candidateBlobs].filter((hash) => {
+      const referencing = db
+        .select()
+        .from(schema.recordings)
+        .where(or(eq(schema.recordings.requestBlob, hash), eq(schema.recordings.responseBlob, hash)))
+        .all();
+      return referencing.every((row) => ids.includes(row.id));
+    });
+    return {
+      dryRun,
+      deleted: matched.length,
+      frames,
+      blobs: orphans.length,
+      services,
+      emptiedServices,
+      notes: [...notes, 'Dry run: nothing was deleted.'],
+      goneIds,
+    };
+  }
+
+  // One transaction: a corpus with frames whose recording is gone, or rows whose blobs were
+  // already unlinked, is a worse state than either the before or the after.
+  db.transaction((tx) => {
+    tx.delete(schema.socketFrames).where(inArray(schema.socketFrames.recordingId, ids)).run();
+    tx.delete(schema.recordings).where(inArray(schema.recordings.id, ids)).run();
+  });
+
+  const blobDir = projectPaths(project).blobs;
+  let unlinked = 0;
+  for (const hash of candidateBlobs) {
+    const stillUsed = db
+      .select()
+      .from(schema.recordings)
+      .where(or(eq(schema.recordings.requestBlob, hash), eq(schema.recordings.responseBlob, hash)))
+      .get();
+    if (stillUsed) continue;
+    rmSync(join(blobDir, hash), { force: true });
+    db.delete(schema.blobs).where(eq(schema.blobs.hash, hash)).run();
+    unlinked += 1;
+  }
+
+  if (emptiedServices.length) {
+    notes.push(
+      `No recordings remain for ${emptiedServices.join(', ')}. Any generated mock for those services is now unbacked, and ` +
+        '`mocktown mocks verify` has nothing left to replay against it.',
+    );
+  }
+  notes.push('Generated mocks, the service registry and the seal stamp are unchanged: a delete narrows the evidence, not the setup.');
+
+  return {
+    dryRun,
+    deleted: matched.length,
+    frames,
+    blobs: unlinked,
+    services,
+    emptiedServices,
+    notes,
+    goneIds,
   };
 }
