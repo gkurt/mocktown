@@ -1,0 +1,32 @@
+core:changelogs:
+  - content: "---\npackages:\n  mocktown:\n    type: minor\n---\n\n### Added\n\nFirst release. Mocktown records an app's outbound traffic, serves it back as stateful\nmocks, and keeps those mocks alive as the real services change.\n\n- **Record.** `mocktown record -- <cmd>` runs your app through a capture proxy and writes\n  every exchange to a corpus. Secrets are scrubbed *before* anything reaches disk, so the\n  corpus you can browse is the corpus that exists. Browsers, HAR imports and WebSockets are\n  covered too, and the recorder filters the browser's own vendor traffic out of the corpus.\n- **Mock.** `mocktown mocks scaffold` turns the corpus into a brief and a module stub for a\n  coding agent to fill in — mocks are stateful modules, not verbatim replay. `mocktown\n  skills install` gives the agent the prompt pack for the job.\n- **Never reach production by accident.** In serve mode anything without a mock hits a deny\n  wall and becomes a self-contained issue in the queue, rather than quietly reaching the\n  real API.\n- **Seal.** `mocktown sandbox up` builds a network whose only route out is the front door;\n  `mocktown seal verify` runs your flows inside it and stamps the result, exiting non-zero\n  when the verdict is anything but sealed — so it works as a CI step.\n- **Drift watch.** Opt in and Mocktown re-records your flows against the real services and\n  files issues for what diverged.\n- **Four surfaces, one daemon.** A CLI, a local HTTP API, an MCP server and a GUI — the\n  shell ships with the package, so `mocktown ui` works on a fresh install.\n\nMocktown runs on Bun, and needs a real `node` on the PATH for the capture proxy.\n"
+    filename: initial-release.md
+    v: 0.0.0
+core:packages:
+  - id: npm:@mocktown/root
+    updated: false
+  - changelogIds:
+      - initial-release.md
+    id: npm:mocktown
+    updated: true
+  - id: npm:spike-03-emulate
+    updated: false
+  - id: npm:@mocktown/gui
+    updated: true
+  - id: npm:spike-02-orpc-bun
+    updated: false
+  - id: npm:spike-04-container-seal
+    updated: false
+  - id: npm:spike-01-mockttp-bun
+    updated: false
+  - id: npm:spike-05-scrubber
+    updated: false
+npm:packages:
+  - id: npm:@mocktown/root
+  - id: npm:mocktown
+  - id: npm:spike-03-emulate
+  - id: npm:@mocktown/gui
+  - id: npm:spike-02-orpc-bun
+  - id: npm:spike-04-container-seal
+  - id: npm:spike-01-mockttp-bun
+  - id: npm:spike-05-scrubber

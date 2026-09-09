@@ -1,7 +1,4 @@
----
-packages:
-  mocktown: minor
----
+## mocktown@0.1.0
 
 ### Added
 
