@@ -18,6 +18,7 @@ process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 const { ProjectRuntime } = await import('#src/daemon/runtime.ts');
 const { resolveProject } = await import('#src/config/project.ts');
 const { schema } = await import('#src/db/client.ts');
+const { bannerUrls } = await import('#src/providers/emulate.ts');
 
 const workspace = join(root, 'app');
 let runtime: InstanceType<typeof ProjectRuntime>;
@@ -50,6 +51,42 @@ beforeAll(async () => {
 afterAll(async () => {
   await runtime?.shutdown();
   rmSync(root, { recursive: true, force: true });
+});
+
+/**
+ * The banner is parsed from a stream nobody controls, and reading it wrong does not look
+ * like a parse error — it looks like a 20s startup timeout with the URLs printed in the log
+ * right above it. That is how the coloured form got past a whole suite of passing tests: it
+ * only appears when emulate decides a human is watching, and `CI=true` is one of the things
+ * that decides it, so it reproduced on the runner and nowhere else.
+ */
+describe('the startup banner', () => {
+  const plain = '\n  emulate v0.11.1\n\n  stripe  http://localhost:4600\n  github  http://localhost:4601\n';
+  // What a GitHub runner actually receives.
+  const coloured =
+    `\n  emulate v0.11.1\n\n  \x1b[36mstripe  \x1b[39m\x1b[1mhttp://localhost:4600\x1b[22m\n` +
+    `  \x1b[36mgithub  \x1b[39m\x1b[1mhttp://localhost:4601\x1b[22m\n`;
+
+  test('reads a service and its URL, coloured or not', () => {
+    for (const [label, text] of [
+      ['plain', plain],
+      ['coloured', coloured],
+    ] as const) {
+      const urls = bannerUrls(text);
+      // Rewritten off `localhost` so nothing downstream resolves to ::1 and misses.
+      expect(urls.get('stripe'), label).toBe('http://127.0.0.1:4600');
+      expect(urls.get('github'), label).toBe('http://127.0.0.1:4601');
+    }
+  });
+
+  test('the version line is not a service', () => {
+    expect(bannerUrls(plain).has('emulate')).toBe(false);
+  });
+
+  // A chunk is whatever the pipe delivered, so a line can arrive before its successor.
+  test('a partial chunk yields only the lines it completed', () => {
+    expect([...bannerUrls('  stripe  http://localhost:4600\n  github  http').keys()]).toEqual(['stripe']);
+  });
 });
 
 describe('emulate behind the front door', () => {

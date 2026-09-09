@@ -30,6 +30,38 @@ export interface EmulateProviderOptions {
   startupTimeoutMs?: number;
 }
 
+/** CSI escape sequences: ESC [ … final byte. Built from a char code — Biome forbids a
+ * control character written into a regex literal. */
+const CSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
+
+/**
+ * Escape codes removed rather than suppressed with NO_COLOR/FORCE_COLOR, which only holds
+ * for as long as the child keeps honouring them. Any CSI sequence, not just colour: a
+ * spinner writes cursor and erase codes through the same stream.
+ */
+export const stripAnsi = (text: string) => text.replace(CSI, '');
+
+/**
+ * The service URLs in a chunk of emulate's banner, which announces one line per service:
+ * `  stripe  http://localhost:4300`.
+ *
+ * Exported because the one bug this has had was invisible from the outside. emulate colours
+ * the banner whenever it thinks a human is watching, and `CI=true` is one of the things its
+ * colour library reads — so on a GitHub runner the lines arrive as
+ * `ESC[36mstripe  ESC[39mESC[1mhttp://localhost:4600ESC[22m`. The pattern wants the URL
+ * directly after the whitespace, so it matched nothing, no service was ever recorded as
+ * announced, and startup failed on the 20s timeout with the URLs sitting in plain sight in
+ * the log. A test feeds it a coloured banner so that cannot come back quietly.
+ */
+export function bannerUrls(text: string): Map<string, string> {
+  const urls = new Map<string, string>();
+  for (const [, service, url] of stripAnsi(text).matchAll(/^\s*(\S+)\s+(https?:\/\/\S+)\s*$/gm)) {
+    // Rewrite localhost -> 127.0.0.1 so nothing downstream resolves to ::1 and misses.
+    urls.set(service!, url!.replace('//localhost:', '//127.0.0.1:'));
+  }
+  return urls;
+}
+
 export class EmulateProvider implements Provider {
   readonly name = 'emulate';
   readonly kind = 'emulator' as const;
@@ -108,13 +140,10 @@ export class EmulateProvider implements Provider {
         timeoutMs,
       );
       const onChunk = (buf: Buffer) => {
-        const text = buf.toString();
+        // Stripped in the log too: it is quoted into API and CLI errors.
+        const text = stripAnsi(buf.toString());
         this.log.push(text);
-        // emulate announces one line per service: "  stripe  http://localhost:4300"
-        for (const [, service, url] of text.matchAll(/^\s*(\S+)\s+(https?:\/\/\S+)\s*$/gm)) {
-          // Rewrite localhost -> 127.0.0.1 so nothing downstream resolves to ::1 and misses.
-          this.urls.set(service!, url!.replace('//localhost:', '//127.0.0.1:'));
-        }
+        for (const [service, url] of bannerUrls(text)) this.urls.set(service, url);
         if (this.options.emulateServices.every((s) => this.urls.has(s))) {
           clearTimeout(timer);
           resolvePromise();
