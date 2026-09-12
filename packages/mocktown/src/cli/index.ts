@@ -247,20 +247,29 @@ projectCommand
  * same command: the wrapper is the group's own action, so it runs when the next argument
  * is not one of its subcommands.
  */
+/** Commander hands one value at a time; a repeatable flag has to accumulate them itself. */
+const collect = (value: string, previous: string[]) => [...previous, value];
+
 const recordCommand = program.commands.find((c) => c.name() === 'record')!;
 recordCommand
   .description("Record a command's outbound traffic through the front door")
   .argument('[command...]', 'Command to run after --')
   .option('--label <label>', 'Label for this recording session')
   .option('--seed <seed>', 'Session seed (default is fixed, so runs are reproducible)')
-  .action(async (argv: string[], options: { label?: string; seed?: string }) => {
+  .option('--live <host>', 'Send this host to the real upstream and capture it, whatever the registry says. Repeatable', collect, [])
+  .action(async (argv: string[], options: { label?: string; seed?: string; live?: string[] }) => {
     const globals = program.opts();
     const project = resolveProject({ project: globals.project as string | undefined });
     ensureRegistered(project);
     const connection = await ensureDaemon();
     const client = clientFor(connection);
 
-    const started = await client.record.start({ project: project.name, label: options.label, seed: options.seed });
+    const started = await client.record.start({
+      project: project.name,
+      label: options.label,
+      seed: options.seed,
+      live: options.live?.length ? options.live : undefined,
+    });
     console.log(`project: ${project.name}`);
     console.log(`recording session ${started.session} — proxy ${started.proxyUrl}`);
 

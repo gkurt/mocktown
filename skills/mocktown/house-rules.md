@@ -109,3 +109,9 @@
    be served by a generated mock — `Bun.serve` does not accept HTTP/2 connections, and
    gRPC needs it plus trailers. Point the service at `record`, or run a real gRPC test
    double and register its host as `passthrough`.
+16. **`record` and `passthrough` are not interchangeable.** While recording they route
+   identically, so the difference only shows under `mocktown serve`: a `record` host that
+   has a generated mock is served from it, and `passthrough` always goes out. Write
+   `passthrough` for a host a served run must genuinely reach, and `record` only for one
+   you mean to capture. To take a mocked host live for a single run, use `mocktown record
+   --live <host>` rather than editing the registry and putting it back.

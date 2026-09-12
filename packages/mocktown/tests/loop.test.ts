@@ -412,6 +412,29 @@ describe('phase 2 — the loop closes on a real project', () => {
   }, 60_000);
 });
 
+describe('re-recording a service that is already mocked', () => {
+  test('a mocked host is denied in a record session, and `--live` is what reopens it', async () => {
+    // Pinned at `generated:`, the host has no provider up during a record run, so routing
+    // denies it rather than leaking to the upstream. Correct — and it is why re-recording
+    // needs a way back in that is not an edit to mocktown.json and a promise to undo it.
+    switchToGeneratedMock();
+    const modeFor = () => runtime.routingTable().routes.find((r) => r.host === SERVICE)?.mode;
+
+    await runtime.startRecord({ label: 'rerecord-denied' });
+    expect(modeFor()).toBe('deny');
+    await runtime.stopRecord();
+
+    await runtime.startRecord({ label: 'rerecord-live', recordOverride: [SERVICE] });
+    expect(modeFor()).toBe('record');
+    await runtime.stopRecord();
+
+    // Session-scoped: the next run inherits the registry, not the flag.
+    await runtime.startRecord({ label: 'rerecord-after' });
+    expect(modeFor()).toBe('deny');
+    await runtime.stopRecord();
+  }, 60_000);
+});
+
 // ── Helpers standing in for the coding agent ─────────────────────────────────
 
 function tokenFor(profile: string): string {

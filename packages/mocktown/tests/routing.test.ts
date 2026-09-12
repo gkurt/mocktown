@@ -32,43 +32,38 @@ describe('the mode table', () => {
   });
 });
 
-describe('a discovered `record` pin does not survive into serve mode', () => {
-  // The recorder pins every host it observes, so every recorded service arrives in serve
-  // mode carrying `record` — which forwards to the real upstream. That is the escape.
+describe('a `record` pin does not survive into serve mode', () => {
+  // `record` asks for capture, and a served run starts no recorder — so honouring the pin
+  // just forwards to the real upstream. That is the escape this rule closes.
   test('a provider that is serving the host outranks the pin', () => {
-    const route = routeForProvider('billing.example.com', 'record', served, {
-      serving: true,
-      discovered: true,
-      servedBy: 'generated',
-    });
+    const route = routeForProvider('billing.example.com', 'record', served, { serving: true, servedBy: 'generated' });
     expect(route.mode).toBe('mock');
     expect(route.target).toBe('127.0.0.1:5000');
     expect(route.provider).toBe('generated');
   });
 
+  test('a pin committed to mocktown.json is overridden too, not just one the recorder wrote', () => {
+    // The registry cannot distinguish the two, and neither reading of `record` means
+    // anything during serve. `passthrough` is how the file says "let this one out", and it
+    // is honoured in both modes — so nothing is lost by giving `record` a serve meaning.
+    const pinned = routeForProvider('billing.example.com', 'record', served, { serving: true, servedBy: 'generated' });
+    expect(pinned.mode).toBe('mock');
+
+    const declared = routeForProvider('billing.example.com', 'passthrough', served, { serving: true, sealed: true });
+    expect(declared.mode).toBe('passthrough');
+  });
+
   test('with no provider up, a sealed run denies rather than escaping', () => {
-    const sealed = routeForProvider('api.stripe.com', 'record', served, { serving: true, discovered: true, sealed: true });
+    const sealed = routeForProvider('api.stripe.com', 'record', served, { serving: true, sealed: true });
     expect(sealed.mode).toBe('deny');
 
     // Unsealed serve is the mixed mode: recording the un-mocked half is the point.
-    const unsealed = routeForProvider('api.stripe.com', 'record', served, { serving: true, discovered: true, sealed: false });
+    const unsealed = routeForProvider('api.stripe.com', 'record', served, { serving: true, sealed: false });
     expect(unsealed.mode).toBe('record');
   });
 
-  test('a pin committed to mocktown.json is a decision, so it stands', () => {
-    // `discovered: false` means someone wrote it down. Overriding that would be the
-    // mirror-image bug: the tool quietly ignoring the file.
-    const route = routeForProvider('billing.example.com', 'record', served, {
-      serving: true,
-      discovered: false,
-      sealed: true,
-      servedBy: 'generated',
-    });
-    expect(route.mode).toBe('record');
-  });
-
   test('recording mode is untouched — a pin is exactly what it means there', () => {
-    const route = routeForProvider('billing.example.com', 'record', served, { serving: false, discovered: true });
+    const route = routeForProvider('billing.example.com', 'record', served, { serving: false });
     expect(route.mode).toBe('record');
   });
 });

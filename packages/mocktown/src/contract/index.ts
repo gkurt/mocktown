@@ -371,7 +371,17 @@ export const contract = {
   record: {
     start: oc
       .route({ method: 'POST', path: '/record/start', summary: 'Start the front door in record mode and open a session' })
-      .input(z.object({ ...ProjectInput, label: z.string().optional(), seed: z.string().optional() }))
+      .input(
+        z.object({
+          ...ProjectInput,
+          label: z.string().optional(),
+          seed: z.string().optional(),
+          live: z
+            .array(z.string())
+            .optional()
+            .describe('Hosts to send to the real upstream and capture, whatever the registry says — for re-recording a mocked service'),
+        }),
+      )
       .output(
         withProject({
           session: z.string(),

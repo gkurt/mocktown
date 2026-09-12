@@ -451,7 +451,6 @@ export class ProjectRuntime {
         : routeForProvider(service.id, service.provider, baseUrls, {
             serving,
             sealed,
-            discovered: service.discovered,
             servedBy: servedBy.get(service.id),
           });
       const aliases = (service.aliases ?? []).filter((alias) => honoured.get(alias) === service.id);

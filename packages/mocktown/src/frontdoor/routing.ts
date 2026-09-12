@@ -32,12 +32,10 @@ export interface RoutingTable {
 
 /** What the front door knows about a service beyond the provider the registry names. */
 export interface RouteContext {
-  /** Serve mode. A provider that is actually up outranks a pin nobody committed. */
+  /** Serve mode. A provider that is up outranks a `record` pin, committed or not. */
   serving?: boolean;
   /** Sealed serve: no request may reach a real upstream, whatever the registry says. */
   sealed?: boolean;
-  /** The registry row came from observed traffic, not from `mocktown.json`. */
-  discovered?: boolean;
   /** Provider instance serving this host right now, for issue attribution. */
   servedBy?: string;
 }
@@ -61,11 +59,10 @@ function mockRoute(host: string, baseUrl: string, provider: string): Route {
 export function routeForProvider(host: string, provider: string, providerBaseUrls: Map<string, string>, context: RouteContext = {}): Route {
   const baseUrl = providerBaseUrls.get(host);
 
-  // The recorder pins every host it observes to `record`, so a service discovered during
-  // a recording run carries that pin into serve mode — where honouring it would forward a
-  // served request to the real upstream. A running provider outranks a pin nobody wrote
-  // down, and a discovered pin under seal is denied rather than allowed to escape.
-  if (context.serving && context.discovered && provider === 'record') {
+  // `record` asks for capture, which a served run cannot do — it starts no recorder. So the
+  // mock wins where a provider has the host, and a sealed run denies rather than escaping.
+  // `passthrough` is how the registry says "let this one out", and it is honoured below.
+  if (context.serving && provider === 'record') {
     if (baseUrl) return mockRoute(host, baseUrl, context.servedBy ?? provider);
     if (context.sealed) return { host, mode: 'deny' };
   }

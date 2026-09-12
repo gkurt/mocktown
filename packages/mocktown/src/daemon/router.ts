@@ -390,7 +390,7 @@ export const router = os.router({
   record: {
     start: os.record.start.handler(async ({ input }) => {
       const runtime = runtimeFor(input.project);
-      const started = await runtime.startRecord({ label: input.label, seed: input.seed });
+      const started = await runtime.startRecord({ label: input.label, seed: input.seed, recordOverride: input.live });
       return { project: runtime.name, ...started };
     }),
 
