@@ -1,3 +1,28 @@
+## mocktown@0.3.0
+
+### Added
+
+- **Schema corrections now survive regeneration.** `mocktown mocks schema` writes a
+  `schema.overrides.ts` beside the drafted `schema.ts`. The draft belongs to the corpus and
+  is rewritten on every run; the overrides module is written once and applied on top, so a
+  correction stands while every field it does not mention keeps following the corpus. An
+  override naming a route that no longer exists fails to load, with the likely rename, rather
+  than silently ceasing to apply.
+- **`retype` corrects a field at any depth** — `retype(current, { 'data[].usage.inputTokens':
+  z.number() })` — using the same paths `--check` and verify failures print at you. The
+  draft's optionality is preserved.
+
+### Changed
+
+- **`schema.ts` is regenerated on every run** once an overrides module exists, so routes
+  recorded after the first draft reach the schema on their own. A schema with no overrides
+  module beside it is still never overwritten without `--force`.
+- **`mocks schema --check` tells corrections apart from drift.** Differences an override made
+  are listed separately and no longer fail the check, so it works as a CI step for a service
+  that has corrections in it.
+- **The drafted schema no longer carries a generation date**, so redrafting an unchanged
+  corpus produces no diff.
+
 ## mocktown@0.2.0
 
 ### Added

@@ -1,32 +1,32 @@
 core:changelogs:
-  - content: "---\npackages:\n  mocktown:\n    type: minor\n---\n\n### Added\n\n- **A dark scheme in the GUI.** `theme` in the shell's header picks `system`, `light` or\n  `dark`; `system` is the default and follows the OS. The choice is remembered and applies\n  before the first paint. Panels follow the shell — the scheme is passed in their query\n  string alongside the project.\n- **Real dials for scenario knobs.** A knob whose schema declares a range is now a slider,\n  a boolean is a switch, and one with a fixed set of values is a select — picked from the\n  knob's own schema, so a mock gains a proper control by declaring one. Project settings\n  are a form with each setting's description under its control, instead of a table with an\n  input in one column.\n\n### Changed\n\n- **Clicking a row in Issues or Services opens a drawer** rather than unfolding the detail\n  underneath the table, so the list stays where it was while you read.\n- **Dashboard widgets have a fixed height and scroll inside themselves**, so one busy\n  service no longer decides the height of the page.\n- **Scrollable areas fade at the edge you can still scroll toward**, and their scrollbar\n  stays out of the way until you reach for it.\n"
-    filename: gui-dials-dark-drawers.md
+  - content: "---\npackages:\n  mocktown:\n    type: minor\n---\n\n### Added\n\n- **Schema corrections now survive regeneration.** `mocktown mocks schema` writes a\n  `schema.overrides.ts` beside the drafted `schema.ts`. The draft belongs to the corpus and\n  is rewritten on every run; the overrides module is written once and applied on top, so a\n  correction stands while every field it does not mention keeps following the corpus. An\n  override naming a route that no longer exists fails to load, with the likely rename, rather\n  than silently ceasing to apply.\n- **`retype` corrects a field at any depth** — `retype(current, { 'data[].usage.inputTokens':\n  z.number() })` — using the same paths `--check` and verify failures print at you. The\n  draft's optionality is preserved.\n\n### Changed\n\n- **`schema.ts` is regenerated on every run** once an overrides module exists, so routes\n  recorded after the first draft reach the schema on their own. A schema with no overrides\n  module beside it is still never overwritten without `--force`.\n- **`mocks schema --check` tells corrections apart from drift.** Differences an override made\n  are listed separately and no longer fail the check, so it works as a CI step for a service\n  that has corrections in it.\n- **The drafted schema no longer carries a generation date**, so redrafting an unchanged\n  corpus produces no diff.\n"
+    filename: schema-overrides.md
     v: 0.0.0
 core:packages:
   - id: npm:@mocktown/root
     updated: false
-  - id: npm:spike-03-emulate
-    updated: false
-  - id: npm:spike-04-container-seal
-    updated: false
-  - id: npm:spike-02-orpc-bun
-    updated: false
-  - id: npm:spike-05-scrubber
-    updated: false
-  - id: npm:spike-01-mockttp-bun
-    updated: false
   - changelogIds:
-      - gui-dials-dark-drawers.md
+      - schema-overrides.md
     id: npm:mocktown
     updated: true
+  - id: npm:spike-02-orpc-bun
+    updated: false
+  - id: npm:spike-04-container-seal
+    updated: false
+  - id: npm:spike-03-emulate
+    updated: false
+  - id: npm:spike-05-scrubber
+    updated: false
   - id: npm:@mocktown/gui
     updated: true
+  - id: npm:spike-01-mockttp-bun
+    updated: false
 npm:packages:
   - id: npm:@mocktown/root
-  - id: npm:spike-03-emulate
-  - id: npm:spike-04-container-seal
-  - id: npm:spike-02-orpc-bun
-  - id: npm:spike-05-scrubber
-  - id: npm:spike-01-mockttp-bun
   - id: npm:mocktown
+  - id: npm:spike-02-orpc-bun
+  - id: npm:spike-04-container-seal
+  - id: npm:spike-03-emulate
+  - id: npm:spike-05-scrubber
   - id: npm:@mocktown/gui
+  - id: npm:spike-01-mockttp-bun

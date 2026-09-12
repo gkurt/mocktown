@@ -9,7 +9,7 @@ service well enough that the application under test cannot tell the difference.
 mocktown corpus export --service <service>      # routes, examples, stateful couplings
 mocktown recordings routes --service <service>  # the full route surface, one line each
 mocktown mocks scaffold --service <service>     # writes .mocktown/mocks/<service>/{index.ts,BRIEF.md}
-mocktown mocks schema --service <service>       # drafts schema.ts — the oracle verify judges you against
+mocktown mocks schema --service <service>       # drafts schema.ts + schema.overrides.ts — the oracle verify judges you against
 ```
 
 Read `.mocktown/mocks/<service>/BRIEF.md` first. It is the corpus organised by route, with the
@@ -102,5 +102,5 @@ mocktown issues list --service <service> --status outstanding   # must be empty
 
 Verification compares **status class and response shape**, not values — returning a
 different id than the recording is correct, omitting the `id` field is not. The shape it
-compares against is `schema.ts` when one is checked in (rule 4), so a failure that says
-your correct response is the wrong type is a line to fix in that file, not in the handler.
+compares against is the checked-in schema when there is one (rule 4), so a failure that says
+your correct response is the wrong type is a line for `schema.overrides.ts`, not the handler.

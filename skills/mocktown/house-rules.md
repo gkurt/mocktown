@@ -24,14 +24,42 @@
    what the service *did*, not the whole of what it must do. Implement the contract they
    imply: a route observed with one id works for any id, a list observed with three
    entries works for none or thirty, and a status observed once is a branch, not a fixture.
-4. **Correct `schema.ts` rather than contorting the mock.** `mocktown mocks schema
-   --service <s>` drafts the response schemas from *every* recording of a route, and
-   verification checks your mock against that file, not against the recordings. So the
-   corpus is evidence, not a permanent oracle: when a recording is a poor witness — a
-   scrubbed number that reads as a string, an object keyed by data, a field that happened
-   to be null throughout — fix the line in `schema.ts` and say why in a comment. It is
-   never regenerated over you, and `--check` diffs it against the corpus when new traffic
-   lands.
+4. **Correct the schema rather than contorting the mock — in `schema.overrides.ts`, never
+   in `schema.ts`.** `mocktown mocks schema --service <s>` drafts response schemas from
+   *every* recording of a route into `schema.ts`, and verification checks your mock against
+   those schemas rather than against the recordings. The corpus is evidence, not a permanent
+   oracle: when a recording is a poor witness — a scrubbed number that reads as a string, an
+   object keyed by data, a field that happened to be null throughout — overrule it and say
+   why on the line.
+
+   `schema.ts` is rewritten on every run; `schema.overrides.ts` is written once and applied
+   on top. An edit made in the draft is gone at the next capture.
+
+   ```ts
+   // schema.overrides.ts
+   import { retype, z, type SchemaOverrides } from 'mocktown/mock';
+   import type Schemas from './schema.ts';
+
+   export default {
+     'GET /v1/things/{thingId}': {
+       200: (current) => current.extend({ count: z.number() }), // scrubbed; the draft says string
+       500: z.object({ Error: z.string() }),                    // a status the corpus never caught
+     },
+     // `.extend` reaches the top level only; `retype` reaches any depth, and takes the paths
+     // `--check` and verify failures print at you.
+     'GET /v1/things': {
+       200: (current) => retype(current, { 'data[].tokenUsage.inputTokens': z.number() }),
+     },
+   } satisfies SchemaOverrides<typeof Schemas>;
+   ```
+
+   Patch with a function: it says the one thing you know and keeps following the corpus for
+   every field it does not mention, so a field the API adds later arrives on its own. Replace
+   outright only when the draft is wrong end to end. `retype` preserves the draft's
+   optionality — that is a fact about the capture, not the type you are correcting — and a
+   route key that no longer exists fails to load rather than silently ceasing to apply.
+   `--check` marks the differences your overrides caused, which is what makes a correction
+   free to keep.
 
 5. **Prefer widening a matcher over duplicating a route.** Two routes that differ only by
    an optional query parameter or a header are one route — and two that differ only by an
@@ -75,7 +103,7 @@
    failure. Deleting the recordings a mock fails verification against makes `mocktown mocks
    verify` pass by having nothing left to replay, and closes an issue by destroying its
    evidence. Both read as green and neither is. If the corpus is a poor witness, rule 4 is
-   the answer: correct `schema.ts` and say why. And never run `mocktown project remove` —
+   the answer: correct the schema in `schema.overrides.ts` and say why. And never run `mocktown project remove` —
    that is a human's decision about their machine, not a step in any job here.
 15. **Do not write routes for gRPC methods.** They are recorded as opaque HTTP/2 and cannot
    be served by a generated mock — `Bun.serve` does not accept HTTP/2 connections, and

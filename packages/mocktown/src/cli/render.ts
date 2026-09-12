@@ -626,44 +626,67 @@ function renderSchemaWrite(r: any): string[] {
   return [
     r.written ? `wrote ${r.file}` : `kept ${r.file}`,
     ...(r.reason ? [`  ${r.reason}`] : []),
+    ...(r.overridesWritten ? [`wrote ${r.overridesFile}`] : []),
     `drafted from ${r.recordings} recording${r.recordings === 1 ? '' : 's'}, ${r.routes.length} route/status pair${r.routes.length === 1 ? '' : 's'}`,
     '',
     ...r.routes.map((route: any) => `  ${pad(`${route.route} ${route.statusCode}`, 60)} ${route.observations} observed`),
     '',
     ...(r.written
       ? [
-          'The schema is a draft, and yours to edit — verification checks the mock against it, not against the recordings.',
-          'Look first at anything typed z.unknown() or z.null(): those are fields the corpus never saw populated,',
-          'and at any field marked `scrubbed as ...`: its recorded value is a stub, so judge the rule yourself.',
+          'The schema is a draft of the corpus and is rewritten on every run. Corrections go in the overrides',
+          'module beside it, where they survive the redraft and keep tracking the corpus for every field they',
+          'do not mention. Look first at anything typed z.unknown() or z.null(): those are fields the corpus',
+          'never saw populated, and at any field marked `scrubbed as ...`: its recorded value is a stub, so',
+          'judge the rule yourself.',
         ]
       : []),
   ];
 }
 
-/**
- * Drift is grouped by route because that is how it is acted on — one route's worth of
- * change is one decision about one handler, and a flat list of forty field paths is not.
- */
-function renderSchemaCheck(r: any): string[] {
-  if (r.drift.length === 0) {
-    return [`${r.file} still agrees with the corpus`, `checked ${r.recordings} recordings across ${r.routes.length} route/status pairs`];
-  }
-
+/** One route's differences, indented under the route they belong to. */
+const driftLines = (entries: any[]): string[] => {
   const byRoute = new Map<string, any[]>();
-  for (const entry of r.drift) {
+  for (const entry of entries) {
     const key = `${entry.route} ${entry.statusCode}`;
     byRoute.set(key, [...(byRoute.get(key) ?? []), entry]);
   }
+  return [...byRoute].flatMap(([route, group]) => [
+    `  ${route}`,
+    ...group.map((entry: any) => `    ${pad(entry.kind, 14)} ${pad(entry.path, 44)} ${entry.detail}`),
+  ]);
+};
+
+/**
+ * Grouped by route because that is how it is acted on. Overridden entries are split off rather
+ * than dropped: mixed in they force a re-triage every run, hidden they would lose the one
+ * report that shows an override gone stale.
+ */
+function renderSchemaCheck(r: any): string[] {
+  const moved = r.drift.filter((entry: any) => !entry.overridden);
+  const expected = r.drift.filter((entry: any) => entry.overridden);
+  const corrections = expected.length
+    ? [
+        '',
+        `${expected.length} further difference${expected.length === 1 ? '' : 's'} on entries ${r.overridesFile} overrides:`,
+        ...driftLines(expected),
+      ]
+    : [];
+
+  if (moved.length === 0) {
+    return [
+      `${r.file} still agrees with the corpus`,
+      `checked ${r.recordings} recordings across ${r.routes.length} route/status pairs`,
+      ...corrections,
+    ];
+  }
 
   return [
-    `${r.drift.length} difference${r.drift.length === 1 ? '' : 's'} between ${r.file} and the corpus`,
+    `${moved.length} difference${moved.length === 1 ? '' : 's'} between ${r.file} and the corpus`,
     '',
-    ...[...byRoute].flatMap(([route, entries]) => [
-      `  ${route}`,
-      ...entries.map((entry: any) => `    ${pad(entry.kind, 14)} ${pad(entry.path, 44)} ${entry.detail}`),
-    ]),
+    ...driftLines(moved),
+    ...corrections,
     '',
-    'Nothing was written. A type-changed line may be a correction you made on purpose —',
-    'a scrubbed value stays wrong in the corpus for as long as the corpus is scrubbed.',
+    'Nothing was written. Redraft with `mocktown mocks schema` to take these up — the draft is',
+    'regenerated and the overrides module is left alone, so a correction here costs nothing to keep.',
   ];
 }

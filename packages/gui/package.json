@@ -1,6 +1,6 @@
 {
   "name": "@mocktown/gui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "The Mocktown GUI shell — a thin client of the daemon API, served by the daemon.",

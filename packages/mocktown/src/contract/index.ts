@@ -536,7 +536,10 @@ export const contract = {
         z.object({
           ...ProjectInput,
           service: z.string(),
-          force: z.boolean().optional().describe('Redraft over a schema that is already checked in, discarding any edits'),
+          force: z
+            .boolean()
+            .optional()
+            .describe('Redraft over a schema that has no overrides module beside it, discarding any corrections made inline'),
           check: z
             .boolean()
             .optional()
@@ -549,8 +552,10 @@ export const contract = {
           service: z.string(),
           file: z.string(),
           written: z.boolean(),
+          overridesFile: z.string().describe('The corrections module: written once, applied on top of every redraft of the schema'),
+          overridesWritten: z.boolean().describe('Whether this run created the overrides module'),
           checked: z.boolean().describe('Whether this was a --check run rather than a write'),
-          ok: z.boolean().describe('False when a --check run found drift; the CLI exits non-zero'),
+          ok: z.boolean().describe('False when a --check run found drift outside the overridden entries; the CLI exits non-zero'),
           reason: z.string().optional().describe('Why nothing was written, when nothing was'),
           recordings: z.number().int().describe('Recordings read'),
           routes: z.array(z.object({ route: z.string(), statusCode: z.number().int(), observations: z.number().int() })),
@@ -561,6 +566,7 @@ export const contract = {
               kind: z.enum(['route-added', 'route-removed', 'field-added', 'field-removed', 'type-changed']),
               path: z.string(),
               detail: z.string(),
+              overridden: z.boolean().describe('An override decided this entry, so it is expected to disagree with the corpus'),
             }),
           ),
         }),

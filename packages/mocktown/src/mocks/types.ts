@@ -14,6 +14,9 @@
 import * as z from 'zod/v4';
 import type { Prng } from '#src/mocks/prng.ts';
 
+// The other thing a mock workspace imports from here: the helper its `schema.overrides.ts`
+// is built around. The rest of overrides.ts is mocktown's side of that file.
+export { retype, type SchemaMap, type SchemaOverrides, type SchemaPatch } from '#src/mocks/overrides.ts';
 // Re-exported so a generated mock has exactly one dependency. Knob schemas need Zod, and
 // requiring every mocked app to add it — at a version matching ours — is friction with no
 // upside, since the daemon validates knob values against these schemas itself.

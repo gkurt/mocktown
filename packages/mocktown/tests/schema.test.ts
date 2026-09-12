@@ -7,7 +7,7 @@
  * `shapeDiff` already had.
  */
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as z from 'zod/v4';
@@ -20,6 +20,7 @@ import {
   print,
   renderSchemaModule,
   schemaDiff,
+  schemaPaths,
   type TypeNode,
   writeSchemaModule,
 } from '#src/mocks/schema.ts';
@@ -206,31 +207,53 @@ test('a failure names the path that failed', () => {
   expect(schemaDiff(schema, { meta: { count: 'one' } })).toEqual(['meta.count: Invalid input: expected number, received string']);
 });
 
-test('a checked-in schema is never overwritten without force', () => {
-  // The one rule that makes the file the author's rather than the corpus's. Regenerating
-  // over it would silently undo every correction, which is the authority we took away.
+test('a draft with no overrides module beside it is never overwritten without force', () => {
+  // The rule every schema written before the overrides layer still relies on: those files
+  // hold their corrections inline, so regenerating over one silently undoes every
+  // correction — the authority the corpus is not supposed to have.
+  const mocksDir = mkdtempSync(join(tmpdir(), 'mocktown-schema-'));
+  mkdirSync(join(mocksDir, 'api.example.test'), { recursive: true });
+  const entries = buildSchemas([{ method: 'GET', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a"}' }]);
+  const { schema, overrides } = schemaPaths(mocksDir, 'api.example.test');
+  writeFileSync(schema, '// hand-corrected\n');
+
+  const declined = writeSchemaModule(mocksDir, 'api.example.test', entries);
+  expect(declined.written).toBe(false);
+  expect(declined.reason).toContain('--force');
+  expect(readFileSync(schema, 'utf8')).toBe('// hand-corrected\n');
+  // And it did not quietly create the overrides module either: that would arm the redraft
+  // rule below against corrections nobody had moved out yet.
+  expect(existsSync(overrides)).toBe(false);
+
+  expect(writeSchemaModule(mocksDir, 'api.example.test', entries, { force: true }).written).toBe(true);
+  expect(readFileSync(schema, 'utf8')).toContain('mocktown/mock');
+});
+
+test('a draft is regenerated once an overrides module exists, and the overrides module is not', () => {
+  // The trade the layer makes: the draft belongs to the corpus and is rewritten on every
+  // run, which is only safe because corrections live in a file that is written once.
   const mocksDir = mkdtempSync(join(tmpdir(), 'mocktown-schema-'));
   mkdirSync(join(mocksDir, 'api.example.test'), { recursive: true });
   const entries = buildSchemas([{ method: 'GET', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a"}' }]);
 
   const first = writeSchemaModule(mocksDir, 'api.example.test', entries);
   expect(first.written).toBe(true);
+  expect(first.overridesWritten).toBe(true);
+  expect(readFileSync(first.overridesFile, 'utf8')).toContain('satisfies SchemaOverrides');
 
-  writeFileSync(first.file, '// hand-corrected\n');
-  const second = writeSchemaModule(mocksDir, 'api.example.test', entries);
-  expect(second.written).toBe(false);
-  expect(second.reason).toContain('--force');
-  expect(readFileSync(first.file, 'utf8')).toBe('// hand-corrected\n');
-
-  expect(writeSchemaModule(mocksDir, 'api.example.test', entries, { force: true }).written).toBe(true);
-  expect(readFileSync(first.file, 'utf8')).toContain('mocktown/mock');
+  writeFileSync(first.overridesFile, '// mine\n');
+  const richer = buildSchemas([{ method: 'GET', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a","note":"b"}' }]);
+  const second = writeSchemaModule(mocksDir, 'api.example.test', richer);
+  expect(second.written).toBe(true);
+  expect(second.overridesWritten).toBe(false);
+  expect(readFileSync(second.file, 'utf8')).toContain('note');
+  expect(readFileSync(first.overridesFile, 'utf8')).toBe('// mine\n');
 });
 
 test('the rendered module keys schemas by method, path and status', () => {
   const module = renderSchemaModule(
     'api.example.test',
     buildSchemas([{ method: 'get', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a"}' }]),
-    '2026-01-01',
   );
   expect(module).toContain('"GET /v1/things"');
   expect(module).toContain('200:');
@@ -347,7 +370,6 @@ test('the rendered module asks formatters to leave it alone', () => {
   const module = renderSchemaModule(
     'api.example.test',
     buildSchemas([{ method: 'get', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a"}' }]),
-    '2026-01-01',
   );
 
   expect(module).toContain('// biome-ignore-all format:');
@@ -359,7 +381,12 @@ test('the rendered module asks formatters to leave it alone', () => {
   // Two of them, because Prettier's directive is per-node and the file has two nodes: the
   // import and the export. Without the first, every run flips one line's quote style.
   expect(module).toContain("// prettier-ignore\nimport { z } from 'mocktown/mock';");
+});
 
-  // A formatter that has neither needs a path, so the header has to name one.
-  expect(module).toContain('mocks/api.example.test/schema.ts');
+test('a redraft of an unchanged corpus produces an unchanged file', () => {
+  // The draft is rewritten on every run, so anything in it that moves on its own — a
+  // generation date, a total — is a diff on a schema that did not change.
+  const entries = buildSchemas([{ method: 'GET', pathTemplate: '/v1/things', statusCode: 200, body: '{"id":"a"}' }]);
+  expect(renderSchemaModule('api.example.test', entries)).toBe(renderSchemaModule('api.example.test', entries));
+  expect(renderSchemaModule('api.example.test', entries)).not.toMatch(/\d{4}-\d{2}-\d{2}/);
 });

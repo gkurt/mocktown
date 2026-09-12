@@ -11,15 +11,16 @@
  * that is behaving exactly as designed, and the noise would train people to ignore the
  * harness.
  *
- * **The schema's status keys are the contract.** `schema.ts` is keyed by route *and
- * status*, and its header has always promised that "correcting a line here is how you
- * overrule a recording". That was only half true: the body was checked against the
- * author's schema, but the status was still checked against whatever the corpus happened
- * to catch. A route the schema declares can return 200 or 500 would fail replay whenever
+ * **The schema's status keys are the contract.** A checked-in schema is keyed by route
+ * *and status*, and the whole point of one is that correcting it overrules a recording.
+ * That was only half true: the body was checked against the author's schema, but the status
+ * was still checked against whatever the corpus happened to catch. A route the schema declares can return 200 or 500 would fail replay whenever
  * the mock answered with the other one — so a service that was erroring during capture
  * held its mock to the outage forever.
  *
- * A route with a schema is therefore judged against it: a status the schema declares is a
+ * A route with a schema is therefore judged against it — the draft in `schema.ts` with the
+ * corrections in `schema.overrides.ts` applied, which is what `loadSchemas` hands over: a
+ * status the schema declares is a
  * valid status, and the body is checked against *that* status's schema rather than the
  * recording's. Answering with a declared status the recording did not have is not a
  * failure, but it is not silent either — it is counted and listed, because "every route
@@ -32,7 +33,8 @@
  */
 import type { Recording } from '#src/contract/schemas.ts';
 import { REPLAY_HEADER } from '#src/mocks/host.ts';
-import { parseJsonBody, type SchemaMap, schemaDiff, schemaKey } from '#src/mocks/schema.ts';
+import { OVERRIDES_FILE, type SchemaMap } from '#src/mocks/overrides.ts';
+import { parseJsonBody, schemaDiff, schemaKey } from '#src/mocks/schema.ts';
 import type { Scrubber } from '#src/scrub/scrubber.ts';
 
 export interface VerifyFailure {
@@ -218,7 +220,7 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
         const legal = Object.keys(declared).sort().join(', ');
         fail(
           `returned ${response.status}, which ${key} does not declare. Its schema declares ${legal}. ` +
-            `Add ${response.status} to schema.ts if the route really can answer that way, or fix the mock.`,
+            `Add ${response.status} in ${OVERRIDES_FILE} if the route really can answer that way, or fix the mock.`,
           [text.slice(0, 200)],
         );
         continue;

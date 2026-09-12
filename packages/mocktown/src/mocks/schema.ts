@@ -16,9 +16,12 @@
  *     reaches disk, so a redacted field records the redaction's type — there was no way to
  *     say so, and the only way to pass was to build the mock wrong.
  *
- * Merging every recording of a route fixes the first two. Writing the result to a file the
- * author owns fixes the third: the corpus stops being a permanent oracle and becomes what
- * it always was — evidence, good enough to draft from.
+ * Merging every recording of a route fixes the first two. Letting the author overrule the
+ * result fixes the third: the corpus stops being a permanent oracle and becomes what it
+ * always was — evidence, good enough to draft from.
+ *
+ * The overruling lives in a second file, `schema.overrides.ts` — see overrides.ts for why
+ * this one is generated rather than owned, and how a correction outlives a redraft.
  *
  * ## What inference will and will not claim
  *
@@ -31,6 +34,14 @@
 import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type * as z from 'zod/v4';
+import {
+  applyOverrides,
+  OVERRIDES_FILE,
+  type ResolvedSchemas,
+  renderOverridesModule,
+  SCHEMA_FILE,
+  type SchemaMap,
+} from '#src/mocks/overrides.ts';
 
 /** The inferred model. Deliberately smaller than Zod: only what a JSON body can express. */
 export type TypeNode =
@@ -345,21 +356,16 @@ export function buildSchemas(observations: RouteObservation[], note?: FieldNote)
     .sort((a, b) => a.route.localeCompare(b.route) || a.statusCode - b.statusCode);
 }
 
-const header = (service: string, generatedAt: string, total: number) => `/**
- * Response schemas for \`${service}\`.
+const header = (service: string) => `/**
+ * Response schemas for \`${service}\`, drafted from the recorded corpus.
  *
- * Drafted ${generatedAt} from ${total} recorded response${total === 1 ? '' : 's'}.
+ * **Rewritten from the recordings on every \`mocktown mocks schema\`. Corrections go in
+ * \`${OVERRIDES_FILE}\`, next to it** — that file is written once, and its patches are applied
+ * on top of whatever this one last said. Verification checks the mock against the two combined.
  *
- * **This file is yours to edit.** It is scaffolded from the corpus, not owned by it:
- * \`mocktown mocks schema\` will not overwrite it once it exists. Verification checks the
- * mock against *this*, so correcting a line here is how you overrule a recording.
- *
- * **The status keys are the contract.** A status listed under a route is that route
- * declaring it can answer that way, and replay accepts any status declared here whichever
- * one the corpus happened to catch — so a service that was erroring during capture no
- * longer holds its mock to reproducing the outage. Add the status you know the route
- * returns; a status *not* listed is a verification failure, which is what makes the list
- * worth keeping honest.
+ * **The status keys are the contract.** Replay accepts any status listed under a route,
+ * whichever one the corpus happened to catch, so a service that was erroring during capture
+ * does not hold its mock to reproducing the outage. A status *not* listed is a failure.
  *
  * Expect to correct it, because the corpus is a witness and not a contract:
  *
@@ -367,31 +373,19 @@ const header = (service: string, generatedAt: string, total: number) => `/**
  *     records the redaction's type rather than the API's.
  *   - It only shows what was exercised. A field no recording ever populated is missing
  *     here, and one that happened to be null throughout is inferred \`z.null()\`.
- *   - Map detection is deliberately shy. An object keyed by data is promoted to
- *     \`z.record\` only when its keys are machine-generated or observed not to repeat;
- *     below that it is left as an object, because the opposite mistake checks nothing.
+ *   - Map detection is shy. An object keyed by data becomes \`z.record\` only when its keys
+ *     are machine-generated or observed not to repeat; the opposite mistake checks nothing.
  *
- * Unknown keys are allowed by design — no \`.strict()\` — since a mock may legitimately
- * return more than the corpus happened to capture.
- *
- * **Formatters are asked to leave this file alone.** It is thousands of lines of generated
- * literal, and a formatter with different defaults rewrites every one of them — which buries
- * the single line you actually corrected in a diff nobody can review, and flips the file
- * back and forth depending on who ran what last. The directives below cover Biome and
- * Prettier. If your formatter has no in-file opt-out, add this path to its ignore list:
- *
- *   mocks/${service}/schema.ts
+ * Unknown keys are allowed by design — no \`.strict()\`.
  */
-// biome-ignore-all format: generated — see the header
+// biome-ignore-all format: generated
 /* eslint-disable */
 // prettier-ignore
 import { z } from 'mocktown/mock';
 `;
 
 /** The generated module, ready to write. */
-export function renderSchemaModule(service: string, entries: SchemaEntry[], generatedAt: string): string {
-  const total = entries.reduce((sum, entry) => sum + entry.observations, 0);
-
+export function renderSchemaModule(service: string, entries: SchemaEntry[]): string {
   const byRoute = new Map<string, SchemaEntry[]>();
   for (const entry of entries) byRoute.set(entry.route, [...(byRoute.get(entry.route) ?? []), entry]);
 
@@ -409,7 +403,7 @@ export function renderSchemaModule(service: string, entries: SchemaEntry[], gene
   // Prettier has no file-level opt-out — `// prettier-ignore` applies to the next node
   // only. That is enough here precisely because the whole schema is one node: everything
   // below is a single `export default`, so one directive covers the entire body.
-  return `${header(service, generatedAt, total)}
+  return `${header(service)}
 // prettier-ignore
 export default {
 ${blocks.join('\n')}
@@ -417,49 +411,82 @@ ${blocks.join('\n')}
 `;
 }
 
+/** Where a service's two schema files live, whether or not either one exists yet. */
+export function schemaPaths(mocksDir: string, service: string): { schema: string; overrides: string } {
+  return { schema: join(mocksDir, service, SCHEMA_FILE), overrides: join(mocksDir, service, OVERRIDES_FILE) };
+}
+
 export interface WriteSchemaResult {
   file: string;
   written: boolean;
-  /** Why it was not written, when it was not. */
+  overridesFile: string;
+  /** Whether this call created the overrides module. It is never rewritten once it exists. */
+  overridesWritten: boolean;
+  /** Why the schema was not written, when it was not. */
   reason?: string;
 }
 
 /**
- * Write `<dirs.mocks>/<service>/schema.ts`, once.
+ * Write `<dirs.mocks>/<service>/schema.ts`, and the overrides module beside it.
  *
- * The same rule the module scaffold follows for `index.ts`: never overwrite something an
- * author has already edited. A schema that regenerated itself would silently undo every
- * correction — which is exactly the authority the corpus is not supposed to have.
+ * The draft is rewritten freely once an overrides module exists, since corrections then live
+ * next door. Without one the old rule holds — a schema written before this layer has its
+ * corrections inline, and `--force` is how an author asks to lose them.
+ *
+ * So the starter is written only alongside a real write of the draft: creating one next to a
+ * draft this call declined to touch would arm that rule against edits nobody had moved yet.
  */
 export function writeSchemaModule(
   mocksDir: string,
   service: string,
   entries: SchemaEntry[],
-  options: { force?: boolean; generatedAt?: string } = {},
+  options: { force?: boolean } = {},
 ): WriteSchemaResult {
-  const file = join(mocksDir, service, 'schema.ts');
-  if (existsSync(file) && !options.force) {
-    return { file, written: false, reason: 'a schema is already checked in; pass --force to redraft it from the corpus' };
+  const { schema: file, overrides: overridesFile } = schemaPaths(mocksDir, service);
+  const hasOverrides = existsSync(overridesFile);
+
+  if (existsSync(file) && !hasOverrides && !options.force) {
+    return {
+      file,
+      written: false,
+      overridesFile,
+      overridesWritten: false,
+      reason:
+        `a schema is already checked in and has no ${OVERRIDES_FILE} beside it, so an edit in it would be lost. ` +
+        `Move any corrections into ${OVERRIDES_FILE} — once that file exists the draft is regenerated on every run — or pass --force to redraft over them`,
+    };
   }
-  writeFileSync(file, renderSchemaModule(service, entries, options.generatedAt ?? new Date().toISOString().slice(0, 10)));
-  return { file, written: true };
+
+  writeFileSync(file, renderSchemaModule(service, entries));
+  if (!hasOverrides) writeFileSync(overridesFile, renderOverridesModule(service));
+  return { file, written: true, overridesFile, overridesWritten: !hasOverrides };
 }
 
-export type SchemaMap = Record<string, Record<number, z.ZodType>>;
+/** Import a module's default export fresh, so an edit takes effect without a daemon restart. */
+async function importDefault(file: string): Promise<unknown> {
+  const imported = await import(`${file}?v=${statSync(file).mtimeMs}`);
+  const value = imported.default;
+  if (!value || typeof value !== 'object') throw new Error(`${file} has no default export`);
+  return value;
+}
 
 /**
- * The checked-in schema for a service, or null when there is none.
- *
- * Cache-busted on mtime like the mock module itself, so editing a schema takes effect on
- * the next verify without restarting the daemon.
+ * The draft, the corrections, and which entries the corrections decided. Both files are
+ * imported separately and both are cache-busted — a static import inside the overrides module
+ * would pin the draft to whatever was on disk when the daemon first loaded it.
  */
-export async function loadSchemas(mocksDir: string, service: string): Promise<SchemaMap | null> {
-  const file = join(mocksDir, service, 'schema.ts');
+export async function loadSchemaLayer(mocksDir: string, service: string): Promise<ResolvedSchemas | null> {
+  const { schema: file, overrides: overridesFile } = schemaPaths(mocksDir, service);
   if (!existsSync(file)) return null;
-  const imported = await import(`${file}?v=${statSync(file).mtimeMs}`);
-  const map = imported.default;
-  if (!map || typeof map !== 'object') throw new Error(`${file} has no default export`);
-  return map as SchemaMap;
+
+  const base = (await importDefault(file)) as SchemaMap;
+  if (!existsSync(overridesFile)) return { schemas: base, overridden: new Set() };
+  return applyOverrides(base, await importDefault(overridesFile), overridesFile);
+}
+
+/** The schemas a mock is judged against: the draft with the author's corrections applied. */
+export async function loadSchemas(mocksDir: string, service: string): Promise<SchemaMap | null> {
+  return (await loadSchemaLayer(mocksDir, service))?.schemas ?? null;
 }
 
 /**
@@ -568,6 +595,8 @@ export interface DriftEntry {
   /** Where in the body, `(root)` for the whole document. */
   path: string;
   detail: string;
+  /** Whether an override decided this entry — those disagree with the corpus by design. */
+  overridden: boolean;
 }
 
 const describe = (node: TypeNode): string => {
@@ -637,13 +666,19 @@ function walkDrift(schema: TypeNode, corpus: TypeNode, path: string, into: (kind
   }
 }
 
-/** Every difference between the checked-in schemas and a schema drafted from the corpus. */
-export function driftBetween(checkedIn: SchemaMap, drafted: SchemaEntry[]): DriftEntry[] {
+/**
+ * Every difference between the schemas in force and a schema drafted from the corpus.
+ *
+ * Entries an override decided are marked, not dropped: an override can go stale too, but a
+ * run's real news must not be buried under corrections behaving as designed.
+ */
+export function driftBetween(checkedIn: SchemaMap, drafted: SchemaEntry[], overridden: ReadonlySet<string> = new Set()): DriftEntry[] {
   const drift: DriftEntry[] = [];
   const seen = new Set<string>();
 
   for (const entry of drafted) {
-    seen.add(`${entry.route} ${entry.statusCode}`);
+    const key = `${entry.route} ${entry.statusCode}`;
+    seen.add(key);
     const declared = checkedIn[entry.route]?.[entry.statusCode];
     if (!declared) {
       drift.push({
@@ -652,23 +687,26 @@ export function driftBetween(checkedIn: SchemaMap, drafted: SchemaEntry[]): Drif
         kind: 'route-added',
         path: '(root)',
         detail: `${entry.observations} recording${entry.observations === 1 ? '' : 's'} the schema says nothing about`,
+        overridden: overridden.has(key),
       });
       continue;
     }
     walkDrift(fromZod(declared), entry.node, '', (kind, path, detail) =>
-      drift.push({ route: entry.route, statusCode: entry.statusCode, kind, path, detail }),
+      drift.push({ route: entry.route, statusCode: entry.statusCode, kind, path, detail, overridden: overridden.has(key) }),
     );
   }
 
   for (const [route, statuses] of Object.entries(checkedIn)) {
     for (const status of Object.keys(statuses)) {
-      if (seen.has(`${route} ${status}`)) continue;
+      const key = `${route} ${status}`;
+      if (seen.has(key)) continue;
       drift.push({
         route,
         statusCode: Number(status),
         kind: 'route-removed',
         path: '(root)',
         detail: 'declared in the schema, absent from the corpus — the route may be gone, or simply untouched by this capture',
+        overridden: overridden.has(key),
       });
     }
   }

@@ -31,7 +31,15 @@ import { ensureProjectCa } from '#src/frontdoor/ca.ts';
 import { listPanels, workspacePanelDir } from '#src/gui/panels.ts';
 import { exportCorpus, inflateRecording, recordingsForService, routeTable } from '#src/mocks/corpus.ts';
 import { scaffoldMock } from '#src/mocks/scaffold.ts';
-import { buildSchemas, driftBetween, loadSchemas, type TypeNode, writeSchemaModule } from '#src/mocks/schema.ts';
+import {
+  buildSchemas,
+  driftBetween,
+  loadSchemaLayer,
+  loadSchemas,
+  schemaPaths,
+  type TypeNode,
+  writeSchemaModule,
+} from '#src/mocks/schema.ts';
 import { verifyRecordings } from '#src/mocks/verify.ts';
 import { writeDevcontainer } from '#src/sandbox/devcontainer.ts';
 import { setKnobs } from '#src/scenario/knobs.ts';
@@ -697,20 +705,27 @@ export const router = os.router({
       const routes = entries.map((entry) => ({ route: entry.route, statusCode: entry.statusCode, observations: entry.observations }));
 
       if (input.check) {
-        const checkedIn = await loadSchemas(paths.mocksDir, input.service);
-        if (!checkedIn) {
+        // Against the schemas actually in force, overrides included — checking the draft
+        // alone would report every correction as drift and nothing the author could act on.
+        const layer = await loadSchemaLayer(paths.mocksDir, input.service);
+        if (!layer) {
           throw new ORPCError('CONFLICT', {
             message: `no schema is checked in for "${input.service}" — there is nothing to check against. Run \`mocktown mocks schema --service ${input.service}\` to draft one.`,
           });
         }
-        const drift = driftBetween(checkedIn, entries);
+        const drift = driftBetween(layer.schemas, entries, layer.overridden);
+        const files = schemaPaths(paths.mocksDir, input.service);
         return {
           project: runtime.name,
           service: input.service,
-          file: join(paths.mocksDir, input.service, 'schema.ts'),
+          file: files.schema,
+          overridesFile: files.overrides,
+          overridesWritten: false,
           written: false,
           checked: true,
-          ok: drift.length === 0,
+          // The exit code has to mean the API moved, or `--check` is unusable in CI for any
+          // service with a correction in it.
+          ok: drift.every((entry) => entry.overridden),
           recordings: rows.length,
           routes,
           drift,
@@ -718,11 +733,15 @@ export const router = os.router({
       }
 
       mkdirSync(join(paths.mocksDir, input.service), { recursive: true });
-      const { file, written, reason } = writeSchemaModule(paths.mocksDir, input.service, entries, { force: input.force });
+      const { file, written, overridesFile, overridesWritten, reason } = writeSchemaModule(paths.mocksDir, input.service, entries, {
+        force: input.force,
+      });
       return {
         project: runtime.name,
         service: input.service,
         file,
+        overridesFile,
+        overridesWritten,
         written,
         checked: false,
         ok: true,
