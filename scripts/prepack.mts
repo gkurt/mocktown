@@ -35,13 +35,23 @@ rmSync(bundled, { recursive: true, force: true });
 // to someone editing the shell — who has the repo — and every install pays for them.
 cpSync(shell, bundled, { recursive: true, filter: (src) => !src.endsWith('.map') });
 
+// Node refuses to type-strip TypeScript under `node_modules`, so the sidecar the front door
+// spawns has to reach users as JavaScript or an installed mocktown cannot proxy anything.
+// `mockttp` stays external: it is a runtime dependency, and bundling it would ship a second
+// copy along with its optional native deps.
+const sidecar = join(pkg, 'src', 'frontdoor', 'sidecar.js');
+await run(
+  ['bun', 'build', 'src/frontdoor/sidecar.ts', '--target', 'node', '--format', 'esm', '--external', 'mockttp', '--outfile', sidecar],
+  pkg,
+);
+
 // npm only reads the licence file sitting beside the manifest, and the repo's is at the
 // root. Copying keeps one editable copy rather than two that can disagree.
 cpSync(join(root, 'LICENSE'), join(pkg, 'LICENSE'));
 
-const missing = [join(bundled, 'index.html'), join(pkg, 'LICENSE'), join(pkg, 'src', 'skills', 'pack.gen.ts')].filter(
+const missing = [join(bundled, 'index.html'), join(pkg, 'LICENSE'), join(pkg, 'src', 'skills', 'pack.gen.ts'), sidecar].filter(
   (path) => !existsSync(path),
 );
 if (missing.length > 0) throw new Error(`prepack did not produce:\n${missing.map((path) => `  ${path}`).join('\n')}`);
 
-console.log('prepack: shell bundled, licence copied, skill pack generated');
+console.log('prepack: shell bundled, sidecar compiled, licence copied, skill pack generated');

@@ -8,6 +8,7 @@ dist
 
 # assembled by scripts/prepack.mts at publish time, never committed
 packages/mocktown/gui-dist
+packages/mocktown/src/frontdoor/sidecar.js
 packages/mocktown/LICENSE
 
 # code coverage

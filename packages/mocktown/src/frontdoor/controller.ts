@@ -15,7 +15,7 @@
  * `subscribe` and `applyRouting`.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Mockttp, RequestRuleData, WebSocketRuleData } from 'mockttp';
 import * as mockttp from 'mockttp';
@@ -24,7 +24,15 @@ import { isLoopbackName } from '#src/capture/launch.ts';
 import { type Route, type RoutingTable, tableSignature } from '#src/frontdoor/routing.ts';
 import { findFreePort } from '#src/util/ports.ts';
 
-const sidecarPath = join(dirname(fileURLToPath(import.meta.url)), 'sidecar.ts');
+// Node refuses to type-strip TypeScript under `node_modules`, so an installed mocktown
+// cannot run the sidecar from source and the tarball ships it compiled (scripts/prepack.mts).
+// Keyed on being installed rather than on the file being there, so a `sidecar.js` left in a
+// checkout by a local `bun pm pack` can never shadow an edit to `sidecar.ts`.
+export function sidecarIn(dir: string): string {
+  return join(dir, dir.split(sep).includes('node_modules') ? 'sidecar.js' : 'sidecar.ts');
+}
+
+const sidecarPath = sidecarIn(dirname(fileURLToPath(import.meta.url)));
 
 /** Mockttp's own fallback priority, so an unmatched-request rule loses to every route. */
 const FALLBACK_PRIORITY = 0;

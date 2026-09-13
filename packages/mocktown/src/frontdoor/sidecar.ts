@@ -27,7 +27,7 @@ if (process.versions.bun) {
 
 const adminPort = Number(process.argv[2]);
 if (!Number.isInteger(adminPort) || adminPort <= 0) {
-  console.error('usage: node sidecar.ts <adminPort>');
+  console.error('usage: node sidecar <adminPort>');
   process.exit(2);
 }
 

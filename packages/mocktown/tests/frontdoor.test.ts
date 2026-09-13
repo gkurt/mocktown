@@ -12,7 +12,7 @@ const root = join(import.meta.dir, '.tmp-frontdoor');
 process.env.MOCKTOWN_CONFIG_HOME = join(root, 'config');
 process.env.MOCKTOWN_DATA_HOME = join(root, 'data');
 
-const { FrontDoor } = await import('#src/frontdoor/controller.ts');
+const { FrontDoor, sidecarIn } = await import('#src/frontdoor/controller.ts');
 const { ensureProjectCa } = await import('#src/frontdoor/ca.ts');
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -60,4 +60,22 @@ describe('replacing the rule set', () => {
       await door.stop();
     }
   }, 60_000);
+});
+
+describe('which sidecar the front door spawns', () => {
+  test('compiled once installed, source in a checkout', () => {
+    // Node refuses to type-strip TypeScript under node_modules, so an install that reached
+    // for the source could not proxy at all — the whole reason prepack compiles it.
+    expect(sidecarIn(join('/app', 'node_modules', 'mocktown', 'src', 'frontdoor'))).toEndWith('sidecar.js');
+    expect(sidecarIn(join('/repo', 'packages', 'mocktown', 'src', 'frontdoor'))).toEndWith('sidecar.ts');
+
+    // pnpm puts the real copy two levels of node_modules down; it is still an install.
+    expect(sidecarIn(join('/app', 'node_modules', '.pnpm', 'mocktown@0.4.0', 'node_modules', 'mocktown', 'src', 'frontdoor'))).toEndWith(
+      'sidecar.js',
+    );
+
+    // A checkout that has run `bun pm pack` has a stale sidecar.js beside the source. The
+    // rule is where the code lives, not what is lying next to it, so the edit still wins.
+    expect(sidecarIn(join('/repo', 'packages', 'mocktown', 'src', 'frontdoor'))).not.toEndWith('sidecar.js');
+  });
 });
