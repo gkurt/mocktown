@@ -27,3 +27,37 @@ describe('a missing Node binary', () => {
     await door.stop();
   });
 });
+
+describe('replacing the rule set', () => {
+  /**
+   * Mockttp subscribes a channel per matcher, step and completion checker to the one shared
+   * admin stream, and disposes only the server's copy — so every re-apply used to pin
+   * another set there for good: 87 listeners, then 173, then 259, climbing for the life of
+   * the daemon. Flat across applies is the whole claim.
+   */
+  test("releases the previous set's channels", async () => {
+    const ca = await ensureProjectCa('frontdoor-test');
+    const door = new FrontDoor({ ca });
+    await door.start();
+    try {
+      const stream = (door as unknown as { proxy: { adminClient: { adminStream: NodeJS.EventEmitter } } }).proxy.adminClient.adminStream;
+      // A different signature each pass, or `applyRouting` short-circuits and proves nothing.
+      const apply = (pass: number) =>
+        door.applyRouting({
+          fallthrough: 'deny',
+          routes: Array.from({ length: 10 }, (_, i) => ({ host: `h${i}-pass${pass}.example.test`, mode: 'record' as const })),
+        });
+
+      await apply(1);
+      const afterFirst = stream.listenerCount('finish');
+      expect(afterFirst).toBeGreaterThan(10);
+
+      await apply(2);
+      await apply(3);
+      expect(stream.listenerCount('finish')).toBe(afterFirst);
+      expect(stream.listenerCount('error')).toBe(afterFirst - 1);
+    } finally {
+      await door.stop();
+    }
+  }, 60_000);
+});

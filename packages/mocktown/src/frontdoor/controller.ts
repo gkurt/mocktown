@@ -247,6 +247,9 @@ export class FrontDoor {
     });
     await this.proxy.start(this.port);
     await this.subscribe();
+    // Everything on the admin stream at this point is Mockttp's own, including the
+    // subscriptions above. Anything beyond it later is a rule channel (see releaseChannels).
+    this.adminBaseline = this.channelListeners();
   }
 
   /**
@@ -436,6 +439,7 @@ export class FrontDoor {
   }
 
   private fallthroughMode: 'record' | 'deny' = 'deny';
+  private adminBaseline?: Map<string, Set<StreamListener>>;
 
   /**
    * Re-apply the whole rule set. Mockttp has no incremental rule editing, and rebuilding
@@ -500,9 +504,43 @@ export class FrontDoor {
       });
     }
 
+    // Mockttp opens a channel per matcher, step and completion checker — four listeners per
+    // rule — so any real project passes Node's default ceiling of 100 legitimately. Track the
+    // rule count rather than lifting the limit, and a channel that stops being released
+    // still trips the warning within a few applies. The doubling is the swap below.
+    this.adminStream?.setMaxListeners((requestRules.length + webSocketRules.length) * CHANNELS_PER_RULE * 3);
+
+    const previous = this.channelListeners();
     await this.proxy.setRequestRules(...requestRules);
     await this.proxy.setWebSocketRules(...webSocketRules);
+    this.releaseChannels(previous);
     this.appliedSignature = signature;
+  }
+
+  /** The admin websocket that every serialized rule's channel subscribes to. */
+  private get adminStream(): NodeJS.EventEmitter | undefined {
+    return (this.proxy as unknown as { adminClient?: { adminStream?: NodeJS.EventEmitter } } | undefined)?.adminClient?.adminStream;
+  }
+
+  private channelListeners(): Map<string, Set<StreamListener>> {
+    const stream = this.adminStream;
+    return new Map(CHANNEL_EVENTS.map((event) => [event, new Set((stream?.listeners(event) ?? []) as StreamListener[])]));
+  }
+
+  /**
+   * Mockttp opens a `ClientServerChannel` per serialized rule and subscribes it to the one
+   * shared admin stream, but disposes only the server's copy — "if the originating rule
+   * needs disposing too, ping the channel and let it know". Nothing does, so every
+   * `applyRouting` pinned another ~86 listeners there for the life of the process. By the
+   * time this runs the replaced rules are gone server-side, so those channels are dead.
+   */
+  private releaseChannels(previous: Map<string, Set<StreamListener>>): void {
+    const stream = this.adminStream;
+    if (!stream || !this.adminBaseline) return;
+    for (const event of CHANNEL_EVENTS) {
+      const keep = this.adminBaseline.get(event);
+      for (const listener of previous.get(event) ?? []) if (!keep?.has(listener)) stream.removeListener(event, listener);
+    }
   }
 
   async stop(): Promise<void> {
@@ -513,6 +551,7 @@ export class FrontDoor {
     }
     this.proxy = undefined;
     this.appliedSignature = undefined;
+    this.adminBaseline = undefined;
     this.exchanges.clear();
     this.sockets.clear();
 
@@ -537,6 +576,12 @@ function missingNodeMessage(nodePath: string): string {
     'with, or set MOCKTOWN_NODE to its path, then `mocktown daemon stop` so the next command restarts the daemon with it.'
   );
 }
+
+/** What a serialized rule's channel subscribes to on the shared admin stream. */
+const CHANNEL_EVENTS = ['data', 'error', 'finish'] as const;
+/** Two matchers, a step and a completion checker — each serialized through its own channel. */
+const CHANNELS_PER_RULE = 4;
+type StreamListener = (...args: any[]) => void;
 
 function requestStepFor(route: Route) {
   switch (route.mode) {
