@@ -40,6 +40,12 @@ export const globalConfigFile = () => join(globalConfigDir(), 'config.json');
 export const daemonStateFile = () => join(globalConfigDir(), 'daemon.json');
 
 /**
+ * Where an auto-started daemon's output goes. A detached process needs a sink that outlives
+ * the command that spawned it, and it is the only record of why one died.
+ */
+export const daemonLogFile = () => join(globalConfigDir(), 'daemon.log');
+
+/**
  * A project name is one path segment and nothing else.
  *
  * The name reaches here from `--project`, `MOCKTOWN_PROJECT` and a committed

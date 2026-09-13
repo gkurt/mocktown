@@ -7,11 +7,13 @@
  * first implementation note).
  */
 import { spawn } from 'node:child_process';
+import { closeSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createORPCClient } from '@orpc/client';
 import { OpenAPILink } from '@orpc/openapi-client/fetch';
-import { isDaemonListening, readDaemonState } from '#src/config/daemon.ts';
+import { type DaemonState, isDaemonListening, isProcessAlive, readDaemonState } from '#src/config/daemon.ts';
+import { daemonLogFile, globalConfigDir } from '#src/config/paths.ts';
 import { contract } from '#src/contract/index.ts';
 import { contractSignature } from '#src/contract/walk.ts';
 
@@ -46,42 +48,47 @@ export async function ensureDaemon(): Promise<DaemonConnection> {
     return { url: `http://127.0.0.1:${existing.port}/api/v1`, token: existing.token };
   }
 
-  const child = spawn(process.execPath, [daemonEntry], {
-    detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
-  });
-
-  const ready = await new Promise<{ port: number } | null>((resolve) => {
-    const timer = setTimeout(() => resolve(null), 20_000);
-    let buffered = '';
-    const onData = (chunk: Buffer) => {
-      buffered += chunk.toString();
-      const match = /\{"ready":true,"port":(\d+)/.exec(buffered);
-      if (match) {
-        clearTimeout(timer);
-        resolve({ port: Number(match[1]) });
-      }
-    };
-    child.stdout?.on('data', onData);
-    child.stderr?.on('data', onData);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve(null);
-    });
-  });
-
-  if (!ready) throw new Error('could not start the Mocktown daemon — run `mocktown daemon start` to see why');
-  // Detached so the daemon outlives the command that started it: recording sessions and
-  // provider processes have to survive the shell. The pipes have to be released too, or
-  // the CLI sits waiting on a stream that will never close.
-  child.stdout?.destroy();
-  child.stderr?.destroy();
+  // Detached so the daemon outlives the command that started it, and pointed at a log file
+  // rather than a pipe: the CLI exits, so a pipe would have to be closed, and the daemon
+  // then dies of EPIPE at its next log line — reaching the *next* command as a closed
+  // socket, long after the cause. Readiness comes off the state file for the same reason.
+  mkdirSync(globalConfigDir(), { recursive: true });
+  const logFile = daemonLogFile();
+  const log = openSync(logFile, 'w', 0o600);
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(process.execPath, [daemonEntry], { detached: true, stdio: ['ignore', log, log], env: process.env });
+  } finally {
+    closeSync(log);
+  }
   child.unref();
 
-  const state = readDaemonState();
-  if (!state) throw new Error('the daemon started but wrote no state file');
+  const state = await waitForDaemon(child.pid!);
+  if (!state) throw new Error(`could not start the Mocktown daemon${logTail(logFile)}`);
   return { url: `http://127.0.0.1:${state.port}/api/v1`, token: state.token };
+}
+
+/** The daemon writes its state before it announces itself, so the file is the readiness signal. */
+async function waitForDaemon(pid: number, timeoutMs = 20_000): Promise<DaemonState | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = readDaemonState();
+    // Matched on pid: a state file left by an earlier daemon must not read as this one's.
+    if (state?.pid === pid && (await isDaemonListening(state.port))) return state;
+    if (!isProcessAlive(pid)) return null;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return null;
+}
+
+/** Why it failed, rather than an instruction to go and reproduce it. */
+function logTail(file: string, lines = 12): string {
+  try {
+    const text = readFileSync(file, 'utf8').trimEnd();
+    return text ? ` — its output is in ${file}:\n${text.split('\n').slice(-lines).join('\n')}` : ` — it logged nothing to ${file}`;
+  } catch {
+    return ` — and wrote no log to ${file}`;
+  }
 }
 
 export function clientFor(connection: DaemonConnection) {
