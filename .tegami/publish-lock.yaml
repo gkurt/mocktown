@@ -1,32 +1,32 @@
 core:changelogs:
-  - content: "---\npackages:\n  mocktown:\n    type: minor\n---\n\n### Added\n\n- **`mocktown record --live <host>`** sends the named hosts to the real service for that\n  session only, whatever the registry says. This is how you re-record a service that already\n  has a mock, which is otherwise denied during a record run.\n\n### Changed\n\n- **`mocktown serve` serves every generated mock, whatever the registry pins.** A host set to\n  `record` that has a mock in `.mocktown/mocks/` is now served from it, so running an app\n  against its mocks no longer means editing `mocktown.json` first and putting it back\n  afterwards. A host with no mock is unchanged: it still reaches the real service and is\n  still named at startup. Use `passthrough` for a host a served run must genuinely reach —\n  it is honoured in both modes.\n\n### Fixed\n\n- **`mocktown serve start` no longer fails with \"The socket connection was closed\n  unexpectedly\"** when no daemon is already running. The daemon the CLI started was being\n  killed by its own output having nowhere to go. It now logs to a file beside `daemon.json`,\n  and a start that fails reports the tail of it instead of asking you to run it again to see\n  why.\n- **A long-running daemon no longer grows on every routing change.** Each re-applied routing\n  table held on to the previous one's front-door channels, which also surfaced as a\n  `MaxListenersExceededWarning` once a project had enough services.\n"
-    filename: mock-mode-without-a-config-flip.md
+  - content: "---\npackages:\n  mocktown:\n    type: patch\n---\n\n### Fixed\n\n- **The front door starts when mocktown is installed as a dependency.** Node refuses to\n  strip types from TypeScript under `node_modules`, so running the CLI from a project's own\n  `node_modules` failed at `serve start` with\n  `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` and no proxy at all. The sidecar the front\n  door spawns now ships compiled. This never affected a clone of the repo, which is why it\n  went unnoticed.\n"
+    filename: installed-front-door.md
     v: 0.0.0
 core:packages:
   - id: npm:@mocktown/root
     updated: false
   - changelogIds:
-      - mock-mode-without-a-config-flip.md
+      - installed-front-door.md
     id: npm:mocktown
     updated: true
-  - id: npm:spike-03-emulate
-    updated: false
-  - id: npm:spike-05-scrubber
-    updated: false
-  - id: npm:spike-02-orpc-bun
-    updated: false
   - id: npm:spike-01-mockttp-bun
     updated: false
-  - id: npm:spike-04-container-seal
+  - id: npm:spike-03-emulate
     updated: false
   - id: npm:@mocktown/gui
     updated: true
+  - id: npm:spike-04-container-seal
+    updated: false
+  - id: npm:spike-02-orpc-bun
+    updated: false
+  - id: npm:spike-05-scrubber
+    updated: false
 npm:packages:
   - id: npm:@mocktown/root
   - id: npm:mocktown
-  - id: npm:spike-03-emulate
-  - id: npm:spike-05-scrubber
-  - id: npm:spike-02-orpc-bun
   - id: npm:spike-01-mockttp-bun
-  - id: npm:spike-04-container-seal
+  - id: npm:spike-03-emulate
   - id: npm:@mocktown/gui
+  - id: npm:spike-04-container-seal
+  - id: npm:spike-02-orpc-bun
+  - id: npm:spike-05-scrubber
