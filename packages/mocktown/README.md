@@ -87,7 +87,11 @@ that exists. `mocktown scrub audit` re-scans it with the current rules.
    comparing status class and response *shape* — never values.
 
 Resolving an issue is a patch to a mock plus `mocktown issues resolve --id <id>`. A fix
-that does not hold reopens the same issue rather than filing a new one.
+that does not hold reopens the same issue rather than filing a new one. Where the corpus
+has a recording of the route, resolving replays it. Where it has none — always the case on a
+checkout that never recorded, since the corpus is local to one machine — there is nothing
+real to compare against, so the mock is sent the issue's own request instead (reads only)
+and the issue closes as *unverified*, saying so in its note.
 
 A mock that is broken — will not import, or throws while seeding — leaves *its* service
 denied and says why in `mocktown providers list`; the rest keep serving. Any host still

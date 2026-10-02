@@ -18,7 +18,7 @@ Anything you write into a mock while working the queue is bound by
 mocktown issues list --status outstanding     # the queue: open plus reopened
 mocktown issues list --batch <id>             # one run's set, or --service / --type
 mocktown issues get --id <issue>              # the full item
-mocktown issues resolve --id <issue>          # replays the trigger; only a pass closes it
+mocktown issues resolve --id <issue>          # replays recordings of the route; a failing replay reopens it
 ```
 
 **Ask for `outstanding`, not `open`.** A resolve whose verification fails leaves the issue
@@ -66,8 +66,12 @@ to finish.
 
 ## Rules
 
-- **Resolution is verified, not asserted.** `issues resolve` replays the triggering
-  requests against your patch; a failing replay reopens the issue with the diff attached.
+- **Resolution is verified, not asserted.** `issues resolve` replays the recordings of the
+  route against your patch; a failing replay reopens the issue with the diff attached. With no
+  recording of the route (the usual case for an unmatched request, and on any machine that
+  never recorded) it sends the issue's own request, if it is a read, and a route that is
+  still unserved reopens. Anything else closes as *unverified*, and the note says so: report
+  it as that, never as verified.
 - **Batch coherently.** Issues from one run share a `batchId`; fix the batch, then verify
   once.
 - **Never auto-commit.** Changes to committed artifacts — generated mocks, `.env.mocktown`,

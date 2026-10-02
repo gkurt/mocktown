@@ -211,7 +211,11 @@ export const RENDERERS: Record<string, (result: any) => string[]> = {
   ],
 
   'mocks.verify': (r) => [
-    `${r.result.passed}/${r.result.passed + r.result.failed} replayed exchanges matched`,
+    // 0/0 read as a pass. The corpus is local to one machine, so a checkout that never
+    // recorded gets here every time, and "nothing was checked" has to say so.
+    r.result.total === 0
+      ? 'no recordings in the local corpus for this service: nothing was verified (record the flow to check the mock against real traffic)'
+      : `${r.result.passed}/${r.result.passed + r.result.failed} replayed exchanges matched`,
     ...(r.result.skipped ? [`${r.result.skipped} socket recordings skipped: replay compares one request to one response`] : []),
     // Printed every run, never folded into the total: an exemption the reader cannot see is
     // worse than the failure it replaced.

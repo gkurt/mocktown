@@ -296,3 +296,58 @@ export async function verifyRecordings(recordings: Recording[], target: ReplayTa
     failures,
   };
 }
+
+export type SmokeResult =
+  | { outcome: 'answered'; status: number }
+  | { outcome: 'unserved'; status: number | null; reason: string }
+  | { outcome: 'skipped'; reason: string };
+
+/**
+ * Sends the request an issue was filed for to the mock and reports whether it is served now.
+ *
+ * This is what closing an issue with no recording of its route falls back to: the app called
+ * something the recording session never reached, so there is nothing real to compare against,
+ * but the issue itself carries the scrubbed request that failed. It proves the route exists,
+ * not that the response is right — callers must still close such an issue as unverified.
+ *
+ * Only reads are sent. A mutating request would change the mock's state as a side effect of
+ * closing an issue, and its body is scrubbed besides, so the mock would be judged on a
+ * request the app never made.
+ */
+export async function smokeRequest(request: unknown, target: ReplayTarget, scrubber: Scrubber): Promise<SmokeResult> {
+  const stored = (request ?? {}) as { method?: unknown; url?: unknown; path?: unknown; headers?: Record<string, unknown> };
+  const method = typeof stored.method === 'string' ? stored.method.toUpperCase() : '';
+  if (!method) return { outcome: 'skipped', reason: 'the issue holds no request to send' };
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) return { outcome: 'skipped', reason: `${method} would change mock state` };
+
+  let location: string;
+  try {
+    const url = new URL(typeof stored.url === 'string' ? stored.url : String(stored.path ?? ''), 'http://placeholder.invalid');
+    location = `${url.pathname}${url.search}`;
+  } catch {
+    return { outcome: 'skipped', reason: 'the stored request has no usable URL' };
+  }
+
+  // Same headers as a replay, for the same reasons: framing is the client's business, and the
+  // replay marker keeps injected latency and errors from failing a contract check.
+  const headers: Record<string, string> = { host: target.service, [REPLAY_HEADER]: '1' };
+  for (const [name, value] of Object.entries(stored.headers ?? {})) {
+    if (['host', 'content-length', 'connection', 'transfer-encoding', 'accept-encoding'].includes(name.toLowerCase())) continue;
+    headers[name] = scrubber.reinject(Array.isArray(value) ? String(value[0]) : String(value));
+  }
+
+  try {
+    const response = await fetch(`${target.baseUrl}${location}`, {
+      method,
+      headers,
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'manual',
+    });
+    await response.arrayBuffer();
+    // 501 is the host's "no route here" answer, the very thing the issue was filed for.
+    if (response.status === 501) return { outcome: 'unserved', status: 501, reason: 'the mock still has no route for it (501)' };
+    return { outcome: 'answered', status: response.status };
+  } catch (error) {
+    return { outcome: 'unserved', status: null, reason: `request failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
