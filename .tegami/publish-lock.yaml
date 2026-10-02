@@ -1,32 +1,32 @@
 core:changelogs:
-  - content: "---\npackages:\n  mocktown:\n    type: patch\n---\n\n### Fixed\n\n- The daemon starts on hosts without IPv6 (containers, some CI), where every port used to be reported as taken.\n"
-    filename: ipv4-port-probe.md
+  - content: "---\npackages:\n  mocktown:\n    type: minor\n---\n\n### Changed\n\n- `issues resolve` no longer refuses to close an issue whose route has no recording. It sends the issue's own request (reads only) to the mock, reopens the issue if the route is still unserved, and otherwise closes it as unverified with a note saying so.\n- `mocks verify` says \"nothing was verified\" when the local corpus has no recordings, instead of `0/0 replayed exchanges matched`.\n"
+    filename: unverified-close.md
     v: 0.0.0
 core:packages:
   - id: npm:@mocktown/root
     updated: false
-  - id: npm:spike-01-mockttp-bun
-    updated: false
   - id: npm:spike-05-scrubber
     updated: false
   - id: npm:spike-04-container-seal
-    updated: false
-  - id: npm:@mocktown/gui
-    updated: true
-  - id: npm:spike-02-orpc-bun
-    updated: false
-  - id: npm:spike-03-emulate
     updated: false
   - changelogIds:
-      - ipv4-port-probe.md
+      - unverified-close.md
     id: npm:mocktown
     updated: true
+  - id: npm:spike-02-orpc-bun
+    updated: false
+  - id: npm:spike-03-emulate
+    updated: false
+  - id: npm:@mocktown/gui
+    updated: true
+  - id: npm:spike-01-mockttp-bun
+    updated: false
 npm:packages:
   - id: npm:@mocktown/root
-  - id: npm:spike-01-mockttp-bun
   - id: npm:spike-05-scrubber
   - id: npm:spike-04-container-seal
-  - id: npm:@mocktown/gui
+  - id: npm:mocktown
   - id: npm:spike-02-orpc-bun
   - id: npm:spike-03-emulate
-  - id: npm:mocktown
+  - id: npm:@mocktown/gui
+  - id: npm:spike-01-mockttp-bun
