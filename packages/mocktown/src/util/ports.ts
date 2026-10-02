@@ -8,8 +8,16 @@ import { createServer } from 'node:net';
 function bindable(port: number, host?: string): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
-    server.once('error', () => resolve(false));
     const done = () => server.close(() => resolve(true));
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      // A wildcard bind targets `::`, which does not exist in a container without IPv6, and Bun
+      // (unlike Node) does not fall back to `0.0.0.0` on its own. That is not a busy port, so
+      // retry the IPv4 wildcard instead of reporting every port as taken.
+      if (host || error.code === 'EADDRINUSE') return resolve(false);
+      const v4 = createServer();
+      v4.once('error', () => resolve(false));
+      v4.listen(port, '0.0.0.0', () => v4.close(() => resolve(true)));
+    });
     host ? server.listen(port, host, done) : server.listen(port, done);
   });
 }
