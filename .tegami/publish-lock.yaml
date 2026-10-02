@@ -1,32 +1,32 @@
 core:changelogs:
-  - content: "---\npackages:\n  mocktown:\n    type: patch\n---\n\n### Fixed\n\n- **The front door starts when mocktown is installed as a dependency.** Node refuses to\n  strip types from TypeScript under `node_modules`, so running the CLI from a project's own\n  `node_modules` failed at `serve start` with\n  `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` and no proxy at all. The sidecar the front\n  door spawns now ships compiled. This never affected a clone of the repo, which is why it\n  went unnoticed.\n"
-    filename: installed-front-door.md
+  - content: "---\npackages:\n  mocktown:\n    type: patch\n---\n\n### Fixed\n\n- The daemon starts on hosts without IPv6 (containers, some CI), where every port used to be reported as taken.\n"
+    filename: ipv4-port-probe.md
     v: 0.0.0
 core:packages:
   - id: npm:@mocktown/root
     updated: false
+  - id: npm:spike-01-mockttp-bun
+    updated: false
+  - id: npm:spike-05-scrubber
+    updated: false
+  - id: npm:spike-04-container-seal
+    updated: false
+  - id: npm:@mocktown/gui
+    updated: true
+  - id: npm:spike-02-orpc-bun
+    updated: false
+  - id: npm:spike-03-emulate
+    updated: false
   - changelogIds:
-      - installed-front-door.md
+      - ipv4-port-probe.md
     id: npm:mocktown
     updated: true
-  - id: npm:spike-01-mockttp-bun
-    updated: false
-  - id: npm:spike-03-emulate
-    updated: false
-  - id: npm:@mocktown/gui
-    updated: true
-  - id: npm:spike-04-container-seal
-    updated: false
-  - id: npm:spike-02-orpc-bun
-    updated: false
-  - id: npm:spike-05-scrubber
-    updated: false
 npm:packages:
   - id: npm:@mocktown/root
-  - id: npm:mocktown
   - id: npm:spike-01-mockttp-bun
-  - id: npm:spike-03-emulate
-  - id: npm:@mocktown/gui
-  - id: npm:spike-04-container-seal
-  - id: npm:spike-02-orpc-bun
   - id: npm:spike-05-scrubber
+  - id: npm:spike-04-container-seal
+  - id: npm:@mocktown/gui
+  - id: npm:spike-02-orpc-bun
+  - id: npm:spike-03-emulate
+  - id: npm:mocktown

@@ -1,3 +1,9 @@
+## mocktown@0.4.2
+
+### Fixed
+
+- The daemon starts on hosts without IPv6 (containers, some CI), where every port used to be reported as taken.
+
 ## mocktown@0.4.1
 
 ### Fixed
