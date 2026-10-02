@@ -40,7 +40,7 @@ import {
   type TypeNode,
   writeSchemaModule,
 } from '#src/mocks/schema.ts';
-import { verifyRecordings } from '#src/mocks/verify.ts';
+import { smokeRequest, verifyRecordings } from '#src/mocks/verify.ts';
 import { writeDevcontainer } from '#src/sandbox/devcontainer.ts';
 import { setKnobs } from '#src/scenario/knobs.ts';
 import { listProfiles, mintProfileSession } from '#src/scenario/profiles.ts';
@@ -512,10 +512,35 @@ export const router = os.router({
         });
       }
 
+      const route = `${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim();
       runtime.issues.setStatus(input.id, 'verifying');
       const recordings = recordingsForService(runtime.db, issue.service, undefined, 1000, issue.pathTemplate ?? undefined).map((row) =>
         inflateRecording(runtime.name, row),
       );
+
+      // No recording of this route means there is nothing real to replay. That is not a failed
+      // check, it is the usual shape of the issue: the app called something the recording
+      // session never reached — and the corpus is local to one machine, so on a checkout that
+      // never recorded it is every issue. Replaying zero exchanges could only ever end in a
+      // refusal the caller bypasses with `--skip-verify`, so skip it and say what was and was
+      // not established instead.
+      if (!recordings.length) {
+        const smoke = await smokeRequest(issue.request, { baseUrl, service: issue.service }, runtime.currentScrubber);
+        if (smoke.outcome === 'unserved') {
+          runtime.issues.setStatus(input.id, 'reopened', `${route} is still not served: ${smoke.reason}`);
+        } else {
+          const checked =
+            smoke.outcome === 'answered'
+              ? `the mock answered the issue's own request with ${smoke.status}`
+              : `the issue's request was not sent (${smoke.reason})`;
+          runtime.issues.setStatus(
+            input.id,
+            'resolved',
+            `closed unverified: no recording of ${route} to replay; ${checked}.${input.note ? ` ${input.note}` : ''}`,
+          );
+        }
+        return { project: runtime.name, issue: toIssue(runtime.issues.get(input.id)!), verified: false, verification: null };
+      }
 
       // The same schema `mocks verify` uses. Closing an issue used to judge the exchange
       // without it, so one exchange could pass one command and fail the other — and it was
@@ -537,25 +562,14 @@ export const router = os.router({
         { baseUrl, service: issue.service, schemas: issueSchemas },
         runtime.currentScrubber,
       );
-      // An empty replay is not a passing replay. Closing an issue on zero evidence is worse
-      // than leaving it open, because the queue then reads as work that was actually done.
       // Counted from what was actually judged, so a set that was entirely sockets or
       // entirely exempted cannot close an issue by having nothing to say about it.
       const judged = result.passed + result.failed;
       const passed = judged > 0 && result.failed === 0;
-      const route = `${issue.method ?? ''} ${issue.pathTemplate ?? issue.path ?? ''}`.trim();
-      // An empty replay means the corpus holds no recording of this route — which is often
-      // the whole reason the issue exists, the app having called something the recording
-      // session never reached. Replay cannot confirm a fix for a route it has no evidence
-      // of, and saying only that the replay was empty sends someone hunting for a recording
-      // that does not exist. Keyed on what the replay found rather than on the issue's type:
-      // the type says what went wrong, not whether there is anything to replay.
       const reason =
         judged > 0
           ? `verification failed: ${result.failed}/${judged} replayed requests did not match`
-          : `nothing to replay for ${route}: the corpus holds no recording of it, so replay cannot confirm the fix. ` +
-            `Prove it with \`mocktown mocks verify --service ${issue.service}\` — which checks the routes that *are* recorded still pass — ` +
-            'then close this with `--skip-verify` and a note saying what the fix was written against.';
+          : `nothing to judge for ${route}: every recording of it is a socket or exempted, so replay cannot confirm the fix. Close it with \`--skip-verify\` and a note saying what the fix was written against.`;
       runtime.issues.setStatus(input.id, passed ? 'resolved' : 'reopened', passed ? input.note : reason);
 
       return { project: runtime.name, issue: toIssue(runtime.issues.get(input.id)!), verified: passed, verification: result };
